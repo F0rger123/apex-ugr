@@ -39,9 +39,9 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
       price: parseFloat(price) || 0,
       hp_gain: parseInt(hpGain) || 0,
       torque_gain: parseInt(torqueGain) || 0,
-      purchase_source: 'Summit Racing',
-      notes: 'Logged via Apex UGR Garage System'
-    });
+      purchase_source: 'Apex Marketplace',
+      notes: 'Added from garage screen'
+    } as any);
     setModalVisible(false);
     setPartName(''); setBrand(''); setPrice(''); setHpGain('');
   };

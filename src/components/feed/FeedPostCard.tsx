@@ -7,7 +7,7 @@ import { colors } from '../../config/colors';
 import { Heart, MessageSquare, Repeat, Share2, Send } from 'lucide-react-native';
 
 interface FeedPostCardProps {
-  post: Post;
+  post: any;
   onLike: () => void;
   onCommentSubmit: (text: string) => void;
   comments?: any[];
@@ -56,7 +56,7 @@ export const FeedPostCard: React.FC<FeedPostCardProps> = ({
       {/* Tags */}
       {post.tags && post.tags.length > 0 && (
         <View style={styles.tagsRow}>
-          {post.tags.map((tag, idx) => (
+          {post.tags.map((tag: string, idx: number) => (
             <Text key={idx} style={styles.tagText}>{tag} </Text>
           ))}
         </View>

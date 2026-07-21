@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Animated } from 'react-native';
 import { useTelemetryStore } from '../../stores/telemetryStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useGarageStore } from '../../stores/garageStore';
@@ -47,6 +47,22 @@ export const TelemetryScreen = ({ navigation }: any) => {
   const [sensorSource, setSensorSource] = useState<'DEVICE_HARDWARE' | 'SIMULATOR'>('DEVICE_HARDWARE');
   const [isHudOverlay, setIsHudOverlay] = useState(false);
   const lastPosRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
+
+  // Pulse animation for HUD
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (isHudOverlay && isSessionActive) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 0.6, duration: 800, useNativeDriver: false }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false })
+        ])
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [isHudOverlay, isSessionActive]);
 
   // Real Hardware Device Motion & GPS Location Sensor Listeners
   useEffect(() => {
@@ -190,12 +206,15 @@ export const TelemetryScreen = ({ navigation }: any) => {
         {isHudOverlay ? (
           <GlassCard style={{ alignItems: 'center', paddingVertical: 40, backgroundColor: 'rgba(0,0,0,0.85)', borderWidth: 2, borderColor: colors.primary }}>
             <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginBottom: 10 }}>WINDSHIELD HUD OVERLAY</Text>
-            <Text style={{ color: colors.primary, fontSize: 110, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
-              {currentSpeedMph}
-            </Text>
-            <Text style={{ color: colors.text, fontSize: 22, fontWeight: '900', letterSpacing: 3 }}>MPH</Text>
+            
+            <Animated.View style={{ opacity: pulseAnim, alignItems: 'center' }}>
+              <Text style={{ color: colors.primary, fontSize: 110, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
+                {currentSpeedMph}
+              </Text>
+              <Text style={{ color: colors.text, fontSize: 22, fontWeight: '900', letterSpacing: 3, marginTop: -15 }}>MPH</Text>
+            </Animated.View>
 
-            <View style={{ flexDirection: 'row', gap: 20, marginTop: 30 }}>
+            <View style={{ flexDirection: 'row', gap: 20, marginTop: 40 }}>
               <View style={{ alignItems: 'center' }}>
                 <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LATERAL G</Text>
                 <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '900' }}>{gForceLateral} G</Text>

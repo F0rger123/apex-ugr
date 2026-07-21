@@ -23,15 +23,14 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
   const handleSubmit = () => {
     if (!wagerCredits || !routeName) return;
     createChallenge({
-      challenger_id: user?.id || '00000000-0000-0000-0000-000000000001',
       race_type: raceType,
       wager_credits: parseFloat(wagerCredits) || 500,
       start_time: startTime,
       rules,
       route_name: routeName,
-      distance_miles: parseFloat(distanceMiles) || 0.25,
-      challenger_profile: user || undefined
-    });
+      status: 'open',
+      distance_miles: parseFloat(distanceMiles) || 0.25
+    }, user?.id || '00000000-0000-0000-0000-000000000001');
     navigation.goBack();
   };
 

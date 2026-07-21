@@ -128,7 +128,7 @@ export const RaceHubScreen = ({ navigation }: any) => {
                     size="sm"
                     style={{ flex: 1 }}
                     onPress={() => {
-                      voteOnDispute(selectedDispute.id, false);
+                      voteOnDispute(selectedDispute.id, user?.id || '', false);
                       setSelectedDispute(null);
                     }}
                   />
@@ -138,7 +138,7 @@ export const RaceHubScreen = ({ navigation }: any) => {
                     size="sm"
                     style={{ flex: 1, marginLeft: 8 }}
                     onPress={() => {
-                      voteOnDispute(selectedDispute.id, true);
+                      voteOnDispute(selectedDispute.id, user?.id || '', true);
                       setSelectedDispute(null);
                     }}
                   />

@@ -74,7 +74,7 @@ export const MessagesScreen = ({ navigation }: any) => {
                   style={[styles.convoItem, isActive && styles.convoItemActive]}
                   onPress={() => setActiveConversation(c.id)}
                 >
-                  <Image source={{ uri: avatar }} style={styles.convoAvatar} />
+                  <Image source={{ uri: avatar || '' }} style={styles.convoAvatar} />
                   <View style={{ flex: 1, marginLeft: 8 }}>
                     <Text style={styles.convoTitle} numberOfLines={1}>{title}</Text>
                     <Text style={styles.convoLast} numberOfLines={1}>{c.last_message}</Text>

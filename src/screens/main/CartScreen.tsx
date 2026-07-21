@@ -35,8 +35,8 @@ export const CartScreen = ({ navigation }: any) => {
   };
 
   const handleCheckout = () => {
-    if (cart.length === 0) return;
-    const order = checkoutCart(shippingAddress);
+    if (cart.length === 0 || !user) return;
+    const order = checkoutCart(user.id, shippingAddress);
     setOrderConfirmedOrder(order);
   };
 

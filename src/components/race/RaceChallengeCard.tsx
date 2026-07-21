@@ -8,7 +8,7 @@ import { colors } from '../../config/colors';
 import { Flag, Trophy, Clock, MapPin, ShieldAlert } from 'lucide-react-native';
 
 interface RaceChallengeCardProps {
-  challenge: RaceChallenge;
+  challenge: any;
   onAccept?: () => void;
   onDecline?: () => void;
   onViewDispute?: () => void;

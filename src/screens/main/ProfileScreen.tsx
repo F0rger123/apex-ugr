@@ -135,7 +135,7 @@ export const ProfileScreen = ({ navigation }: any) => {
           size="md"
           icon={<LogOut size={16} color={colors.danger} />}
           style={{ marginVertical: 20 }}
-          onPress={logout}
+          onPress={signOut}
         />
 
         <View style={{ height: 40 }} />

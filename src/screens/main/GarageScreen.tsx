@@ -50,10 +50,10 @@ export const GarageScreen = ({ navigation }: any) => {
       weight_lbs: 3500,
       top_speed_mph: parseInt(topSpeed) || 0,
       drivetrain: 'RWD',
-      fuel_type: 'Premium',
+      fuel_type: '93 Octane',
       photos: [],
-      is_primary: vehicles.length === 0,
-    });
+      is_primary: true,
+    } as any);
     if (!error) {
       setModalVisible(false);
       setMake(''); setModel(''); setEngine(''); setHp('');

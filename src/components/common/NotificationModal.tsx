@@ -25,7 +25,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ visible, o
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <TouchableOpacity onPress={markAllAsRead} style={{ marginRight: 12 }}>
+              <TouchableOpacity onPress={() => markAllAsRead('demo-user-1')} style={{ marginRight: 12 }}>
                 <CheckCheck size={18} color={colors.primary} />
               </TouchableOpacity>
               <TouchableOpacity onPress={onClose}>
@@ -39,14 +39,14 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ visible, o
               <GlassCard
                 key={n.id}
                 onPress={() => markAsRead(n.id)}
-                style={[styles.notifCard, !n.read && styles.unreadNotif]}
+                style={[styles.notifCard, !n.read ? styles.unreadNotif : null] as any}
               >
                 <View style={styles.notifRow}>
                   <View style={styles.iconBox}>
-                    {n.type === 'challenge' && <Flag size={16} color={colors.warning} />}
-                    {n.type === 'race_result' && <Trophy size={16} color={colors.primary} />}
-                    {n.type === 'order' && <ShoppingCart size={16} color={colors.info} />}
-                    {n.type === 'meet' && <Calendar size={16} color={colors.text} />}
+                    {(n.type as string) === 'challenge' && <Flag size={16} color={colors.warning} />}
+                    {(n.type as string) === 'race_result' && <Trophy size={16} color={colors.primary} />}
+                    {(n.type as string) === 'order' && <ShoppingCart size={16} color={colors.info} />}
+                    {(n.type as string) === 'meet' && <Calendar size={16} color={colors.text} />}
                   </View>
 
                   <View style={{ flex: 1, marginLeft: 10 }}>

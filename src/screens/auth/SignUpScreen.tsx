@@ -146,9 +146,9 @@ export const SignUpScreen = ({ navigation }: any) => {
           <Text style={styles.label}>CONFIRM PASSWORD</Text>
           <View style={[
             styles.inputBox,
-            confirmPassword && password !== confirmPassword && styles.inputError,
-            confirmPassword && password === confirmPassword && styles.inputSuccess,
-          ]}>
+            (confirmPassword && password !== confirmPassword) ? styles.inputError : null,
+            (confirmPassword && password === confirmPassword) ? styles.inputSuccess : null,
+          ] as any}>
             <Lock size={16} color={
               confirmPassword
                 ? (password === confirmPassword ? colors.primary : colors.danger)

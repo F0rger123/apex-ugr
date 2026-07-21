@@ -56,8 +56,77 @@ interface FeedState {
 
 const PAGE_SIZE = 10;
 
+const DEFAULT_FEED_POSTS: PostWithProfile[] = [
+  {
+    id: 'demo-post-1',
+    user_id: 'demo-user-1',
+    post_type: 'video',
+    media_url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4',
+    video_url: null,
+    thumbnail_url: 'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?q=80&w=800&auto=format&fit=crop',
+    caption: 'Dialing in the new turbo setup! 🚀 Boost hits hard. #ApexUGR #Tuned',
+    tags: ['#ApexUGR', '#Tuned'],
+    vehicle_id: null,
+    likes_count: 1420,
+    comments_count: 89,
+    reposts_count: 12,
+    created_at: new Date().toISOString(),
+    user_profile: {
+      id: 'demo-user-1',
+      username: 'BoostedV8',
+      display_name: 'Alex Mercer',
+      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop',
+      bio: 'Track day enthusiast',
+      reputation_level: 'PRO',
+      reputation_points: 4500,
+      credits_balance: 12000,
+      races_won: 45,
+      races_total: 60,
+      top_speed_recorded: 165,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_verified: true,
+      home_city: 'Los Angeles'
+    } as any,
+    user_has_liked: false,
+  },
+  {
+    id: 'demo-post-2',
+    user_id: 'demo-user-2',
+    post_type: 'photo',
+    media_url: 'https://images.unsplash.com/photo-1503371456621-0a6d0c41031f?q=80&w=800&auto=format&fit=crop',
+    video_url: null,
+    thumbnail_url: null,
+    caption: 'Late night canyon run with the crew. 🌙 #NightRun #ApexUGR',
+    tags: ['#NightRun', '#ApexUGR'],
+    vehicle_id: null,
+    likes_count: 843,
+    comments_count: 24,
+    reposts_count: 5,
+    created_at: new Date(Date.now() - 3600000).toISOString(),
+    user_profile: {
+      id: 'demo-user-2',
+      username: 'MidnightRunner',
+      display_name: 'Sarah J.',
+      avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=200&auto=format&fit=crop',
+      bio: 'Canyon carver',
+      reputation_level: 'VETERAN',
+      reputation_points: 3200,
+      credits_balance: 8500,
+      races_won: 22,
+      races_total: 40,
+      top_speed_recorded: 142,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_verified: false,
+      home_city: 'Malibu'
+    } as any,
+    user_has_liked: true,
+  }
+];
+
 export const useFeedStore = create<FeedState>((set, get) => ({
-  posts: [],
+  posts: DEFAULT_FEED_POSTS,
   commentsMap: {},
   isLoading: false,
   isLoadingMore: false,
@@ -103,7 +172,13 @@ export const useFeedStore = create<FeedState>((set, get) => ({
       const { data, error } = await query;
 
       if (error) {
-        set({ error: error.message, isLoading: false, isLoadingMore: false });
+        if (reset) set({ posts: DEFAULT_FEED_POSTS, isLoading: false, isLoadingMore: false });
+        else set({ error: error.message, isLoading: false, isLoadingMore: false });
+        return;
+      }
+
+      if (reset && (!data || data.length === 0)) {
+        set({ posts: DEFAULT_FEED_POSTS, isLoading: false, isLoadingMore: false, hasMore: false });
         return;
       }
 
@@ -123,7 +198,11 @@ export const useFeedStore = create<FeedState>((set, get) => ({
         isLoadingMore: false,
       }));
     } catch (err: any) {
-      set({ error: err?.message || 'Failed to load feed', isLoading: false, isLoadingMore: false });
+      if (reset) {
+        set({ posts: DEFAULT_FEED_POSTS, isLoading: false, isLoadingMore: false, hasMore: false });
+      } else {
+        set({ error: err?.message || 'Failed to load feed', isLoading: false, isLoadingMore: false });
+      }
     }
   },
 

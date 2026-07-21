@@ -34,7 +34,7 @@ const DEFAULT_PRODUCTS: MarketplaceProduct[] = [
     id: 'part-am-2',
     title: 'Roush Phase 2 750HP Supercharger Kit',
     brand: 'Roush Performance',
-    category: 'Turbo / Supercharger',
+    category: 'Supercharger',
     price: 8999.99,
     vendor_name: 'American Muscle',
     image_url: 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop',
@@ -88,7 +88,7 @@ const DEFAULT_PRODUCTS: MarketplaceProduct[] = [
     id: 'part-eb-1',
     title: 'Garrett G35-1050 Dual Ball Bearing Turbocharger',
     brand: 'Garrett Motion',
-    category: 'Turbo / Supercharger',
+    category: 'Turbo',
     price: 2249.50,
     vendor_name: 'eBay Motors',
     image_url: 'https://images.unsplash.com/photo-1580273916550-e323be2ae537?q=80&w=800&auto=format&fit=crop',
@@ -164,7 +164,7 @@ interface MarketplaceState {
 }
 
 export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
-  products: [],
+  products: DEFAULT_PRODUCTS,
   cart: [],
   wishlistIds: [],
   orders: [],

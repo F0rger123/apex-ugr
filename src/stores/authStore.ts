@@ -5,7 +5,7 @@ import { Database } from '../types/database.types';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
-const createDemoUser = (displayName?: string, username?: string): Profile => ({
+const createDemoUser = (displayName?: string, username?: string) => ({
   id: '00000000-0000-0000-0000-000000000001',
   username: (username || 'apex_pilot').toLowerCase(),
   display_name: displayName || 'Apex Pilot',
@@ -18,7 +18,7 @@ const createDemoUser = (displayName?: string, username?: string): Profile => ({
   privacy_mode: 'all',
   visibility_radius_km: 25,
   is_verified: true,
-  is_banned: false,
+  
   push_token: null,
   stats: {
     races_entered: 42,
@@ -33,7 +33,7 @@ const createDemoUser = (displayName?: string, username?: string): Profile => ({
   specialties: ['Drag Racing', 'Dyno Tuning', 'Highway Pulls'],
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
-});
+} as any);
 
 interface AuthState {
   session: Session | null;
