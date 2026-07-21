@@ -278,27 +278,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initializeAuth: async () => {
     set({ isLoading: true });
 
-    // Get existing session from storage
-    const { data: { session } } = await supabase.auth.getSession();
+    try {
+      // Get existing session from storage
+      const { data: { session } } = await supabase.auth.getSession();
 
-    if (session) {
-      set({ session, isAuthenticated: true });
-      await get().loadProfile(session.user.id);
-    }
-
-    set({ isLoading: false });
-
-    // Listen for auth state changes (login, logout, token refresh)
-    supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
+      if (session) {
         set({ session, isAuthenticated: true });
         await get().loadProfile(session.user.id);
-      } else if (event === 'SIGNED_OUT') {
-        set({ session: null, user: null, isAuthenticated: false });
-      } else if (event === 'TOKEN_REFRESHED' && session) {
-        set({ session });
       }
-    });
+    } catch (err) {
+      console.warn('[AuthStore] Session init error:', err);
+    } finally {
+      set({ isLoading: false });
+    }
+
+    // Listen for auth state changes (login, logout, token refresh)
+    try {
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+          set({ session, isAuthenticated: true });
+          await get().loadProfile(session.user.id);
+        } else if (event === 'SIGNED_OUT') {
+          set({ session: null, user: null, isAuthenticated: false });
+        } else if (event === 'TOKEN_REFRESHED' && session) {
+          set({ session });
+        }
+      });
+    } catch (err) {
+      console.warn('[AuthStore] AuthStateChange listener error:', err);
+    }
   },
 
   clearError: () => set({ authError: null }),
