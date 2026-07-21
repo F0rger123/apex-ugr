@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Image } from 'react-native';
 import { useRaceStore } from '../../stores/raceStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -13,9 +13,18 @@ import { colors } from '../../config/colors';
 import { Flag, Plus, ShieldAlert, Check, X, Trophy, Video } from 'lucide-react-native';
 
 export const RaceHubScreen = ({ navigation }: any) => {
-  const { races, disputes, acceptChallenge, declineChallenge, voteOnDispute } = useRaceStore();
+  const { races, disputes, acceptChallenge, declineChallenge, voteOnDispute, fetchRaces, fetchDisputes, subscribeToRaces, unsubscribeFromRaces } = useRaceStore();
   const { user } = useAuthStore();
   const [selectedDispute, setSelectedDispute] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      fetchRaces(user.id);
+      fetchDisputes();
+      subscribeToRaces(user.id);
+    }
+    return () => unsubscribeFromRaces();
+  }, [user?.id]);
 
   const openChallenges = races.filter((r) => r.status === 'open' || r.status === 'accepted');
   const activeDisputes = disputes.filter((d) => d.status === 'under_review');

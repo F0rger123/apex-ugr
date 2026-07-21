@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, ActivityIndicator, FlatList } from 'react-native';
 import { useMessageStore } from '../../stores/messageStore';
 import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
@@ -9,23 +9,46 @@ import { colors } from '../../config/colors';
 import { Send, Image as ImageIcon, Mic, CheckCheck, Users, Search, Volume2 } from 'lucide-react-native';
 
 export const MessagesScreen = ({ navigation }: any) => {
-  const { conversations, activeConversationId, messagesMap, setActiveConversation, sendMessage } = useMessageStore();
+  const { conversations, activeConversationId, messagesMap, setActiveConversation, sendMessage, fetchConversations, fetchMessages, subscribeToConversation, unsubscribeFromConversation, isLoading } = useMessageStore();
   const { user } = useAuthStore();
 
   const [inputContent, setInputContent] = useState('');
-  const activeConversation = conversations.find((c) => c.id === activeConversationId) || conversations[0];
-  const activeMessages = messagesMap[activeConversation?.id] || [];
+  const scrollRef = useRef<any>(null);
+  const activeConversation = conversations.find((c) => c.id === activeConversationId);
+  const activeMessages = messagesMap[activeConversation?.id || ''] || [];
 
-  const handleSend = () => {
-    if (!inputContent.trim() || !activeConversation) return;
-    sendMessage(activeConversation.id, inputContent, user?.id || '00000000-0000-0000-0000-000000000001');
+  useEffect(() => {
+    if (user) {
+      fetchConversations(user.id);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (activeConversation?.id) {
+      fetchMessages(activeConversation.id);
+      subscribeToConversation(activeConversation.id);
+    }
+    return () => {
+      if (activeConversation?.id) {
+        unsubscribeFromConversation(activeConversation.id);
+      }
+    };
+  }, [activeConversation?.id]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (scrollRef.current && activeMessages.length > 0) {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [activeMessages.length]);
+
+  const handleSend = async () => {
+    if (!inputContent.trim() || !activeConversation || !user) return;
+    const text = inputContent.trim();
     setInputContent('');
+    await sendMessage(activeConversation.id, user.id, text);
   };
 
-  const sendVoiceNote = () => {
-    if (!activeConversation) return;
-    sendMessage(activeConversation.id, '🎤 Voice Note (0:14)', user?.id || '00000000-0000-0000-0000-000000000001', 'https://example.com/voice.mp3', 'audio');
-  };
 
   return (
     <View style={styles.container}>
@@ -75,9 +98,14 @@ export const MessagesScreen = ({ navigation }: any) => {
           </View>
 
           {/* Messages Feed */}
-          <ScrollView style={styles.messagesScroll} showsVerticalScrollIndicator={false}>
+          <ScrollView ref={scrollRef} style={styles.messagesScroll} showsVerticalScrollIndicator={false}>
+            {activeMessages.length === 0 && (
+              <View style={styles.emptyChat}>
+                <Text style={styles.emptyChatText}>No messages yet. Say hello!</Text>
+              </View>
+            )}
             {activeMessages.map((m) => {
-              const isMe = m.sender_id === (user?.id || '00000000-0000-0000-0000-000000000001');
+              const isMe = m.sender_id === user?.id;
 
               return (
                 <View key={m.id} style={[styles.bubbleWrapper, isMe ? styles.bubbleRight : styles.bubbleLeft]}>
@@ -101,16 +129,14 @@ export const MessagesScreen = ({ navigation }: any) => {
 
           {/* Message Input Box */}
           <View style={styles.inputBoxRow}>
-            <TouchableOpacity style={styles.mediaBtn} onPress={sendVoiceNote}>
-              <Mic size={18} color={colors.primary} />
-            </TouchableOpacity>
-
             <TextInput
               style={styles.textInput}
               placeholder="Type message..."
               placeholderTextColor={colors.textMuted}
               value={inputContent}
               onChangeText={setInputContent}
+              returnKeyType="send"
+              onSubmitEditing={handleSend}
             />
 
             <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
@@ -132,12 +158,12 @@ const styles = StyleSheet.create({
   convoAvatar: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder },
   convoTitle: { color: colors.text, fontSize: 10, fontWeight: '800', marginTop: 4, textAlign: 'center' },
   convoLast: { color: colors.textMuted, fontSize: 8, textAlign: 'center' },
-
   chatArea: { flex: 1, flexDirection: 'column' },
   chatHeader: { height: 44, backgroundColor: colors.glassHeader, borderBottomWidth: 1, borderBottomColor: colors.cardBorder, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12 },
   chatHeaderTitle: { color: colors.text, fontSize: 13, fontWeight: '900' },
-
   messagesScroll: { flex: 1, padding: 12 },
+  emptyChat: { alignItems: 'center', paddingTop: 40 },
+  emptyChatText: { color: colors.textMuted, fontSize: 12 },
   bubbleWrapper: { marginVertical: 4, flexDirection: 'row' },
   bubbleLeft: { justifyContent: 'flex-start' },
   bubbleRight: { justifyContent: 'flex-end' },
@@ -146,10 +172,8 @@ const styles = StyleSheet.create({
   bubbleMe: { backgroundColor: colors.primary },
   msgText: { color: colors.text, fontSize: 12, fontWeight: '700' },
   timeText: { color: colors.textMuted, fontSize: 8, marginTop: 2, textAlign: 'right' },
-
   audioRow: { flexDirection: 'row', alignItems: 'center' },
   audioBubbleText: { color: colors.primary, fontSize: 12, fontWeight: '800', marginLeft: 6 },
-
   inputBoxRow: { flexDirection: 'row', alignItems: 'center', padding: 8, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.cardBorder },
   mediaBtn: { padding: 8 },
   textInput: { flex: 1, backgroundColor: colors.card, borderRadius: 8, color: colors.text, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, borderWidth: 1, borderColor: colors.cardBorder },

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useMarketplaceStore } from '../../stores/marketplaceStore';
 import { useGarageStore } from '../../stores/garageStore';
+import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { GlassCard } from '../../components/common/GlassCard';
@@ -29,15 +30,30 @@ export const MarketplaceScreen = ({ navigation }: any) => {
     wishlistIds,
     toggleWishlist,
     addToCart,
+    fetchProducts,
+    fetchOrders,
+    isLoading,
   } = useMarketplaceStore();
 
   const { getActiveVehicle } = useGarageStore();
+  const { user } = useAuthStore();
   const activeVehicle = getActiveVehicle();
 
   const [activeTab, setActiveTab] = useState<'catalog' | 'orders'>('catalog');
   const [filterByGarage, setFilterByGarage] = useState(false);
   const [showFilterDrawer, setShowFilterDrawer] = useState(false);
   const [selectedCompareProduct, setSelectedCompareProduct] = useState<MarketplaceProduct | null>(null);
+
+  useEffect(() => {
+    // Fetch products filtered to user's active vehicle make
+    fetchProducts(
+      filterByGarage && activeVehicle ? activeVehicle.make : undefined,
+      filterByGarage && activeVehicle ? activeVehicle.model : undefined,
+    );
+    if (user) {
+      fetchOrders(user.id);
+    }
+  }, [filterByGarage, activeVehicle?.id, user?.id]);
 
   const products = getFilteredProducts(
     filterByGarage ? activeVehicle?.make : undefined,

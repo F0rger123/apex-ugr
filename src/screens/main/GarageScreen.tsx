@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, ActivityIndicator } from 'react-native';
 import { useGarageStore } from '../../stores/garageStore';
+import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { GlassCard } from '../../components/common/GlassCard';
@@ -11,7 +12,19 @@ import { colors } from '../../config/colors';
 import { Car, Plus, Shield, Flame, Wrench, X } from 'lucide-react-native';
 
 export const GarageScreen = ({ navigation }: any) => {
-  const { vehicles, activeVehicleId, setActiveVehicle, getTotalBuildValue, addVehicle } = useGarageStore();
+  const { vehicles, activeVehicleId, setActiveVehicle, setPrimaryVehicle, getTotalBuildValue, addVehicle, fetchVehicles, fetchModifications, isLoading } = useGarageStore();
+  const { user } = useAuthStore();
+
+  useEffect(() => {
+    if (user) {
+      fetchVehicles(user.id);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    // Fetch modifications for each loaded vehicle
+    vehicles.forEach((v) => fetchModifications(v.id));
+  }, [vehicles.length]);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [make, setMake] = useState('');
@@ -21,27 +34,30 @@ export const GarageScreen = ({ navigation }: any) => {
   const [hp, setHp] = useState('');
   const [topSpeed, setTopSpeed] = useState('');
 
-  const handleCreateVehicle = () => {
-    if (!make || !model) return;
-    addVehicle({
+  const handleCreateVehicle = async () => {
+    if (!make || !model || !user) return;
+    const { error } = await addVehicle({
+      user_id: user.id,
       year: parseInt(year) || 2024,
       make,
       model,
-      trim: 'Track Edition',
+      trim: null,
       color: 'Carbon Obsidian',
-      engine: engine || '3.8L Twin-Turbo',
-      transmission: '7-Speed Dual-Clutch',
-      horsepower: parseInt(hp) || 750,
-      torque: 700,
-      weight_lbs: 3800,
-      top_speed_mph: parseInt(topSpeed) || 205,
-      drivetrain: 'AWD',
-      fuel_type: 'E85',
-      photos: ['https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop'],
-      is_primary: false,
+      engine: engine || 'N/A',
+      transmission: '6-Speed Manual',
+      horsepower: parseInt(hp) || 0,
+      torque: 0,
+      weight_lbs: 3500,
+      top_speed_mph: parseInt(topSpeed) || 0,
+      drivetrain: 'RWD',
+      fuel_type: 'Premium',
+      photos: [],
+      is_primary: vehicles.length === 0,
     });
-    setModalVisible(false);
-    setMake(''); setModel(''); setEngine(''); setHp('');
+    if (!error) {
+      setModalVisible(false);
+      setMake(''); setModel(''); setEngine(''); setHp('');
+    }
   };
 
   return (
@@ -61,12 +77,19 @@ export const GarageScreen = ({ navigation }: any) => {
             variant="primary"
             size="sm"
             icon={<Plus size={14} color={colors.background} />}
-            onPress={() => setModalVisible(false)}
+            onPress={() => setModalVisible(true)}
           />
         </View>
 
         {/* Vehicles Shelf List */}
         <SectionHeader title={`REGISTERED VEHICLES (${vehicles.length})`} />
+        {isLoading && <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />}
+        {!isLoading && vehicles.length === 0 && (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>NO VEHICLES REGISTERED</Text>
+            <Text style={styles.emptyStateSub}>Tap ADD VEHICLE to register your ride.</Text>
+          </View>
+        )}
         {vehicles.map((v) => {
           const isPrimary = v.id === activeVehicleId;
           const buildVal = getTotalBuildValue(v.id);
@@ -82,7 +105,7 @@ export const GarageScreen = ({ navigation }: any) => {
               {!isPrimary && (
                 <TouchableOpacity
                   style={styles.setPrimaryBtn}
-                  onPress={() => setActiveVehicle(v.id)}
+                  onPress={() => user && setPrimaryVehicle(v.id, user.id)}
                 >
                   <Text style={styles.setPrimaryText}>SET AS ACTIVE RIDE</Text>
                 </TouchableOpacity>
@@ -148,4 +171,7 @@ const styles = StyleSheet.create({
   modalTitle: { color: colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
   label: { color: colors.textMuted, fontSize: 10, fontWeight: '800', marginTop: 10, marginBottom: 4 },
   input: { backgroundColor: colors.surface, borderRadius: 8, color: colors.text, padding: 10, fontSize: 14, borderWidth: 1, borderColor: colors.cardBorder },
+  emptyState: { alignItems: 'center', paddingVertical: 40 },
+  emptyStateText: { color: colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
+  emptyStateSub: { color: colors.textMuted, fontSize: 12, marginTop: 6 },
 });
