@@ -12,7 +12,7 @@ import { colors } from '../../config/colors';
 import { ShieldCheck, Award, Coins, MapPin, Settings, LogOut, CheckCircle2, ShieldAlert, UserCheck } from 'lucide-react-native';
 
 export const ProfileScreen = ({ navigation }: any) => {
-  const { user, logout, togglePrivacyMode, followStats, fetchFollowStats } = useAuthStore();
+  const { user, signOut, togglePrivacyMode, followStats, fetchFollowStats } = useAuthStore();
   const { vehicles } = useGarageStore();
 
   useEffect(() => {
@@ -100,7 +100,7 @@ export const ProfileScreen = ({ navigation }: any) => {
         {/* Achievements Section */}
         <SectionHeader title="UNLOCKED ACHIEVEMENTS" />
         <GlassCard>
-          {user?.achievements.map((ach) => (
+          {(Array.isArray(user?.achievements) ? (user.achievements as any[]) : []).map((ach: any) => (
             <View key={ach.id} style={styles.achRow}>
               <Award size={18} color={colors.primary} />
               <Text style={styles.achName}>{ach.name}</Text>
@@ -112,7 +112,7 @@ export const ProfileScreen = ({ navigation }: any) => {
         {/* Privacy & Safety Settings */}
         <SectionHeader title="GPS & RADAR PRIVACY" />
         <GlassCard>
-          <Text style={styles.privacySub}>Current Radar Visibility: <Text style={{ color: colors.primary }}>{user?.privacy_mode.toUpperCase()}</Text></Text>
+          <Text style={styles.privacySub}>Current Radar Visibility: <Text style={{ color: colors.primary }}>{(user?.privacy_mode || 'all').toUpperCase()}</Text></Text>
           <View style={styles.privacyBtnGrid}>
             {(['all', 'friends', 'meet_only', 'invisible'] as const).map((m) => (
               <TouchableOpacity

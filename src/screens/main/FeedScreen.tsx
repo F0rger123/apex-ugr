@@ -46,7 +46,7 @@ const FeedPostCard = ({
         <Video
           source={{ uri: post.media_url }}
           style={styles.mediaBackground}
-          resizeMode={ResizeMode.COVER}
+          resizeMode={(ResizeMode?.COVER || 'cover') as any}
           shouldPlay={isActive}
           isLooping
           isMuted={false}
@@ -241,7 +241,11 @@ export const FeedScreen = ({ navigation }: any) => {
     
     // Attempt upload
     let finalMediaUrl = '';
-    const { url, error } = await uploadPostMedia(user.id, newMediaUri, newMediaType);
+    const ext = newMediaType === 'video' ? 'mp4' : 'jpeg';
+    const mimeType = newMediaType === 'video' ? 'video/mp4' : 'image/jpeg';
+    const fileName = `post_${Date.now()}.${ext}`;
+
+    const { url, error } = await uploadPostMedia(user.id, newMediaUri, fileName, mimeType);
     
     if (error || !url) {
       // Fallback if local testing
@@ -479,9 +483,12 @@ const styles = StyleSheet.create({
   postCard: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT, position: 'relative' },
   mediaBackground: { width: '100%', height: '100%', position: 'absolute' },
   gradientOverlay: {
-    position: 'absolute', inset: 0,
-    background: 'linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, transparent 40%, rgba(0,0,0,0.7) 100%)',
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
 
   topBar: { position: 'absolute', top: Platform.OS === 'web' ? 80 : 110, left: 16, flexDirection: 'row', alignItems: 'center', gap: 8 },

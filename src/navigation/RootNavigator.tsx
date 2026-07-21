@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Device from 'expo-device';
@@ -58,7 +58,7 @@ export const RootNavigator = () => {
       }
     }
     
-    if (isAuthenticated && user?.id) {
+    if (Platform.OS !== 'web' && isAuthenticated && user?.id) {
       registerForPushNotificationsAsync();
     }
   }, [isAuthenticated, user?.id]);

@@ -96,7 +96,7 @@ export const LeaderboardsScreen = ({ navigation }: any) => {
                 <Text style={styles.username}>@{user.username}</Text>
                 
                 <View style={styles.badgeRow}>
-                  <MatrixBadge label={user.reputation_level || 'ROOKIE'} size="sm" variant={idx < 3 ? 'green' : 'dark'} />
+                  <MatrixBadge label={user.reputation_level || 'ROOKIE'} size="sm" variant={idx < 3 ? 'green' : 'silver'} />
                 </View>
               </View>
 

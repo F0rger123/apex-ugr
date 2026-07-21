@@ -59,11 +59,13 @@ export const DashboardScreen = ({ navigation }: any) => {
 
           <View style={styles.statsRow}>
             <View style={styles.statCol}>
-              <Text style={styles.statVal}>{user?.stats.races_won} / {user?.stats.races_entered}</Text>
+              <Text style={styles.statVal}>
+                {((user?.stats as any)?.races_won) || 0} / {((user?.stats as any)?.races_entered) || 0}
+              </Text>
               <Text style={styles.statLab}>WIN RECORD</Text>
             </View>
             <View style={styles.statCol}>
-              <Text style={styles.statValGreen}>{user?.stats.top_speed_recorded} MPH</Text>
+              <Text style={styles.statValGreen}>{((user?.stats as any)?.top_speed_recorded) || 0} MPH</Text>
               <Text style={styles.statLab}>TOP SPEED</Text>
             </View>
             <View style={styles.statCol}>

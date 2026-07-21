@@ -19,7 +19,6 @@ interface TelemetryState {
   updateTelemetry: (speed: number, gLat?: number, gLong?: number) => void;
   saveSession: (userId: string, vehicleId: string, runType: 'quarter_mile' | 'zero_to_60' | 'top_speed') => Promise<void>;
   resetTelemetry: () => void;
-  resetTelemetry: () => void;
 }
 
 export const useTelemetryStore = create<TelemetryState>((set, get) => ({
