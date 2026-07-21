@@ -1,5 +1,6 @@
-import React from 'react';
-import { View, StyleSheet, ViewStyle, TouchableOpacity, Platform } from 'react-native';
+import React, { useRef } from 'react';
+import { View, StyleSheet, ViewStyle, TouchableWithoutFeedback, Animated, Platform } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { colors } from '../../config/colors';
 
 interface GlassCardProps {
@@ -15,30 +16,55 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   activeGlow = false,
   onPress,
 }) => {
-  const cardStyle: any[] = [
-    styles.card,
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.98,
+      useNativeDriver: true,
+      speed: 20,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+    }).start();
+  };
+
+  const containerStyle: any[] = [
+    styles.container,
     activeGlow ? styles.activeGlowBorder : styles.standardBorder,
     style || {},
   ];
 
+  const content = (
+    <BlurView intensity={40} tint="dark" style={styles.blurContainer}>
+      {children}
+    </BlurView>
+  );
+
   if (onPress) {
     return (
-      <TouchableOpacity style={cardStyle} activeOpacity={0.82} onPress={onPress}>
-        {children}
-      </TouchableOpacity>
+      <TouchableWithoutFeedback onPressIn={handlePressIn} onPressOut={handlePressOut} onPress={onPress}>
+        <Animated.View style={[containerStyle, { transform: [{ scale: scaleAnim }] }]}>
+          {content}
+        </Animated.View>
+      </TouchableWithoutFeedback>
     );
   }
 
-  return <View style={cardStyle}>{children}</View>;
+  return <View style={containerStyle}>{content}</View>;
 };
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.card,
+  container: {
     borderRadius: 16,
-    padding: 16,
     marginVertical: 6,
     overflow: 'hidden',
+    backgroundColor: 'rgba(15, 17, 23, 0.4)', // Base fallback translucent
     ...Platform.select({
       web: {
         backdropFilter: 'blur(20px)',
@@ -55,8 +81,14 @@ const styles = StyleSheet.create({
     }),
   },
   standardBorder: {
-    borderWidth: 1,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
     borderColor: colors.cardBorder,
+  },
+  blurContainer: {
+    padding: 16,
   },
   activeGlowBorder: {
     borderWidth: 1.5,

@@ -42,6 +42,19 @@ const FeedPostCard = ({
   const [isMuted, setIsMuted] = useState(false);
   const author = post.user_profile;
 
+  const lastTapRef = useRef<number>(0);
+  const handlePress = () => {
+    const now = Date.now();
+    const DOUBLE_PRESS_DELAY = 300;
+    if (lastTapRef.current && (now - lastTapRef.current) < DOUBLE_PRESS_DELAY) {
+      onLike();
+      // Optional: We could trigger a local heart animation here
+    } else {
+      setIsPaused(!isPaused);
+    }
+    lastTapRef.current = now;
+  };
+
   return (
     <View style={[styles.postCard, { height: POST_HEIGHT }]}>
       {/* Media Background */}
@@ -49,7 +62,7 @@ const FeedPostCard = ({
         <TouchableOpacity 
           activeOpacity={1} 
           style={styles.mediaBackground} 
-          onPress={() => setIsPaused(!isPaused)}
+          onPress={handlePress}
         >
           <Video
             source={{ uri: post.media_url }}
@@ -358,6 +371,10 @@ export const FeedScreen = ({ navigation }: any) => {
           showsVerticalScrollIndicator={false}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={{ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }}
+          snapToInterval={POST_HEIGHT}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          disableIntervalMomentum={true}
           onEndReached={() => {
             if (hasMore && !isLoadingMore && user) {
               fetchFeed(user.id, feedTab);

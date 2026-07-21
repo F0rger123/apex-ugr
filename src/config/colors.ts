@@ -1,15 +1,20 @@
 export const colors = {
-  // Primary Matrix Cyber Theme
+  // Primary Matrix Cyber Theme (Preserved)
   primary: '#00FF66',          // Matrix Neon Green
   primaryGlow: 'rgba(0, 255, 102, 0.25)',
   primaryDark: '#00B345',      // Deep Green Accent
   primaryBg: 'rgba(0, 38, 15, 0.6)',
 
-  // Background Base
-  background: '#040508',       // Deeper Obsidian Black
-  surface: '#0A0C11',          // Darker Carbon Surface
-  card: 'rgba(15, 17, 23, 0.4)', // 40% Opacity Glass Card
-  cardBorder: 'rgba(255, 255, 255, 0.08)',
+  // The Digital Astral Background Base (Depth)
+  deepSpace: '#060E20',        // Deep space base color for nebula
+  background: 'transparent',   // Transparent to allow nebula to show through
+  surface: '#0A0C11',          
+  surfaceContainerLow: '#091328',
+  surfaceContainerHigh: '#141F38',
+  surfaceVariant: 'rgba(25, 37, 64, 0.4)', // 40% Opacity Glass Card
+  
+  card: 'rgba(25, 37, 64, 0.4)',
+  cardBorder: 'rgba(64, 72, 93, 0.15)', // Ghost Border
   activeCardBorder: '#00FF66',
 
   // Status & Accents
@@ -17,16 +22,18 @@ export const colors = {
   warning: '#FFB800',          // Telemetry Gold
   info: '#00E5FF',             // Cyber Cyan
   success: '#00FF66',
+  astralPurple: '#be83fa',
+  astralIndigo: '#6366f1',
 
   // Text Hierarchy
-  text: '#F8FAFC',             // High contrast white
-  textSecondary: '#94A3B8',    // Muted silver
-  textMuted: '#64748B',        // Subdued slate
-  textMatrix: '#00FF66',       // Glowing readout text
+  text: '#DEE5FF',             // High contrast white/indigo
+  textSecondary: '#A3AAC4',    // on_surface_variant
+  textMuted: '#64748B',        
+  textMatrix: '#00FF66',       
 
   // Glassmorphism overlays
-  glassBg: 'rgba(15, 17, 23, 0.4)',
-  glassHeader: 'rgba(4, 5, 8, 0.85)',
+  glassBg: 'rgba(25, 37, 64, 0.4)',
+  glassHeader: 'rgba(6, 14, 32, 0.85)',
   overlay: 'rgba(0, 0, 0, 0.85)',
 };
 

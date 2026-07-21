@@ -42,7 +42,7 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
   const lng = currentLocation?.longitude || -118.2437;
 
   // Static HTML template — only loaded once!
-  const htmlContent = `
+  const [htmlContent] = useState(`
     <!DOCTYPE html>
     <html>
     <head>
@@ -68,7 +68,7 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
         
         function initMap(lat, lng) {
           if (map) return;
-          map = L.map('map', { zoomControl: true }).setView([lat, lng], 12);
+          map = L.map('map', { zoomControl: true }).setView([lat, lng], 4);
           L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap, © CARTO'
@@ -82,13 +82,12 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
           if (data.type === 'INIT') {
             initMap(data.lat, data.lng);
           } else if (data.type === 'UPDATE' && map) {
-            // Update Your Location
             if (data.you) {
               if (markers['you']) map.removeLayer(markers['you']);
               const youIcon = L.divIcon({ html: '<div style="width:20px;height:20px;background:#00FF66;border-radius:50%;border:3px solid #fff;box-shadow:0 0 15px #00FF66;"></div>', className: '' });
               markers['you'] = L.marker([data.you.lat, data.you.lng], { icon: youIcon }).addTo(map)
                 .bindPopup('<div class="racer-tag">YOU (LIVE PILOT)</div><div class="racer-sub">Telemetry Active</div>');
-              map.panTo([data.you.lat, data.you.lng]); // Follow user
+              // Removed map.panTo so user can freely zoom/pan "globe style"
             }
 
             // Update Drivers (clear old ones first)
@@ -109,12 +108,12 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
           }
         });
         
-        // Initialize immediately if lat/lng available
-        initMap(${lat}, ${lng});
+        // Initialize with default, will be overridden by UPDATE
+        initMap(34.0522, -118.2437);
       </script>
     </body>
     </html>
-  `;
+  `);
 
   // Send updates to iframe when data changes
   useEffect(() => {

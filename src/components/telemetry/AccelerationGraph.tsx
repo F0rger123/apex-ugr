@@ -18,7 +18,8 @@ export const AccelerationGraph: React.FC<AccelerationGraphProps> = ({
   const minVal = 0;
 
   const points = data.map((val, index) => {
-    const x = (index / (data.length - 1)) * (width - 20) + 10;
+    const divider = data.length > 1 ? data.length - 1 : 1;
+    const x = (index / divider) * (width - 20) + 10;
     const y = height - 20 - ((val - minVal) / (maxVal - minVal)) * (height - 30);
     return { x, y, val };
   });

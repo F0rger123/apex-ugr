@@ -148,7 +148,35 @@ export const TelemetryScreen = ({ navigation }: any) => {
     }
   }, [isSessionActive, currentSpeedMph]);
 
-  // Removed Dynamic Telemetry Run Simulation fallback loop
+  // Simulator Telemetry Fallback Loop
+  useEffect(() => {
+    let simInterval: any;
+    if (isSessionActive && sensorSource === 'SIMULATOR') {
+      let mockSpeed = currentSpeedMph;
+      let accelPhase = true;
+      simInterval = setInterval(() => {
+        if (accelPhase) {
+          mockSpeed += Math.floor(Math.random() * 12) + 2;
+          const gLong = (Math.random() * 0.8 + 0.4);
+          const gLat = (Math.random() * 0.1);
+          if (mockSpeed >= 160) {
+            accelPhase = false;
+          }
+          updateTelemetry(mockSpeed, gLat, gLong);
+        } else {
+          mockSpeed -= Math.floor(Math.random() * 8) + 4;
+          const gLong = -(Math.random() * 0.6 + 0.2);
+          const gLat = (Math.random() * 0.1);
+          if (mockSpeed <= 0) {
+            mockSpeed = 0;
+            accelPhase = true; // reset cycle for fun
+          }
+          updateTelemetry(mockSpeed, gLat, gLong);
+        }
+      }, 500);
+    }
+    return () => clearInterval(simInterval);
+  }, [isSessionActive, sensorSource, currentSpeedMph]);
 
   return (
     <View style={styles.container}>
@@ -197,6 +225,14 @@ export const TelemetryScreen = ({ navigation }: any) => {
                 onPress={startSession}
               />
             )}
+            <TouchableOpacity 
+              style={[styles.resetBtn, sensorSource === 'SIMULATOR' && { borderColor: colors.primary }]} 
+              onPress={() => setSensorSource(s => s === 'SIMULATOR' ? 'DEVICE_HARDWARE' : 'SIMULATOR')}
+            >
+              <Text style={{ color: sensorSource === 'SIMULATOR' ? colors.primary : colors.text, fontSize: 10, fontWeight: '900' }}>
+                {sensorSource === 'SIMULATOR' ? 'SIM MODE' : 'LIVE GPS'}
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.resetBtn} onPress={() => setIsHudOverlay(!isHudOverlay)}>
               <Text style={{ color: isHudOverlay ? colors.primary : colors.text, fontSize: 10, fontWeight: '900' }}>
                 {isHudOverlay ? 'EXIT HUD' : 'HUD MODE'}

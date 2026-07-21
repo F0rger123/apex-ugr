@@ -7,6 +7,7 @@ import * as Notifications from 'expo-notifications';
 import { useAuthStore } from '../stores/authStore';
 
 import { BottomTabNavigator } from './BottomTabNavigator';
+import { NebulaBackground } from '../components/common/NebulaBackground';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignUpScreen } from '../screens/auth/SignUpScreen';
 import { VehicleDetailScreen } from '../screens/main/VehicleDetailScreen';
@@ -64,25 +65,27 @@ export const RootNavigator = () => {
     }
   }, [isAuthenticated, user?.id]);
 
+  const navTheme = {
+    dark: true,
+    colors: {
+      primary: colors.primary,
+      background: 'transparent',
+      card: colors.glassHeader,
+      text: colors.text,
+      border: 'transparent',
+      notification: colors.primary,
+    },
+  };
+
   // Show loading spinner while we check for an existing session
   if (isLoading) {
     return <LoadingScreen />;
   }
 
   return (
-    <NavigationContainer
-      theme={{
-        dark: true,
-        colors: {
-          primary: colors.primary,
-          background: colors.background,
-          card: colors.card,
-          text: colors.text,
-          border: colors.cardBorder,
-          notification: colors.danger,
-        },
-      }}
-    >
+    <View style={{ flex: 1, backgroundColor: colors.deepSpace }}>
+      <NebulaBackground />
+      <NavigationContainer theme={navTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
         {!isAuthenticated ? (
           // Auth stack — only shown to unauthenticated users
@@ -146,7 +149,8 @@ export const RootNavigator = () => {
           </Stack.Group>
         )}
       </Stack.Navigator>
-    </NavigationContainer>
+      </NavigationContainer>
+    </View>
   );
 };
 
