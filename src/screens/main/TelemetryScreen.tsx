@@ -45,6 +45,8 @@ export const TelemetryScreen = ({ navigation }: any) => {
   };
 
   const [sensorSource, setSensorSource] = useState<'DEVICE_HARDWARE' | 'SIMULATOR'>('DEVICE_HARDWARE');
+  const [isHudOverlay, setIsHudOverlay] = useState(false);
+  const lastPosRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
 
   // Real Hardware Device Motion & GPS Location Sensor Listeners
   useEffect(() => {
@@ -65,16 +67,43 @@ export const TelemetryScreen = ({ navigation }: any) => {
 
       window.addEventListener('devicemotion', handleMotion);
 
-      // 2. Geolocation Watch Position for Live Speed (m/s -> MPH)
+      // 2. Geolocation Watch Position for Live Speed (m/s -> MPH with Haversine fallback)
       if ('geolocation' in navigator && isSessionActive) {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
-            const rawSpeedMs = position.coords.speed || 0; // m/s
-            const speedMph = Math.round(rawSpeedMs * 2.23694); // convert to MPH
-            updateTelemetry(speedMph);
+            let speedMph = 0;
+            const rawSpeedMs = position.coords.speed;
+            const now = Date.now();
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            if (rawSpeedMs !== null && rawSpeedMs > 0) {
+              speedMph = Math.round(rawSpeedMs * 2.23694);
+            } else if (lastPosRef.current) {
+              const prev = lastPosRef.current;
+              const dtSec = (now - prev.time) / 1000;
+              if (dtSec > 0.5) {
+                // Haversine formula
+                const R = 6371; // km
+                const dLat = (lat - prev.lat) * (Math.PI / 180);
+                const dLng = (lng - prev.lng) * (Math.PI / 180);
+                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                          Math.cos(prev.lat * (Math.PI / 180)) * Math.cos(lat * (Math.PI / 180)) *
+                          Math.sin(dLng / 2) * Math.sin(dLng / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                const distKm = R * c;
+                const speedKmh = (distKm / dtSec) * 3600;
+                speedMph = Math.round(speedKmh * 0.621371);
+              }
+            }
+
+            lastPosRef.current = { lat, lng, time: now };
+            if (speedMph >= 0 && speedMph < 350) {
+              updateTelemetry(speedMph);
+            }
           },
           (err) => console.log('GPS Error:', err),
-          { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+          { enableHighAccuracy: true, maximumAge: 500, timeout: 5000 }
         );
       }
 
@@ -146,16 +175,46 @@ export const TelemetryScreen = ({ navigation }: any) => {
                 onPress={startSession}
               />
             )}
+            <TouchableOpacity style={styles.resetBtn} onPress={() => setIsHudOverlay(!isHudOverlay)}>
+              <Text style={{ color: isHudOverlay ? colors.primary : colors.text, fontSize: 10, fontWeight: '900' }}>
+                {isHudOverlay ? 'EXIT HUD' : 'HUD MODE'}
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.resetBtn} onPress={resetTelemetry}>
               <RefreshCw size={16} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         </GlassCard>
 
-        {/* Speedometer Gauge HUD */}
-        <GlassCard style={{ alignItems: 'center', paddingVertical: 20 }}>
-          <SpeedometerGauge currentSpeed={currentSpeedMph} maxSpeed={240} size={250} />
-        </GlassCard>
+        {/* WINDSHIELD HUD OVERLAY MODE */}
+        {isHudOverlay ? (
+          <GlassCard style={{ alignItems: 'center', paddingVertical: 40, backgroundColor: 'rgba(0,0,0,0.85)', borderWidth: 2, borderColor: colors.primary }}>
+            <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginBottom: 10 }}>WINDSHIELD HUD OVERLAY</Text>
+            <Text style={{ color: colors.primary, fontSize: 110, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
+              {currentSpeedMph}
+            </Text>
+            <Text style={{ color: colors.text, fontSize: 22, fontWeight: '900', letterSpacing: 3 }}>MPH</Text>
+
+            <View style={{ flexDirection: 'row', gap: 20, marginTop: 30 }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LATERAL G</Text>
+                <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '900' }}>{gForceLateral} G</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>0-60 LAUNCH</Text>
+                <Text style={{ color: colors.warning, fontSize: 20, fontWeight: '900' }}>{zeroToSixtySec}s</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LONG G</Text>
+                <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '900' }}>{gForceLongitudinal} G</Text>
+              </View>
+            </View>
+          </GlassCard>
+        ) : (
+          <GlassCard style={{ alignItems: 'center', paddingVertical: 20 }}>
+            <SpeedometerGauge currentSpeed={currentSpeedMph} maxSpeed={240} size={250} />
+          </GlassCard>
+        )}
 
         {/* Stats Grid */}
         <View style={styles.statsGrid}>

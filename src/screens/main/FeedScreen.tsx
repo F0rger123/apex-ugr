@@ -219,6 +219,28 @@ export const FeedScreen = ({ navigation }: any) => {
   };
 
   const handlePickMedia = async () => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*,video/*';
+      input.onchange = (e: any) => {
+        const file = e.target?.files?.[0];
+        if (file) {
+          const isVideo = file.type.startsWith('video');
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            if (event.target?.result) {
+              setNewMediaUri(event.target.result as string);
+              setNewMediaType(isVideo ? 'video' : 'photo');
+            }
+          };
+          reader.readAsDataURL(file);
+        }
+      };
+      input.click();
+      return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.All,
       allowsEditing: true,

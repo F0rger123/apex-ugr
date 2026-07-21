@@ -80,54 +80,105 @@ export const MapScreen = ({ navigation }: any) => {
     setPrivacyMode(mode, user.id);
   };
 
-  // ─── Web Fallback Map ─────────────────────────────────────────────────────
-  const WebRadarView = () => (
-    <View style={styles.webRadarContainer}>
-      {/* Radar circles */}
-      <View style={[styles.radarRing, { width: 80, height: 80, borderRadius: 40 }]} />
-      <View style={[styles.radarRing, { width: 170, height: 170, borderRadius: 85 }]} />
-      <View style={[styles.radarRing, { width: 260, height: 260, borderRadius: 130 }]} />
-      <View style={styles.radarCrossH} />
-      <View style={styles.radarCrossV} />
+  // ─── Web Interactive Map ──────────────────────────────────────────────────
+  const WebRadarView = () => {
+    const lat = currentLocation?.latitude || 34.0522;
+    const lng = currentLocation?.longitude || -118.2437;
 
-      {/* Current user dot */}
-      <View style={styles.youDot}>
-        <View style={styles.youPulse} />
-        <Text style={styles.youLabel}>YOU</Text>
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <style>
+          html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; background: #08090C; font-family: system-ui, sans-serif; }
+          .leaflet-container { background: #08090C !important; }
+          .leaflet-popup-content-wrapper { background: rgba(15,17,23,0.95) !important; color: #fff !important; border: 1px solid #00FF66 !important; border-radius: 10px !important; backdrop-filter: blur(8px); }
+          .leaflet-popup-tip { background: #00FF66 !important; }
+          .racer-tag { color: #00FF66; font-weight: 900; font-size: 13px; margin-bottom: 2px; }
+          .racer-sub { color: #8E9BAE; font-size: 11px; }
+          .speed-tag { color: #FFB800; font-weight: 800; font-size: 12px; margin-top: 4px; }
+        </style>
+      </head>
+      <body>
+        <div id="map"></div>
+        <script>
+          const map = L.map('map', { zoomControl: true }).setView([${lat}, ${lng}], 12);
+          L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap, © CARTO'
+          }).addTo(map);
+
+          // You marker
+          const youIcon = L.divIcon({
+            html: '<div style="width:20px;height:20px;background:#00FF66;border-radius:50%;border:3px solid #fff;box-shadow:0 0 15px #00FF66;"></div>',
+            className: ''
+          });
+          L.marker([${lat}, ${lng}], { icon: youIcon }).addTo(map).bindPopup('<div class="racer-tag">YOU (LIVE PILOT)</div><div class="racer-sub">Telemetry Active</div>');
+
+          // Driver markers
+          const drivers = ${JSON.stringify(
+            driversNearby.map(d => ({
+              lat: d.latitude,
+              lng: d.longitude,
+              name: d.profile?.username || 'Racer',
+              speed: d.speed_mph,
+              status: d.status,
+              car: d.vehicle ? `${d.vehicle.year} ${d.vehicle.make} ${d.vehicle.model}` : 'Tuned Vehicle'
+            }))
+          )};
+
+          drivers.forEach(d => {
+            const icon = L.divIcon({
+              html: '<div style="width:16px;height:16px;background:#FFB800;border-radius:50%;border:2px solid #000;box-shadow:0 0 10px #FFB800;"></div>',
+              className: ''
+            });
+            L.marker([d.lat, d.lng], { icon: icon }).addTo(map)
+              .bindPopup('<div class="racer-tag">@' + d.name + '</div><div class="racer-sub">' + d.car + '</div><div class="speed-tag">' + d.speed + ' MPH • ' + d.status + '</div>');
+          });
+
+          // Car meets markers
+          const meets = ${JSON.stringify(
+            meets.map(m => ({
+              lat: m.latitude,
+              lng: m.longitude,
+              title: m.title,
+              location: m.location_name
+            }))
+          )};
+
+          meets.forEach(m => {
+            const icon = L.divIcon({
+              html: '<div style="width:24px;height:24px;background:#FF0055;border-radius:6px;border:2px solid #fff;box-shadow:0 0 12px #FF0055;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:bold;">MEET</div>',
+              className: ''
+            });
+            L.marker([m.lat, m.lng], { icon: icon }).addTo(map)
+              .bindPopup('<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div><div class="racer-sub">' + m.location + '</div>');
+          });
+        </script>
+      </body>
+      </html>
+    `;
+
+    return (
+      <View style={{ flex: 1, minHeight: 380, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: colors.cardBorder }}>
+        {Platform.OS === 'web' ? (
+          <iframe
+            srcDoc={htmlContent}
+            style={{ width: '100%', height: '100%', border: 'none' }}
+            title="Apex UGR Radar Map"
+          />
+        ) : (
+          <View style={styles.webRadarContainer}>
+            <Text style={{ color: colors.textMuted }}>Map Loading...</Text>
+          </View>
+        )}
       </View>
-
-      {/* Driver pins */}
-      {driversNearby.slice(0, 6).map((driver, idx) => {
-        const positions = [
-          { top: 35, left: 55 }, { bottom: 35, right: 45 }, { top: 80, right: 60 },
-          { bottom: 60, left: 40 }, { top: 20, right: 80 }, { bottom: 20, left: 80 },
-        ];
-        const pos = positions[idx % positions.length];
-        const statusColor = STATUS_COLORS[driver.status] || colors.primary;
-
-        return (
-          <TouchableOpacity
-            key={driver.id}
-            style={[styles.driverPin, pos, selectedDriver?.id === driver.id && styles.driverPinSelected]}
-            onPress={() => setSelectedDriver(driver)}
-          >
-            <View style={[styles.driverPinDot, { backgroundColor: statusColor }]} />
-            <Image
-              source={{ uri: driver.profile?.avatar_url || '' }}
-              style={styles.pinAvatar}
-            />
-            <Text style={styles.pinName}>{driver.profile?.username || 'Unknown'}</Text>
-            <Text style={[styles.pinSpeed, { color: statusColor }]}>{driver.speed_mph} MPH</Text>
-          </TouchableOpacity>
-        );
-      })}
-
-      {/* Stats overlay */}
-      <View style={styles.radarStats}>
-        <Text style={styles.radarStatText}>{driversNearby.length} PILOTS IN RANGE</Text>
-      </View>
-    </View>
-  );
+    );
+  };
 
   // ─── Native Map View ──────────────────────────────────────────────────────
   const NativeMapView = () => {
