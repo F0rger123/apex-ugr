@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
 import { useAuthStore } from '../stores/authStore';
 
 import { BottomTabNavigator } from './BottomTabNavigator';
@@ -26,13 +28,40 @@ const LoadingScreen = () => (
 );
 
 export const RootNavigator = () => {
-  const { isAuthenticated, isLoading, initializeAuth } = useAuthStore();
+  const { isAuthenticated, isLoading, initializeAuth, user, savePushToken } = useAuthStore();
 
   // Initialize auth on mount — reads persisted session from AsyncStorage
   // and subscribes to Supabase auth state changes
   useEffect(() => {
     initializeAuth();
   }, []);
+
+  // Register for Push Notifications when user is authenticated
+  useEffect(() => {
+    async function registerForPushNotificationsAsync() {
+      let token;
+      if (Device.isDevice) {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+        if (finalStatus !== 'granted') {
+          return;
+        }
+        token = (await Notifications.getExpoPushTokenAsync({ projectId: 'YOUR_PROJECT_ID' })).data;
+      }
+      
+      if (token && user?.id) {
+        await savePushToken(user.id, token);
+      }
+    }
+    
+    if (isAuthenticated && user?.id) {
+      registerForPushNotificationsAsync();
+    }
+  }, [isAuthenticated, user?.id]);
 
   // Show loading spinner while we check for an existing session
   if (isLoading) {

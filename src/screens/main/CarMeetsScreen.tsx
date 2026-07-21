@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, TextInput } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, TextInput, ActivityIndicator } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
@@ -11,12 +11,19 @@ import { colors } from '../../config/colors';
 import { Calendar, MapPin, Users, Plus, Navigation, Clock, ShieldCheck, CheckCircle2, X } from 'lucide-react-native';
 
 export const CarMeetsScreen = ({ navigation }: any) => {
-  const { meets } = useMapStore();
+  const { meets, fetchMeets, joinMeet, currentLocation, isLoading } = useMapStore();
   const { user } = useAuthStore();
 
-  const [rsvpState, setRsvpState] = useState<{ [meetId: string]: 'going' | 'maybe' | 'none' }>({
-    'meet-1': 'going',
-  });
+  useEffect(() => {
+    if (currentLocation) {
+      fetchMeets(currentLocation.latitude, currentLocation.longitude);
+    } else {
+      // Fallback to a default location if GPS isn't active yet, e.g. Los Angeles
+      fetchMeets(34.0522, -118.2437);
+    }
+  }, [currentLocation]);
+
+  const [rsvpState, setRsvpState] = useState<{ [meetId: string]: 'going' | 'maybe' | 'none' }>({});
   const [selectedMeetDetails, setSelectedMeetDetails] = useState<any | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [title, setTitle] = useState('');
@@ -24,7 +31,10 @@ export const CarMeetsScreen = ({ navigation }: any) => {
   const [description, setDescription] = useState('');
   const [meetType, setMeetType] = useState<'Meet' | 'Cruise' | 'Show' | 'Track Day'>('Cruise');
 
-  const toggleRsvp = (meetId: string, status: 'going' | 'maybe') => {
+  const toggleRsvp = async (meetId: string, status: 'going' | 'maybe') => {
+    if (status === 'going' && user) {
+      await joinMeet(meetId, user.id);
+    }
     setRsvpState((prev) => ({
       ...prev,
       [meetId]: prev[meetId] === status ? 'none' : status,
@@ -58,8 +68,11 @@ export const CarMeetsScreen = ({ navigation }: any) => {
         </View>
 
         {/* Meets List */}
-        {meets.map((meet) => {
-          const userRsvp = rsvpState[meet.id] || 'none';
+        {isLoading && meets.length === 0 ? (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+        ) : (
+          meets.map((meet) => {
+            const userRsvp = rsvpState[meet.id] || 'none';
 
           return (
             <GlassCard key={meet.id} style={styles.meetCard}>
@@ -127,7 +140,7 @@ export const CarMeetsScreen = ({ navigation }: any) => {
               </View>
             </GlassCard>
           );
-        })}
+        }))}
 
         <View style={{ height: 40 }} />
       </ScrollView>

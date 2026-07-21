@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { supabase } from '../config/supabase';
 
 interface TelemetryState {
   currentSpeedMph: number;
@@ -16,21 +17,23 @@ interface TelemetryState {
   startSession: () => void;
   stopSession: () => void;
   updateTelemetry: (speed: number, gLat?: number, gLong?: number) => void;
+  saveSession: (userId: string, vehicleId: string, runType: 'quarter_mile' | 'zero_to_60' | 'top_speed') => Promise<void>;
+  resetTelemetry: () => void;
   resetTelemetry: () => void;
 }
 
 export const useTelemetryStore = create<TelemetryState>((set, get) => ({
   currentSpeedMph: 0,
-  topSpeedMph: 194,
-  avgSpeedMph: 68.4,
-  gForceLateral: 0.12,
-  gForceLongitudinal: 0.08,
-  zeroToSixtySec: 2.05,
-  quarterMileSec: 8.85,
-  distanceMiles: 48.2,
+  topSpeedMph: 0,
+  avgSpeedMph: 0,
+  gForceLateral: 0,
+  gForceLongitudinal: 0,
+  zeroToSixtySec: 0,
+  quarterMileSec: 0,
+  distanceMiles: 0,
   isSessionActive: false,
-  speedHistory: [0, 15, 35, 60, 85, 110, 135, 142, 120, 80, 45, 0],
-  sessionDurationSec: 1420,
+  speedHistory: [0],
+  sessionDurationSec: 0,
 
   startSession: () => {
     set({
@@ -58,6 +61,25 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       gForceLongitudinal: Number(gLong.toFixed(2)),
       speedHistory: newHistory
     });
+  },
+
+  saveSession: async (userId, vehicleId, runType) => {
+    const state = get();
+    const resultValue = runType === 'quarter_mile' ? state.quarterMileSec : state.zeroToSixtySec;
+    
+    try {
+      await supabase.rpc('save_telemetry_run', {
+        p_user_id: userId,
+        p_vehicle_id: vehicleId,
+        p_run_type: runType,
+        p_result_value: resultValue || 0,
+        p_max_speed_mph: state.topSpeedMph,
+        p_max_g_force: Math.max(state.gForceLateral, state.gForceLongitudinal),
+        p_gps_log: { history: state.speedHistory }
+      });
+    } catch (err) {
+      console.error('[TelemetryStore] saveSession error:', err);
+    }
   },
 
   resetTelemetry: () => {

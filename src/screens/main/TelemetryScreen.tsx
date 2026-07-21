@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
 import { useTelemetryStore } from '../../stores/telemetryStore';
+import { useAuthStore } from '../../stores/authStore';
+import { useGarageStore } from '../../stores/garageStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { GlassCard } from '../../components/common/GlassCard';
@@ -28,7 +30,19 @@ export const TelemetryScreen = ({ navigation }: any) => {
     stopSession,
     updateTelemetry,
     resetTelemetry,
+    saveSession,
   } = useTelemetryStore();
+  const { user } = useAuthStore();
+  const { getActiveVehicle } = useGarageStore();
+
+  const handleStopSession = async () => {
+    if (user) {
+      const vehicle = getActiveVehicle();
+      // Assume a 1/4 mile run for now based on stats
+      await saveSession(user.id, vehicle?.id || '', 'quarter_mile');
+    }
+    stopSession();
+  };
 
   const [sensorSource, setSensorSource] = useState<'DEVICE_HARDWARE' | 'SIMULATOR'>('DEVICE_HARDWARE');
 
@@ -120,7 +134,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
                 size="md"
                 style={{ flex: 1 }}
                 icon={<Square size={16} color={colors.danger} />}
-                onPress={stopSession}
+                onPress={handleStopSession}
               />
             ) : (
               <ApexButton

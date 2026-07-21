@@ -11,6 +11,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   authError: string | null;
+  followStats: { followers: number; following: number };
 
   // Auth actions
   signUp: (email: string, password: string, username: string, displayName: string) => Promise<{ error: string | null }>;
@@ -25,6 +26,8 @@ interface AuthState {
   addCredits: (amount: number) => Promise<{ error: string | null }>;
   deductCredits: (amount: number) => Promise<{ error: string | null }>;
   togglePrivacyMode: (mode: 'all' | 'friends' | 'meet_only' | 'invisible') => Promise<void>;
+  fetchFollowStats: (userId: string) => Promise<void>;
+  savePushToken: (userId: string, token: string) => Promise<void>;
 
   // Session management
   initializeAuth: () => Promise<void>;
@@ -37,6 +40,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
   isLoading: true,
   authError: null,
+  followStats: { followers: 0, following: 0 },
 
   // ─── Sign Up ──────────────────────────────────────────────────────────────
   signUp: async (email, password, username, displayName) => {
@@ -158,7 +162,33 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ session: null, user: null, isAuthenticated: false, isLoading: false, authError: null });
   },
 
-  // ─── Load Profile ─────────────────────────────────────────────────────────
+  // ─── Profile & Credits ────────────────────────────────────────────────────
+  savePushToken: async (userId, token) => {
+    try {
+      await supabase.from('profiles').update({ push_token: token }).eq('id', userId);
+    } catch (err) {
+      console.error('[AuthStore] Failed to save push token:', err);
+    }
+  },
+
+  fetchFollowStats: async (userId) => {
+    try {
+      const { count: followers } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('following_id', userId);
+
+      const { count: following } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('follower_id', userId);
+
+      set({ followStats: { followers: followers || 0, following: following || 0 } });
+    } catch (err) {
+      console.error('[AuthStore] fetchFollowStats error:', err);
+    }
+  },
+
   loadProfile: async (userId) => {
     try {
       const { data, error } = await supabase

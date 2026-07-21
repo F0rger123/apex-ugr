@@ -14,6 +14,8 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
 import { useFeedStore, PostWithProfile, CommentWithProfile } from '../../stores/feedStore';
 import { useAuthStore } from '../../stores/authStore';
 import { colors } from '../../config/colors';
@@ -40,11 +42,22 @@ const FeedPostCard = ({
   return (
     <View style={styles.postCard}>
       {/* Media Background */}
-      <Image
-        source={{ uri: post.thumbnail_url || post.media_url }}
-        style={styles.mediaBackground}
-        resizeMode="cover"
-      />
+      {post.post_type === 'video' ? (
+        <Video
+          source={{ uri: post.media_url }}
+          style={styles.mediaBackground}
+          resizeMode={ResizeMode.COVER}
+          shouldPlay={isActive}
+          isLooping
+          isMuted={false}
+        />
+      ) : (
+        <Image
+          source={{ uri: post.thumbnail_url || post.media_url }}
+          style={styles.mediaBackground}
+          resizeMode="cover"
+        />
+      )}
 
       {/* Gradient overlay for readability */}
       <View style={styles.gradientOverlay} />
@@ -171,7 +184,8 @@ export const FeedScreen = ({ navigation }: any) => {
   const [commentText, setCommentText] = useState('');
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newCaption, setNewCaption] = useState('');
-  const [newMediaUrl, setNewMediaUrl] = useState('');
+  const [newMediaUri, setNewMediaUri] = useState<string | null>(null);
+  const [newMediaType, setNewMediaType] = useState<'photo' | 'video'>('photo');
   const [isPosting, setIsPosting] = useState(false);
 
   useEffect(() => {
@@ -204,19 +218,49 @@ export const FeedScreen = ({ navigation }: any) => {
     setCommentText('');
   };
 
+  const handlePickMedia = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      setNewMediaUri(result.assets[0].uri);
+      setNewMediaType(result.assets[0].type === 'video' ? 'video' : 'photo');
+    }
+  };
+
   const handleCreatePost = async () => {
-    if (!newCaption.trim() || !user) return;
+    if (!newCaption.trim() || !user || !newMediaUri) {
+      Alert.alert('Error', 'Caption and Media are required');
+      return;
+    }
+    
     setIsPosting(true);
+    
+    // Attempt upload
+    let finalMediaUrl = '';
+    const { url, error } = await uploadPostMedia(user.id, newMediaUri, newMediaType);
+    
+    if (error || !url) {
+      // Fallback if local testing
+      finalMediaUrl = newMediaUri; 
+    } else {
+      finalMediaUrl = url;
+    }
+
     await createPost(user.id, {
-      post_type: 'photo',
-      media_url: newMediaUrl.trim() || 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop',
+      post_type: newMediaType,
+      media_url: finalMediaUrl,
       caption: newCaption.trim(),
       tags: newCaption.match(/#\w+/g) || ['#ApexUGR'],
     });
+    
     setIsPosting(false);
     setCreateModalVisible(false);
     setNewCaption('');
-    setNewMediaUrl('');
+    setNewMediaUri(null);
   };
 
   const renderPost = ({ item }: { item: PostWithProfile }) => (
@@ -365,25 +409,19 @@ export const FeedScreen = ({ navigation }: any) => {
             </View>
 
             <View style={styles.mediaTypeRow}>
-              <TouchableOpacity style={styles.mediaTypeBtn}>
+              <TouchableOpacity style={styles.mediaTypeBtn} onPress={handlePickMedia}>
                 <Camera size={20} color={colors.primary} />
-                <Text style={styles.mediaTypeBtnText}>PHOTO</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.mediaTypeBtn}>
-                <Film size={20} color={colors.primary} />
-                <Text style={styles.mediaTypeBtnText}>VIDEO</Text>
+                <Text style={styles.mediaTypeBtnText}>
+                  {newMediaUri ? 'CHANGE MEDIA' : 'SELECT PHOTO / VIDEO'}
+                </Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.inputLabel}>MEDIA URL (photo or video)</Text>
-            <TextInput
-              style={styles.formInput}
-              placeholder="https://..."
-              placeholderTextColor={colors.textMuted}
-              value={newMediaUrl}
-              onChangeText={setNewMediaUrl}
-              autoCapitalize="none"
-            />
+            {newMediaUri && (
+              <View style={{ marginBottom: 16 }}>
+                <Text style={[styles.inputLabel, { color: colors.primary }]}>Media Selected ✓</Text>
+              </View>
+            )}
 
             <Text style={styles.inputLabel}>CAPTION & HASHTAGS</Text>
             <TextInput

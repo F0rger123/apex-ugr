@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '../../stores/authStore';
 import { useGarageStore } from '../../stores/garageStore';
@@ -12,8 +12,14 @@ import { colors } from '../../config/colors';
 import { ShieldCheck, Award, Coins, MapPin, Settings, LogOut, CheckCircle2, ShieldAlert, UserCheck } from 'lucide-react-native';
 
 export const ProfileScreen = ({ navigation }: any) => {
-  const { user, logout, togglePrivacyMode } = useAuthStore();
+  const { user, logout, togglePrivacyMode, followStats, fetchFollowStats } = useAuthStore();
   const { vehicles } = useGarageStore();
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchFollowStats(user.id);
+    }
+  }, [user?.id]);
 
   const [showReportModal, setShowReportModal] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -53,11 +59,11 @@ export const ProfileScreen = ({ navigation }: any) => {
           {/* Followers / Following Row */}
           <View style={styles.followStatsRow}>
             <View style={styles.followCol}>
-              <Text style={styles.followVal}>1,420</Text>
+              <Text style={styles.followVal}>{followStats.followers.toLocaleString()}</Text>
               <Text style={styles.followLab}>FOLLOWERS</Text>
             </View>
             <View style={styles.followCol}>
-              <Text style={styles.followVal}>389</Text>
+              <Text style={styles.followVal}>{followStats.following.toLocaleString()}</Text>
               <Text style={styles.followLab}>FOLLOWING</Text>
             </View>
 

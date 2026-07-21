@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '../../stores/authStore';
 import { useGarageStore } from '../../stores/garageStore';
@@ -17,10 +17,22 @@ import { Shield, Zap, Flame, Trophy, MapPin, Gauge, ChevronRight } from 'lucide-
 
 export const DashboardScreen = ({ navigation }: any) => {
   const { user } = useAuthStore();
-  const { getActiveVehicle, getTotalBuildValue } = useGarageStore();
-  const { races } = useRaceStore();
+  const { getActiveVehicle, getTotalBuildValue, fetchVehicles } = useGarageStore();
+  const { races, fetchRaces } = useRaceStore();
   const { currentSpeedMph } = useTelemetryStore();
-  const { meets } = useMapStore();
+  const { meets, fetchMeets, currentLocation } = useMapStore();
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchVehicles(user.id);
+      fetchRaces(user.id);
+      if (currentLocation) {
+        fetchMeets(currentLocation.latitude, currentLocation.longitude);
+      } else {
+        fetchMeets(34.0522, -118.2437); // Fallback
+      }
+    }
+  }, [user?.id, currentLocation]);
 
   const activeVehicle = getActiveVehicle();
   const buildValue = activeVehicle ? getTotalBuildValue(activeVehicle.id) : 0;
