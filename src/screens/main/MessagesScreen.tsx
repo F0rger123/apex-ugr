@@ -3,120 +3,155 @@ import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput 
 import { useMessageStore } from '../../stores/messageStore';
 import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
-import { SectionHeader } from '../../components/common/SectionHeader';
 import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { colors } from '../../config/colors';
-import { Send, ArrowLeft, Image as ImageIcon, Mic } from 'lucide-react-native';
+import { Send, Image as ImageIcon, Mic, CheckCheck, Users, Search, Volume2 } from 'lucide-react-native';
 
 export const MessagesScreen = ({ navigation }: any) => {
-  const { conversations, messagesMap, activeConversationId, setActiveConversation, sendMessage } = useMessageStore();
+  const { conversations, activeConversationId, messagesMap, setActiveConversation, sendMessage } = useMessageStore();
   const { user } = useAuthStore();
 
   const [inputContent, setInputContent] = useState('');
-
-  const activeConv = conversations.find((c) => c.id === activeConversationId);
-  const activeMessages = activeConversationId ? messagesMap[activeConversationId] || [] : [];
+  const activeConversation = conversations.find((c) => c.id === activeConversationId) || conversations[0];
+  const activeMessages = messagesMap[activeConversation?.id] || [];
 
   const handleSend = () => {
-    if (!inputContent.trim() || !activeConversationId) return;
-    sendMessage(activeConversationId, inputContent);
+    if (!inputContent.trim() || !activeConversation) return;
+    sendMessage(activeConversation.id, inputContent, user?.id || '00000000-0000-0000-0000-000000000001');
     setInputContent('');
+  };
+
+  const sendVoiceNote = () => {
+    if (!activeConversation) return;
+    sendMessage(activeConversation.id, '🎤 Voice Note (0:14)', user?.id || '00000000-0000-0000-0000-000000000001', 'https://example.com/voice.mp3', 'audio');
   };
 
   return (
     <View style={styles.container}>
-      <ApexHeader onProfilePress={() => navigation.navigate('Profile')} />
+      <ApexHeader
+        showBack
+        title="DIRECT MESSAGES"
+        onBackPress={() => navigation.goBack()}
+        onProfilePress={() => navigation.navigate('Profile')}
+      />
 
-      {activeConversationId && activeConv ? (
-        /* Chat Room View */
-        <View style={{ flex: 1 }}>
-          <View style={styles.roomHeader}>
-            <TouchableOpacity onPress={() => setActiveConversation(null)}>
-              <ArrowLeft size={18} color={colors.primary} />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: activeConv.other_profile?.avatar_url || 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=400&auto=format&fit=crop' }}
-              style={styles.roomAvatar}
-            />
-            <View style={{ marginLeft: 10, flex: 1 }}>
-              <Text style={styles.roomTitle}>{activeConv.other_profile?.display_name || 'Racer'}</Text>
-              <Text style={styles.roomSub}>@{activeConv.other_profile?.username} • ONLINE</Text>
-            </View>
+      <View style={styles.layoutRow}>
+        {/* Conversations List Sidebar */}
+        <View style={styles.convoSidebar}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {conversations.map((c) => {
+              const isActive = c.id === activeConversation?.id;
+              const title = c.is_group ? c.group_name : c.other_profile?.display_name;
+              const avatar = c.is_group ? 'https://images.unsplash.com/photo-1511919884226-fd3cad34687c?q=80&w=400&auto=format&fit=crop' : c.other_profile?.avatar_url;
+
+              return (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.convoItem, isActive && styles.convoItemActive]}
+                  onPress={() => setActiveConversation(c.id)}
+                >
+                  <Image source={{ uri: avatar }} style={styles.convoAvatar} />
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={styles.convoTitle} numberOfLines={1}>{title}</Text>
+                    <Text style={styles.convoLast} numberOfLines={1}>{c.last_message}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Active Chat Thread */}
+        <View style={styles.chatArea}>
+          {/* Chat Header */}
+          <View style={styles.chatHeader}>
+            <Text style={styles.chatHeaderTitle}>
+              {activeConversation?.is_group ? activeConversation.group_name : activeConversation?.other_profile?.display_name}
+            </Text>
+            {activeConversation?.is_group && (
+              <MatrixBadge label="GROUP CHAT" variant="green" size="sm" />
+            )}
           </View>
 
-          <ScrollView style={styles.messagesList} contentContainerStyle={{ paddingVertical: 12 }}>
+          {/* Messages Feed */}
+          <ScrollView style={styles.messagesScroll} showsVerticalScrollIndicator={false}>
             {activeMessages.map((m) => {
-              const isMe = m.sender_id === user?.id;
+              const isMe = m.sender_id === (user?.id || '00000000-0000-0000-0000-000000000001');
+
               return (
-                <View key={m.id} style={[styles.msgBubble, isMe ? styles.msgMe : styles.msgOther]}>
-                  <Text style={[styles.msgText, isMe && { color: colors.background }]}>{m.content}</Text>
+                <View key={m.id} style={[styles.bubbleWrapper, isMe ? styles.bubbleRight : styles.bubbleLeft]}>
+                  <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
+                    {m.media_type === 'audio' ? (
+                      <View style={styles.audioRow}>
+                        <Volume2 size={16} color={colors.primary} />
+                        <Text style={styles.audioBubbleText}>{m.content}</Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.msgText, isMe && { color: colors.background }]}>{m.content}</Text>
+                    )}
+                    <Text style={[styles.timeText, isMe && { color: 'rgba(0,0,0,0.5)' }]}>
+                      {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  </View>
                 </View>
               );
             })}
           </ScrollView>
 
-          {/* Chat Input Bar */}
-          <View style={styles.chatInputBar}>
+          {/* Message Input Box */}
+          <View style={styles.inputBoxRow}>
+            <TouchableOpacity style={styles.mediaBtn} onPress={sendVoiceNote}>
+              <Mic size={18} color={colors.primary} />
+            </TouchableOpacity>
+
             <TextInput
-              style={styles.chatInput}
-              placeholder="Type message or wager detail..."
+              style={styles.textInput}
+              placeholder="Type message..."
               placeholderTextColor={colors.textMuted}
               value={inputContent}
               onChangeText={setInputContent}
             />
+
             <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
               <Send size={16} color={colors.background} />
             </TouchableOpacity>
           </View>
         </View>
-      ) : (
-        /* Conversations List */
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          <SectionHeader title="DIRECT & GROUP CHATS" />
-          {conversations.map((c) => (
-            <GlassCard key={c.id} onPress={() => setActiveConversation(c.id)}>
-              <View style={styles.convRow}>
-                <Image
-                  source={{ uri: c.other_profile?.avatar_url || 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=400&auto=format&fit=crop' }}
-                  style={styles.avatar}
-                />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.convName}>{c.other_profile?.display_name}</Text>
-                  <Text style={styles.convLastMsg} numberOfLines={1}>{c.last_message}</Text>
-                </View>
-                <MatrixBadge label="ACTIVE" variant="green" size="sm" />
-              </View>
-            </GlassCard>
-          ))}
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      )}
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  layoutRow: { flex: 1, flexDirection: 'row' },
+  convoSidebar: { width: 110, backgroundColor: colors.surface, borderRightWidth: 1, borderRightColor: colors.cardBorder, paddingVertical: 8 },
+  convoItem: { padding: 8, alignItems: 'center', marginVertical: 4, borderRadius: 8 },
+  convoItemActive: { backgroundColor: 'rgba(0, 255, 102, 0.12)', borderWidth: 1, borderColor: colors.primary },
+  convoAvatar: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.cardBorder },
+  convoTitle: { color: colors.text, fontSize: 10, fontWeight: '800', marginTop: 4, textAlign: 'center' },
+  convoLast: { color: colors.textMuted, fontSize: 8, textAlign: 'center' },
 
-  roomHeader: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.cardBorder },
-  roomAvatar: { width: 34, height: 34, borderRadius: 17, marginLeft: 10, borderWidth: 1, borderColor: colors.primary },
-  roomTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
-  roomSub: { color: colors.primary, fontSize: 9, fontWeight: '800' },
+  chatArea: { flex: 1, flexDirection: 'column' },
+  chatHeader: { height: 44, backgroundColor: colors.glassHeader, borderBottomWidth: 1, borderBottomColor: colors.cardBorder, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12 },
+  chatHeaderTitle: { color: colors.text, fontSize: 13, fontWeight: '900' },
 
-  messagesList: { flex: 1, paddingHorizontal: 16 },
-  msgBubble: { maxWidth: '75%', padding: 10, borderRadius: 12, marginVertical: 4 },
-  msgMe: { alignSelf: 'flex-end', backgroundColor: colors.primary },
-  msgOther: { alignSelf: 'flex-start', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.cardBorder },
-  msgText: { color: colors.text, fontSize: 13, fontWeight: '600' },
+  messagesScroll: { flex: 1, padding: 12 },
+  bubbleWrapper: { marginVertical: 4, flexDirection: 'row' },
+  bubbleLeft: { justifyContent: 'flex-start' },
+  bubbleRight: { justifyContent: 'flex-end' },
+  bubble: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, maxWidth: '80%' },
+  bubbleOther: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.cardBorder },
+  bubbleMe: { backgroundColor: colors.primary },
+  msgText: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  timeText: { color: colors.textMuted, fontSize: 8, marginTop: 2, textAlign: 'right' },
 
-  chatInputBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, padding: 10, borderTopWidth: 1, borderTopColor: colors.cardBorder },
-  chatInput: { flex: 1, backgroundColor: colors.background, borderRadius: 8, color: colors.text, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.cardBorder },
-  sendBtn: { backgroundColor: colors.primary, padding: 10, borderRadius: 8, marginLeft: 8 },
+  audioRow: { flexDirection: 'row', alignItems: 'center' },
+  audioBubbleText: { color: colors.primary, fontSize: 12, fontWeight: '800', marginLeft: 6 },
 
-  convRow: { flexDirection: 'row', alignItems: 'center' },
-  avatar: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.primary },
-  convName: { color: colors.text, fontSize: 14, fontWeight: '800' },
-  convLastMsg: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+  inputBoxRow: { flexDirection: 'row', alignItems: 'center', padding: 8, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.cardBorder },
+  mediaBtn: { padding: 8 },
+  textInput: { flex: 1, backgroundColor: colors.card, borderRadius: 8, color: colors.text, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, borderWidth: 1, borderColor: colors.cardBorder },
+  sendBtn: { backgroundColor: colors.primary, padding: 8, borderRadius: 8, marginLeft: 8 },
 });
