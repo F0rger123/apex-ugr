@@ -1,186 +1,301 @@
 import { create } from 'zustand';
-import { Post, Comment } from '../types/database.types';
+import { supabase } from '../config/supabase';
+import { Database } from '../types/database.types';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
-interface FeedState {
-  posts: Post[];
-  commentsMap: Record<string, Comment[]>;
-  toggleLike: (postId: string) => void;
-  addComment: (postId: string, commentText: string) => void;
-  createPost: (postData: Omit<Post, 'id' | 'created_at' | 'likes_count' | 'comments_count' | 'reposts_count'>) => void;
-}
+type Post = Database['public']['Tables']['posts']['Row'];
+type Comment = Database['public']['Tables']['comments']['Row'];
+type Profile = Database['public']['Tables']['profiles']['Row'];
 
-const INITIAL_POSTS: Post[] = [
-  {
-    id: 'post-1',
-    user_id: '00000000-0000-0000-0000-000000000001',
-    post_type: 'photo',
-    media_url: 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop',
-    caption: 'Dyno tune complete at AMS! Made 1,150WHP on E85 FlexFuel. Staged for Friday night wagers! ⚡🏎️',
-    tags: ['#GTR', '#Alpha12', '#ApexUGR', '#E85'],
-    likes_count: 412,
-    comments_count: 3,
-    reposts_count: 34,
-    created_at: new Date(Date.now() - 3600000 * 3).toISOString(),
-    user_has_liked: true,
-    user_profile: {
-      id: '00000000-0000-0000-0000-000000000001',
-      username: 'phantom_gtr',
-      display_name: 'Ryder Vance',
-      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
-      reputation_level: 'Community Favorite',
-      bio: null,
-      home_city: 'Los Angeles, CA',
-      reputation_points: 4850,
-      credits_balance: 18500,
-      favorite_car_type: 'JDM',
-      racing_specialties: [],
-      stats: { races_entered: 14, races_won: 11, top_speed_recorded: 224, meets_hosted: 5 },
-      achievements: [],
-      is_verified: true,
-      privacy_mode: 'all',
-      visibility_radius_km: 50,
-      created_at: new Date().toISOString()
-    }
-  },
-  {
-    id: 'post-2',
-    user_id: '00000000-0000-0000-0000-000000000002',
-    post_type: 'video',
-    media_url: 'https://images.unsplash.com/photo-1614162692292-7ac56d7f7f1e?q=80&w=800&auto=format&fit=crop',
-    thumbnail_url: 'https://images.unsplash.com/photo-1614162692292-7ac56d7f7f1e?q=80&w=800&auto=format&fit=crop',
-    caption: 'Morning telemetry laps at Homestead Speedway. 911 GT3 RS aero load at 180 MPH is insane! 🏁',
-    tags: ['#GT3RS', '#Weissach', '#TrackDemon'],
-    likes_count: 589,
-    comments_count: 2,
-    reposts_count: 52,
-    created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
-    user_has_liked: false,
-    user_profile: {
-      id: '00000000-0000-0000-0000-000000000002',
-      username: 'apex_gt3',
-      display_name: 'Elena Rostova',
-      avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=400&auto=format&fit=crop',
-      reputation_level: 'Street Specialist',
-      bio: null,
-      home_city: 'Miami, FL',
-      reputation_points: 3920,
-      credits_balance: 14200,
-      favorite_car_type: 'Euro',
-      racing_specialties: [],
-      stats: { races_entered: 10, races_won: 8, top_speed_recorded: 184, meets_hosted: 2 },
-      achievements: [],
-      is_verified: true,
-      privacy_mode: 'all',
-      visibility_radius_km: 50,
-      created_at: new Date().toISOString()
-    }
-  }
-];
-
-const INITIAL_COMMENTS: Record<string, Comment[]> = {
-  'post-1': [
-    {
-      id: 'cmt-1',
-      post_id: 'post-1',
-      user_id: '00000000-0000-0000-0000-000000000002',
-      comment_text: 'That launch boost is terrifying! Let’s set up the roll race challenge.',
-      created_at: new Date(Date.now() - 1800000).toISOString(),
-      user_profile: {
-        id: '00000000-0000-0000-0000-000000000002',
-        username: 'apex_gt3',
-        display_name: 'Elena Rostova',
-        avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=400&auto=format&fit=crop',
-        reputation_level: 'Street Specialist',
-        bio: null, home_city: 'Miami, FL', reputation_points: 3920, credits_balance: 14200, favorite_car_type: 'Euro', racing_specialties: [], stats: { races_entered: 10, races_won: 8, top_speed_recorded: 184, meets_hosted: 2 }, achievements: [], is_verified: true, privacy_mode: 'all', visibility_radius_km: 50, created_at: new Date().toISOString()
-      }
-    },
-    {
-      id: 'cmt-2',
-      post_id: 'post-1',
-      user_id: '00000000-0000-0000-0000-000000000003',
-      comment_text: 'Clean setup! What pressure are you running on the rear slicks?',
-      created_at: new Date(Date.now() - 900000).toISOString(),
-      user_profile: {
-        id: '00000000-0000-0000-0000-000000000003',
-        username: 'boosted_2jz',
-        display_name: 'Kenji Sato',
-        avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=400&auto=format&fit=crop',
-        reputation_level: 'Veteran',
-        bio: null, home_city: 'Tokyo', reputation_points: 2800, credits_balance: 9500, favorite_car_type: 'JDM', racing_specialties: [], stats: { races_entered: 8, races_won: 5, top_speed_recorded: 210, meets_hosted: 1 }, achievements: [], is_verified: true, privacy_mode: 'all', visibility_radius_km: 50, created_at: new Date().toISOString()
-      }
-    }
-  ]
+export type PostWithProfile = Post & {
+  user_profile: Profile;
+  user_has_liked: boolean;
 };
 
-export const useFeedStore = create<FeedState>((set) => ({
-  posts: INITIAL_POSTS,
-  commentsMap: INITIAL_COMMENTS,
+export type CommentWithProfile = Comment & {
+  user_profile: Profile;
+};
 
-  toggleLike: (postId) => {
-    set((state) => ({
-      posts: state.posts.map((p) => {
-        if (p.id === postId) {
-          const liked = !p.user_has_liked;
-          return {
-            ...p,
-            user_has_liked: liked,
-            likes_count: liked ? p.likes_count + 1 : p.likes_count - 1
-          };
+interface FeedState {
+  posts: PostWithProfile[];
+  commentsMap: Record<string, CommentWithProfile[]>;
+  isLoading: boolean;
+  isLoadingMore: boolean;
+  error: string | null;
+  hasMore: boolean;
+  currentPage: number;
+
+  // Feed fetching
+  fetchFeed: (userId: string, tab: 'foryou' | 'following', reset?: boolean) => Promise<void>;
+  fetchComments: (postId: string) => Promise<void>;
+
+  // Interactions
+  toggleLike: (postId: string, userId: string) => Promise<void>;
+  addComment: (postId: string, userId: string, commentText: string) => Promise<{ error: string | null }>;
+  createPost: (
+    userId: string,
+    data: {
+      post_type: 'video' | 'photo' | 'build_update' | 'meet_recap';
+      media_url: string;
+      video_url?: string;
+      thumbnail_url?: string;
+      caption: string;
+      tags: string[];
+      vehicle_id?: string;
+    }
+  ) => Promise<{ error: string | null }>;
+
+  // Media upload
+  uploadPostMedia: (userId: string, uri: string, fileName: string, mimeType: string) => Promise<{ url: string | null; error: string | null }>;
+
+  // Realtime
+  subscribeToFeed: () => RealtimeChannel;
+  unsubscribeFromFeed: () => void;
+  _channel: RealtimeChannel | null;
+}
+
+const PAGE_SIZE = 10;
+
+export const useFeedStore = create<FeedState>((set, get) => ({
+  posts: [],
+  commentsMap: {},
+  isLoading: false,
+  isLoadingMore: false,
+  error: null,
+  hasMore: true,
+  currentPage: 0,
+  _channel: null,
+
+  // ─── Fetch feed ───────────────────────────────────────────────────────────
+  fetchFeed: async (userId, tab, reset = false) => {
+    const page = reset ? 0 : get().currentPage;
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
+    set(reset ? { isLoading: true, error: null } : { isLoadingMore: true });
+
+    try {
+      let query = supabase
+        .from('posts')
+        .select(`
+          *,
+          user_profile:profiles!posts_user_id_fkey(*),
+          user_has_liked:post_likes!left(id)
+        `)
+        .range(from, to)
+        .order('created_at', { ascending: false });
+
+      if (tab === 'following') {
+        // Only show posts from users the current user follows
+        const { data: followData } = await supabase
+          .from('follows')
+          .select('following_id')
+          .eq('follower_id', userId);
+
+        const followingIds = followData?.map((f) => f.following_id) || [];
+        if (followingIds.length === 0) {
+          set({ posts: reset ? [] : get().posts, isLoading: false, isLoadingMore: false, hasMore: false });
+          return;
         }
-        return p;
-      })
-    }));
+        query = query.in('user_id', followingIds);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        set({ error: error.message, isLoading: false, isLoadingMore: false });
+        return;
+      }
+
+      // Normalize the liked status — post_likes returns an array if joined
+      const normalized: PostWithProfile[] = (data || []).map((post: any) => ({
+        ...post,
+        user_has_liked: Array.isArray(post.user_has_liked)
+          ? post.user_has_liked.some((like: any) => like !== null)
+          : !!post.user_has_liked,
+      }));
+
+      set((state) => ({
+        posts: reset ? normalized : [...state.posts, ...normalized],
+        currentPage: page + 1,
+        hasMore: normalized.length === PAGE_SIZE,
+        isLoading: false,
+        isLoadingMore: false,
+      }));
+    } catch (err: any) {
+      set({ error: err?.message || 'Failed to load feed', isLoading: false, isLoadingMore: false });
+    }
   },
 
-  addComment: (postId, commentText) => {
-    const newComment: Comment = {
-      id: `cmt-${Date.now()}`,
-      post_id: postId,
-      user_id: '00000000-0000-0000-0000-000000000001',
-      comment_text: commentText,
-      created_at: new Date().toISOString(),
-      user_profile: {
-        id: '00000000-0000-0000-0000-000000000001',
-        username: 'phantom_gtr',
-        display_name: 'Ryder Vance',
-        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
-        reputation_level: 'Community Favorite',
-        bio: null, home_city: 'Los Angeles, CA', reputation_points: 4850, credits_balance: 18500, favorite_car_type: 'JDM', racing_specialties: [], stats: { races_entered: 14, races_won: 11, top_speed_recorded: 224, meets_hosted: 5 }, achievements: [], is_verified: true, privacy_mode: 'all', visibility_radius_km: 50, created_at: new Date().toISOString()
-      }
-    };
+  // ─── Fetch comments ───────────────────────────────────────────────────────
+  fetchComments: async (postId) => {
+    try {
+      const { data, error } = await supabase
+        .from('comments')
+        .select('*, user_profile:profiles!comments_user_id_fkey(*)')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true });
 
-    set((state) => {
-      const existing = state.commentsMap[postId] || [];
-      return {
+      if (!error && data) {
+        set((state) => ({
+          commentsMap: { ...state.commentsMap, [postId]: data as CommentWithProfile[] },
+        }));
+      }
+    } catch (err) {
+      console.error('[FeedStore] fetchComments error:', err);
+    }
+  },
+
+  // ─── Toggle like ──────────────────────────────────────────────────────────
+  toggleLike: async (postId, userId) => {
+    const post = get().posts.find((p) => p.id === postId);
+    if (!post) return;
+
+    const wasLiked = post.user_has_liked;
+
+    // Optimistic update
+    set((state) => ({
+      posts: state.posts.map((p) =>
+        p.id === postId
+          ? {
+              ...p,
+              user_has_liked: !wasLiked,
+              likes_count: wasLiked ? p.likes_count - 1 : p.likes_count + 1,
+            }
+          : p
+      ),
+    }));
+
+    try {
+      if (wasLiked) {
+        await supabase
+          .from('post_likes')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', userId);
+      } else {
+        await supabase
+          .from('post_likes')
+          .insert({ post_id: postId, user_id: userId });
+      }
+    } catch (err) {
+      // Revert optimistic update on failure
+      set((state) => ({
+        posts: state.posts.map((p) =>
+          p.id === postId
+            ? { ...p, user_has_liked: wasLiked, likes_count: post.likes_count }
+            : p
+        ),
+      }));
+    }
+  },
+
+  // ─── Add comment ──────────────────────────────────────────────────────────
+  addComment: async (postId, userId, commentText) => {
+    try {
+      const { data, error } = await supabase
+        .from('comments')
+        .insert({ post_id: postId, user_id: userId, comment_text: commentText })
+        .select('*, user_profile:profiles!comments_user_id_fkey(*)')
+        .single();
+
+      if (error) return { error: error.message };
+
+      set((state) => ({
         commentsMap: {
           ...state.commentsMap,
-          [postId]: [...existing, newComment]
+          [postId]: [...(state.commentsMap[postId] || []), data as CommentWithProfile],
         },
         posts: state.posts.map((p) =>
           p.id === postId ? { ...p, comments_count: p.comments_count + 1 } : p
-        )
-      };
-    });
+        ),
+      }));
+
+      return { error: null };
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to post comment' };
+    }
   },
 
-  createPost: (postData) => {
-    const newPost: Post = {
-      ...postData,
-      id: `post-${Date.now()}`,
-      likes_count: 0,
-      comments_count: 0,
-      reposts_count: 0,
-      created_at: new Date().toISOString(),
-      user_has_liked: false,
-      user_profile: {
-        id: '00000000-0000-0000-0000-000000000001',
-        username: 'phantom_gtr',
-        display_name: 'Ryder Vance',
-        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
-        reputation_level: 'Community Favorite',
-        bio: null, home_city: 'Los Angeles, CA', reputation_points: 4850, credits_balance: 18500, favorite_car_type: 'JDM', racing_specialties: [], stats: { races_entered: 14, races_won: 11, top_speed_recorded: 224, meets_hosted: 5 }, achievements: [], is_verified: true, privacy_mode: 'all', visibility_radius_km: 50, created_at: new Date().toISOString()
-      }
-    };
-    set((state) => ({ posts: [newPost, ...state.posts] }));
-  }
+  // ─── Create post ──────────────────────────────────────────────────────────
+  createPost: async (userId, postData) => {
+    try {
+      const { data, error } = await supabase
+        .from('posts')
+        .insert({ ...postData, user_id: userId })
+        .select('*, user_profile:profiles!posts_user_id_fkey(*)')
+        .single();
+
+      if (error) return { error: error.message };
+
+      const newPost: PostWithProfile = { ...(data as any), user_has_liked: false };
+
+      set((state) => ({
+        posts: [newPost, ...state.posts],
+      }));
+
+      return { error: null };
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to create post' };
+    }
+  },
+
+  // ─── Upload media to Supabase Storage ─────────────────────────────────────
+  uploadPostMedia: async (userId, uri, fileName, mimeType) => {
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const filePath = `posts/${userId}/${Date.now()}_${fileName}`;
+
+      const { data, error } = await supabase.storage
+        .from('post-media')
+        .upload(filePath, blob, { contentType: mimeType, upsert: false });
+
+      if (error) return { url: null, error: error.message };
+
+      const { data: urlData } = supabase.storage
+        .from('post-media')
+        .getPublicUrl(filePath);
+
+      return { url: urlData.publicUrl, error: null };
+    } catch (err: any) {
+      return { url: null, error: err?.message || 'Upload failed' };
+    }
+  },
+
+  // ─── Realtime subscription ────────────────────────────────────────────────
+  subscribeToFeed: () => {
+    const channel = supabase
+      .channel('feed-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'posts' },
+        async (payload) => {
+          // Fetch the full post with profile when a new post appears
+          const { data } = await supabase
+            .from('posts')
+            .select('*, user_profile:profiles!posts_user_id_fkey(*)')
+            .eq('id', payload.new.id)
+            .single();
+
+          if (data) {
+            set((state) => ({
+              posts: [{ ...(data as any), user_has_liked: false }, ...state.posts],
+            }));
+          }
+        }
+      )
+      .subscribe();
+
+    set({ _channel: channel });
+    return channel;
+  },
+
+  unsubscribeFromFeed: () => {
+    const { _channel } = get();
+    if (_channel) {
+      supabase.removeChannel(_channel);
+      set({ _channel: null });
+    }
+  },
 }));

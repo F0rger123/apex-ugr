@@ -1,181 +1,283 @@
 import { create } from 'zustand';
-import { UserVehicle, VehicleModification } from '../types/database.types';
+import { supabase } from '../config/supabase';
+import { Database } from '../types/database.types';
+
+type UserVehicle = Database['public']['Tables']['vehicles']['Row'];
+type VehicleModification = Database['public']['Tables']['vehicle_modifications']['Row'];
+
+export interface CartItem {
+  product: Database['public']['Tables']['marketplace_products']['Row'];
+  quantity: number;
+}
 
 interface GarageState {
   vehicles: UserVehicle[];
   modifications: VehicleModification[];
-  activeVehicleId: string;
-  addVehicle: (vehicle: Omit<UserVehicle, 'id' | 'created_at'>) => void;
-  setPrimaryVehicle: (id: string) => void;
-  addModification: (mod: Omit<VehicleModification, 'id' | 'created_at'>) => void;
-  deleteModification: (id: string) => void;
+  activeVehicleId: string | null;
+  isLoading: boolean;
+  error: string | null;
+
+  // Data fetching
+  fetchVehicles: (userId: string) => Promise<void>;
+  fetchModifications: (vehicleId: string) => Promise<void>;
+
+  // Vehicle CRUD
+  addVehicle: (vehicle: Database['public']['Tables']['vehicles']['Insert']) => Promise<{ error: string | null; id?: string }>;
+  updateVehicle: (id: string, updates: Database['public']['Tables']['vehicles']['Update']) => Promise<{ error: string | null }>;
+  deleteVehicle: (id: string) => Promise<{ error: string | null }>;
+  setPrimaryVehicle: (vehicleId: string, userId: string) => Promise<void>;
+
+  // Modification CRUD
+  addModification: (mod: Database['public']['Tables']['vehicle_modifications']['Insert']) => Promise<{ error: string | null }>;
+  deleteModification: (id: string) => Promise<{ error: string | null }>;
+
+  // Photo management (Supabase Storage)
+  uploadVehiclePhoto: (vehicleId: string, userId: string, uri: string, fileName: string) => Promise<{ url: string | null; error: string | null }>;
+
+  // Computed helpers
+  setActiveVehicle: (id: string) => void;
   getActiveVehicle: () => UserVehicle | undefined;
   getVehicleModifications: (vehicleId: string) => VehicleModification[];
   getTotalBuildValue: (vehicleId: string) => number;
   getTotalHpGain: (vehicleId: string) => number;
 }
 
-const INITIAL_VEHICLES: UserVehicle[] = [
-  {
-    id: '11111111-1111-1111-1111-111111111111',
-    user_id: '00000000-0000-0000-0000-000000000001',
-    year: 2024,
-    make: 'Nissan',
-    model: 'GT-R',
-    trim: 'Nismo Alpha 12',
-    color: 'Midnight Purple IV',
-    nickname: 'GODZILLA',
-    vin: 'JN1AR3EF9NW104822',
-    engine: '3.8L VR38DETT Twin-Turbo',
-    transmission: '6-Speed Dual Clutch ATTESA E-TS',
-    horsepower: 1150,
-    torque: 980,
-    weight_lbs: 3860,
-    top_speed_mph: 224,
-    quarter_mile_sec: 8.85,
-    zero_to_sixty_sec: 2.05,
-    drivetrain: 'AWD',
-    fuel_type: 'E85 Flex Fuel',
-    photos: [
-      'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop',
-      'https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?q=80&w=800&auto=format&fit=crop'
-    ],
-    video_url: 'https://www.w3schools.com/html/mov_bbb.mp4',
-    sound_clip_url: 'https://actions.google.com/sounds/v1/transports/sports_car_rev.ogg',
-    dyno_chart_url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=800&auto=format&fit=crop',
-    is_primary: true,
-    created_at: new Date().toISOString()
-  },
-  {
-    id: '22222222-2222-2222-2222-222222222222',
-    user_id: '00000000-0000-0000-0000-000000000001',
-    year: 2023,
-    make: 'Porsche',
-    model: '911 GT3 RS',
-    trim: 'Weissach Package',
-    color: 'Lizard Green',
-    nickname: 'VIREN',
-    engine: '4.0L High-Rev Flat-6 NA',
-    transmission: '7-Speed PDK Dual-Clutch',
-    horsepower: 518,
-    torque: 343,
-    weight_lbs: 3197,
-    top_speed_mph: 184,
-    quarter_mile_sec: 10.90,
-    zero_to_sixty_sec: 2.90,
-    drivetrain: 'RWD',
-    fuel_type: '93 Octane / E30',
-    photos: [
-      'https://images.unsplash.com/photo-1614162692292-7ac56d7f7f1e?q=80&w=800&auto=format&fit=crop'
-    ],
-    is_primary: false,
-    created_at: new Date().toISOString()
-  }
-];
-
-const INITIAL_MODIFICATIONS: VehicleModification[] = [
-  {
-    id: 'mod-1',
-    vehicle_id: '11111111-1111-1111-1111-111111111111',
-    category: 'Turbo',
-    brand: 'AMS Performance',
-    part_name: 'Alpha 12 Twin Turbocharger System',
-    price: 18500.00,
-    installation_date: '2025-11-12',
-    notes: 'Billet wheel Garrett dual ball-bearing turbochargers rated for 1,300 HP',
-    hp_gain: 350,
-    torque_gain: 280,
-    purchase_source: 'AMS Performance',
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'mod-2',
-    vehicle_id: '11111111-1111-1111-1111-111111111111',
-    category: 'Exhaust',
-    brand: 'Akrapovič',
-    part_name: 'Titanium Evolution Line Exhaust',
-    price: 8490.00,
-    installation_date: '2025-10-05',
-    notes: 'Full titanium dual cat-back exhaust system with carbon fiber tips',
-    hp_gain: 28,
-    torque_gain: 32,
-    purchase_source: 'Summit Racing',
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'mod-3',
-    vehicle_id: '11111111-1111-1111-1111-111111111111',
-    category: 'Tune',
-    brand: 'Cobb Tuning',
-    part_name: 'Accessport V3 Custom E85 Map',
-    price: 1750.00,
-    installation_date: '2025-11-15',
-    notes: 'Custom dyno tune by Prime Motoring on E85 Flex Fuel',
-    hp_gain: 120,
-    torque_gain: 110,
-    purchase_source: 'Cobb Tuning',
-    created_at: new Date().toISOString()
-  }
-];
-
 export const useGarageStore = create<GarageState>((set, get) => ({
-  vehicles: INITIAL_VEHICLES,
-  modifications: INITIAL_MODIFICATIONS,
-  activeVehicleId: INITIAL_VEHICLES[0].id,
+  vehicles: [],
+  modifications: [],
+  activeVehicleId: null,
+  isLoading: false,
+  error: null,
 
-  addVehicle: (vehicleData) => {
-    const newVehicle: UserVehicle = {
-      ...vehicleData,
-      id: `veh-${Date.now()}`,
-      created_at: new Date().toISOString()
-    };
-    set((state) => ({
-      vehicles: [newVehicle, ...state.vehicles],
-      activeVehicleId: newVehicle.id
-    }));
+  // ─── Fetch user's vehicles ────────────────────────────────────────────────
+  fetchVehicles: async (userId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('*')
+        .eq('user_id', userId)
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        set({ error: error.message, isLoading: false });
+        return;
+      }
+
+      const primary = data.find((v) => v.is_primary) || data[0];
+      set({
+        vehicles: data,
+        activeVehicleId: primary?.id || null,
+        isLoading: false,
+      });
+    } catch (err: any) {
+      set({ error: err?.message || 'Failed to load vehicles', isLoading: false });
+    }
   },
 
-  setPrimaryVehicle: (id) => {
+  // ─── Fetch modifications for a vehicle ────────────────────────────────────
+  fetchModifications: async (vehicleId) => {
+    try {
+      const { data, error } = await supabase
+        .from('vehicle_modifications')
+        .select('*')
+        .eq('vehicle_id', vehicleId)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        // Merge with existing modifications (other vehicles' mods stay)
+        const existing = get().modifications.filter((m) => m.vehicle_id !== vehicleId);
+        set({ modifications: [...existing, ...data] });
+      }
+    } catch (err) {
+      console.error('[GarageStore] fetchModifications error:', err);
+    }
+  },
+
+  // ─── Add vehicle ──────────────────────────────────────────────────────────
+  addVehicle: async (vehicleData) => {
+    set({ isLoading: true });
+    try {
+      const { data, error } = await supabase
+        .from('vehicles')
+        .insert(vehicleData)
+        .select()
+        .single();
+
+      if (error) {
+        set({ isLoading: false });
+        return { error: error.message };
+      }
+
+      set((state) => ({
+        vehicles: [data, ...state.vehicles],
+        activeVehicleId: data.id,
+        isLoading: false,
+      }));
+
+      return { error: null, id: data.id };
+    } catch (err: any) {
+      set({ isLoading: false });
+      return { error: err?.message || 'Failed to add vehicle' };
+    }
+  },
+
+  // ─── Update vehicle ───────────────────────────────────────────────────────
+  updateVehicle: async (id, updates) => {
+    try {
+      const { data, error } = await supabase
+        .from('vehicles')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) return { error: error.message };
+
+      set((state) => ({
+        vehicles: state.vehicles.map((v) => (v.id === id ? data : v)),
+      }));
+
+      return { error: null };
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to update vehicle' };
+    }
+  },
+
+  // ─── Delete vehicle ───────────────────────────────────────────────────────
+  deleteVehicle: async (id) => {
+    try {
+      const { error } = await supabase.from('vehicles').delete().eq('id', id);
+      if (error) return { error: error.message };
+
+      const remaining = get().vehicles.filter((v) => v.id !== id);
+      set({
+        vehicles: remaining,
+        activeVehicleId: remaining[0]?.id || null,
+      });
+
+      return { error: null };
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to delete vehicle' };
+    }
+  },
+
+  // ─── Set primary vehicle (unsets all others) ──────────────────────────────
+  setPrimaryVehicle: async (vehicleId, userId) => {
+    // Unset all primary flags for this user
+    await supabase
+      .from('vehicles')
+      .update({ is_primary: false })
+      .eq('user_id', userId);
+
+    // Set the selected vehicle as primary
+    await supabase
+      .from('vehicles')
+      .update({ is_primary: true })
+      .eq('id', vehicleId);
+
+    // Update local state
     set((state) => ({
       vehicles: state.vehicles.map((v) => ({
         ...v,
-        is_primary: v.id === id
+        is_primary: v.id === vehicleId,
       })),
-      activeVehicleId: id
+      activeVehicleId: vehicleId,
     }));
   },
 
-  addModification: (modData) => {
-    const newMod: VehicleModification = {
-      ...modData,
-      id: `mod-${Date.now()}`,
-      created_at: new Date().toISOString()
-    };
-    set((state) => {
-      const updatedMods = [newMod, ...state.modifications];
-      // Update vehicle horsepower & torque with estimated gain
-      const updatedVehicles = state.vehicles.map((v) => {
-        if (v.id === modData.vehicle_id) {
-          return {
-            ...v,
-            horsepower: v.horsepower + (modData.hp_gain || 0),
-            torque: v.torque + (modData.torque_gain || 0)
-          };
-        }
-        return v;
-      });
-      return {
-        modifications: updatedMods,
-        vehicles: updatedVehicles
-      };
-    });
+  // ─── Add modification ─────────────────────────────────────────────────────
+  addModification: async (modData) => {
+    try {
+      const { data, error } = await supabase
+        .from('vehicle_modifications')
+        .insert(modData)
+        .select()
+        .single();
+
+      if (error) return { error: error.message };
+
+      set((state) => ({
+        modifications: [data, ...state.modifications],
+        // Update vehicle's horsepower/torque figures
+        vehicles: state.vehicles.map((v) => {
+          if (v.id === modData.vehicle_id) {
+            return {
+              ...v,
+              horsepower: v.horsepower + (modData.hp_gain || 0),
+              torque: v.torque + (modData.torque_gain || 0),
+            };
+          }
+          return v;
+        }),
+      }));
+
+      return { error: null };
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to add modification' };
+    }
   },
 
-  deleteModification: (id) => {
-    set((state) => ({
-      modifications: state.modifications.filter((m) => m.id !== id)
-    }));
+  // ─── Delete modification ──────────────────────────────────────────────────
+  deleteModification: async (id) => {
+    try {
+      const mod = get().modifications.find((m) => m.id === id);
+      const { error } = await supabase.from('vehicle_modifications').delete().eq('id', id);
+      if (error) return { error: error.message };
+
+      set((state) => ({
+        modifications: state.modifications.filter((m) => m.id !== id),
+        // Revert HP/torque if we know the mod's gains
+        vehicles: mod
+          ? state.vehicles.map((v) => {
+              if (v.id === mod.vehicle_id) {
+                return {
+                  ...v,
+                  horsepower: v.horsepower - (mod.hp_gain || 0),
+                  torque: v.torque - (mod.torque_gain || 0),
+                };
+              }
+              return v;
+            })
+          : state.vehicles,
+      }));
+
+      return { error: null };
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to delete modification' };
+    }
   },
+
+  // ─── Upload vehicle photo to Supabase Storage ─────────────────────────────
+  uploadVehiclePhoto: async (vehicleId, userId, uri, fileName) => {
+    try {
+      // Fetch the file as blob
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const filePath = `vehicles/${userId}/${vehicleId}/${fileName}`;
+
+      const { data, error } = await supabase.storage
+        .from('vehicle-photos')
+        .upload(filePath, blob, {
+          contentType: blob.type || 'image/jpeg',
+          upsert: false,
+        });
+
+      if (error) return { url: null, error: error.message };
+
+      const { data: urlData } = supabase.storage
+        .from('vehicle-photos')
+        .getPublicUrl(filePath);
+
+      return { url: urlData.publicUrl, error: null };
+    } catch (err: any) {
+      return { url: null, error: err?.message || 'Upload failed' };
+    }
+  },
+
+  // ─── Computed helpers ─────────────────────────────────────────────────────
+  setActiveVehicle: (id) => set({ activeVehicleId: id }),
 
   getActiveVehicle: () => {
     const { vehicles, activeVehicleId } = get();
@@ -187,12 +289,14 @@ export const useGarageStore = create<GarageState>((set, get) => ({
   },
 
   getTotalBuildValue: (vehicleId) => {
-    const mods = get().getVehicleModifications(vehicleId);
-    return mods.reduce((sum, m) => sum + Number(m.price || 0), 0);
+    return get()
+      .getVehicleModifications(vehicleId)
+      .reduce((sum, m) => sum + Number(m.price || 0), 0);
   },
 
   getTotalHpGain: (vehicleId) => {
-    const mods = get().getVehicleModifications(vehicleId);
-    return mods.reduce((sum, m) => sum + Number(m.hp_gain || 0), 0);
-  }
+    return get()
+      .getVehicleModifications(vehicleId)
+      .reduce((sum, m) => sum + Number(m.hp_gain || 0), 0);
+  },
 }));
