@@ -66,7 +66,7 @@ export interface UserVehicle {
 export interface VehicleModification {
   id: string;
   vehicle_id: string;
-  category: 'Intake' | 'Exhaust' | 'Headers' | 'Turbo' | 'Supercharger' | 'Tune' | 'Nitrous' | 'Suspension' | 'Wheels & Tires' | 'Brakes' | 'Lighting' | 'Interior' | 'Exterior' | 'Electronics';
+  category: string;
   brand: string;
   part_name: string;
   price: number;
@@ -120,7 +120,7 @@ export interface MarketplaceProduct {
   brand: string;
   category: string;
   price: number;
-  vendor_name: string;
+  vendor_name: 'AmericanMuscle' | 'eBay Motors' | 'Amazon' | 'Summit Racing' | 'CJ Pony Parts' | 'Tire Rack' | 'AutoZone';
   image_url: string;
   description: string;
   compatible_makes: string[];
@@ -129,6 +129,7 @@ export interface MarketplaceProduct {
   reviews_count: number;
   purchase_url: string;
   in_stock: boolean;
+  hp_gain?: number;
   created_at: string;
 }
 
@@ -174,6 +175,7 @@ export interface Post {
   user_id: string;
   post_type: 'video' | 'photo' | 'build_update' | 'meet_recap';
   media_url: string;
+  video_url?: string;
   thumbnail_url?: string;
   caption: string;
   tags: string[];
@@ -215,29 +217,4 @@ export interface Message {
   media_type?: string;
   created_at: string;
   sender_profile?: Profile;
-}
-
-export interface NotificationItem {
-  id: string;
-  user_id: string;
-  title: string;
-  body: string;
-  type: 'challenge' | 'race_result' | 'message' | 'comment' | 'meet_invite' | 'order_update';
-  target_id?: string;
-  is_read: boolean;
-  created_at: string;
-}
-
-export interface TelemetrySession {
-  current_speed_mph: number;
-  top_speed_mph: number;
-  avg_speed_mph: number;
-  g_force_lateral: number;
-  g_force_longitudinal: number;
-  zero_to_sixty_timer_sec: number;
-  quarter_mile_timer_sec: number;
-  distance_miles: number;
-  session_duration_sec: number;
-  is_active: boolean;
-  speed_history: number[];
 }

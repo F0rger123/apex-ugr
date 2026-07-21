@@ -8,7 +8,7 @@ import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
 import { colors } from '../../config/colors';
-import { Navigation, Shield, Eye, EyeOff, MapPin, Users, Gauge, ChevronRight } from 'lucide-react-native';
+import { Navigation, Shield, Eye, EyeOff, MapPin, Users, Gauge, ChevronRight, MessageSquare, Flag } from 'lucide-react-native';
 
 export const MapScreen = ({ navigation }: any) => {
   const { driversRadar, meets, privacyMode, setPrivacyMode, visibilityRadiusKm } = useMapStore();
@@ -17,9 +17,14 @@ export const MapScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      <ApexHeader onProfilePress={() => navigation.navigate('Profile')} />
+      <ApexHeader
+        showBack
+        title="GPS DRIVER RADAR"
+        onBackPress={() => navigation.goBack()}
+        onProfilePress={() => navigation.navigate('Profile')}
+      />
 
-      {/* Simulated High-Tech Radar Map Display Box */}
+      {/* High-Tech Radar Canvas Engine */}
       <View style={styles.mapCanvasContainer}>
         {/* Radar Map Grid Background */}
         <View style={styles.radarGridBackground}>
@@ -30,7 +35,7 @@ export const MapScreen = ({ navigation }: any) => {
           <View style={styles.radarCrosshairH} />
           <View style={styles.radarCrosshairV} />
 
-          {/* User Marker */}
+          {/* User Marker Center */}
           <View style={styles.userMarkerCenter}>
             <View style={styles.userMarkerPulse} />
             <Text style={styles.userMarkerText}>YOU (1,150 WHP)</Text>
@@ -67,10 +72,10 @@ export const MapScreen = ({ navigation }: any) => {
             <Shield size={12} color={colors.primary} />
             <Text style={styles.privacyText}>RADAR: {privacyMode.toUpperCase()}</Text>
           </View>
-          <MatrixBadge label={`RADIUS: ${visibilityRadiusKm} KM`} variant="silver" size="sm" />
+          <MatrixBadge label={`RANGE: ${visibilityRadiusKm} KM`} variant="silver" size="sm" />
         </View>
 
-        {/* Selected Driver Popup Drawer */}
+        {/* Selected Driver Drawer */}
         {selectedDriver && (
           <GlassCard activeGlow style={styles.driverDrawer}>
             <View style={styles.drawerHeader}>
@@ -85,17 +90,19 @@ export const MapScreen = ({ navigation }: any) => {
 
             <View style={styles.drawerActions}>
               <ApexButton
-                title="CHALLENGE RACER"
+                title="WAGER RACE"
                 variant="primary"
                 size="sm"
                 style={{ flex: 1 }}
+                icon={<Flag size={14} color={colors.background} />}
                 onPress={() => navigation.navigate('CreateChallenge')}
               />
               <ApexButton
-                title="DIRECT MESSAGE"
+                title="MESSAGE"
                 variant="secondary"
                 size="sm"
                 style={{ flex: 1, marginLeft: 8 }}
+                icon={<MessageSquare size={14} color={colors.text} />}
                 onPress={() => navigation.navigate('Messages')}
               />
             </View>
@@ -107,7 +114,7 @@ export const MapScreen = ({ navigation }: any) => {
       <ScrollView style={styles.content}>
         <SectionHeader title="PRIVACY & RADAR CONTROLS" />
         <GlassCard>
-          <Text style={styles.controlSub}>VISIBILITY PREFERENCE</Text>
+          <Text style={styles.controlSub}>RADAR VISIBILITY MODE</Text>
           <View style={styles.privacyModesRow}>
             {(['all', 'friends', 'meet_only', 'invisible'] as const).map((mode) => (
               <TouchableOpacity

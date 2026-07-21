@@ -1,32 +1,44 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '../../stores/authStore';
-import { MatrixBadge } from './MatrixBadge';
 import { colors } from '../../config/colors';
-import { Bell, Shield, Coins, Search } from 'lucide-react-native';
+import { Bell, Coins, ArrowLeft } from 'lucide-react-native';
 
 interface ApexHeaderProps {
   onNotificationPress?: () => void;
   onProfilePress?: () => void;
+  showBack?: boolean;
+  onBackPress?: () => void;
+  title?: string;
 }
 
 export const ApexHeader: React.FC<ApexHeaderProps> = ({
   onNotificationPress,
   onProfilePress,
+  showBack = false,
+  onBackPress,
+  title,
 }) => {
   const { user } = useAuthStore();
 
   return (
     <View style={styles.headerContainer}>
-      {/* App Brand Title */}
-      <View style={styles.brandContainer}>
-        <View style={styles.logoBadge}>
-          <Text style={styles.logoText}>APEX</Text>
+      {/* Left Navigation: Back Arrow or App Brand */}
+      {showBack ? (
+        <TouchableOpacity style={styles.backBtn} onPress={onBackPress}>
+          <ArrowLeft size={20} color={colors.primary} />
+          <Text style={styles.backTitle}>{title || 'BACK'}</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.brandContainer}>
+          <View style={styles.logoBadge}>
+            <Text style={styles.logoText}>APEX</Text>
+          </View>
+          <Text style={styles.brandTitle}>UGR</Text>
         </View>
-        <Text style={styles.brandTitle}>UGR</Text>
-      </View>
+      )}
 
-      {/* Right Controls: Credits & Avatar */}
+      {/* Right Controls: Credits Balance & Avatar */}
       <View style={styles.rightControls}>
         <View style={styles.creditsPill}>
           <Coins size={14} color={colors.warning} />
@@ -42,12 +54,14 @@ export const ApexHeader: React.FC<ApexHeaderProps> = ({
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity style={styles.avatarBtn} onPress={onProfilePress}>
-          <Image
-            source={{ uri: user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop' }}
-            style={styles.avatar}
-          />
-        </TouchableOpacity>
+        {onProfilePress && (
+          <TouchableOpacity style={styles.avatarBtn} onPress={onProfilePress}>
+            <Image
+              source={{ uri: user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop' }}
+              style={styles.avatar}
+            />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -63,6 +77,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: colors.cardBorder,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginLeft: 8,
   },
   brandContainer: {
     flexDirection: 'row',

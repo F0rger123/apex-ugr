@@ -1,15 +1,15 @@
 export const colors = {
   // Primary Matrix Cyber Theme
   primary: '#00FF66',          // Matrix Neon Green
-  primaryGlow: '#00FF6640',      // Neon Green Transparent Glow
+  primaryGlow: 'rgba(0, 255, 102, 0.25)',
   primaryDark: '#00B345',      // Deep Green Accent
-  primaryBg: '#00260F',        // Matrix Dark Tint
+  primaryBg: 'rgba(0, 38, 15, 0.6)',
 
   // Background Base
-  background: '#08090C',       // Jet Obsidian Black
-  surface: '#111319',          // Carbon Surface
-  card: '#161922',             // Dark Glass Card
-  cardBorder: 'rgba(255, 255, 255, 0.08)',
+  background: '#060709',       // Deepest Obsidian Black
+  surface: '#0F1117',          // Carbon Surface
+  card: 'rgba(18, 22, 30, 0.82)',// Dark Glass Card
+  cardBorder: 'rgba(255, 255, 255, 0.09)',
   activeCardBorder: '#00FF66',
 
   // Status & Accents
@@ -25,9 +25,9 @@ export const colors = {
   textMatrix: '#00FF66',       // Glowing readout text
 
   // Glassmorphism overlays
-  glassBg: 'rgba(22, 25, 34, 0.85)',
-  glassHeader: 'rgba(8, 9, 12, 0.90)',
-  overlay: 'rgba(0, 0, 0, 0.75)',
+  glassBg: 'rgba(18, 22, 30, 0.85)',
+  glassHeader: 'rgba(6, 7, 9, 0.92)',
+  overlay: 'rgba(0, 0, 0, 0.85)',
 };
 
 export const theme = {
@@ -45,8 +45,4 @@ export const theme = {
     lg: 18,
     full: 9999,
   },
-  typography: {
-    fontFamilyBold: 'System',
-    fontFamilyNumeric: 'System',
-  }
 };

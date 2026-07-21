@@ -31,7 +31,7 @@ export const DashboardScreen = ({ navigation }: any) => {
     <View style={styles.container}>
       <ApexHeader
         onProfilePress={() => navigation.navigate('Profile')}
-        onNotificationPress={() => navigation.navigate('Notifications')}
+        onNotificationPress={() => navigation.navigate('Profile')}
       />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -39,7 +39,7 @@ export const DashboardScreen = ({ navigation }: any) => {
         <GlassCard activeGlow style={styles.welcomeBanner}>
           <View style={styles.welcomeHeader}>
             <View>
-              <Text style={styles.welcomeSub}>PILOT RECORD</Text>
+              <Text style={styles.welcomeSub}>PILOT RECORD • APEX OS</Text>
               <Text style={styles.welcomeTitle}>{user?.display_name}</Text>
             </View>
             <MatrixBadge label={user?.reputation_level || 'ROOKIE'} variant="green" />
@@ -63,8 +63,8 @@ export const DashboardScreen = ({ navigation }: any) => {
 
         {/* Primary Ride Section */}
         <SectionHeader
-          title="PRIMARY RIDE & BUILD"
-          actionText="VIEW GARAGE"
+          title="PRIMARY RIDE & BUILD SPECS"
+          actionText="GARAGE"
           onActionPress={() => navigation.navigate('Garage')}
         />
         {activeVehicle && (
@@ -77,16 +77,16 @@ export const DashboardScreen = ({ navigation }: any) => {
 
         {/* Telemetry Quick Launch Widget */}
         <SectionHeader
-          title="TELEMETRY HUD"
-          actionText="OPEN TELEMETRY"
+          title="LIVE SENSOR TELEMETRY"
+          actionText="OPEN HUD"
           onActionPress={() => navigation.navigate('Telemetry')}
         />
         <GlassCard style={styles.telemetryWidget}>
           <View style={styles.telemetryRow}>
-            <SpeedometerGauge currentSpeed={currentSpeedMph} size={150} />
+            <SpeedometerGauge currentSpeed={currentSpeedMph} size={140} />
             <View style={styles.telemetryMeta}>
               <Text style={styles.telemetryMetaTitle}>LIVE SENSOR FEED</Text>
-              <Text style={styles.telemetryMetaSub}>GPS Precision: 0.1s</Text>
+              <Text style={styles.telemetryMetaSub}>Device Motion & GPS Active</Text>
               <View style={styles.telemetryPills}>
                 <MatrixBadge label="0-60: 2.05s" variant="green" size="sm" style={{ marginBottom: 4 }} />
                 <MatrixBadge label="1/4 Mi: 8.85s" variant="gold" size="sm" />
@@ -96,7 +96,7 @@ export const DashboardScreen = ({ navigation }: any) => {
                 onPress={() => navigation.navigate('Telemetry')}
               >
                 <Gauge size={14} color={colors.background} />
-                <Text style={styles.telemetryBtnText}>START RUN</Text>
+                <Text style={styles.telemetryBtnText}>START LAUNCH RUN</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -104,7 +104,7 @@ export const DashboardScreen = ({ navigation }: any) => {
 
         {/* Active Race Wagers */}
         <SectionHeader
-          title="ACTIVE RACE WAGERS"
+          title="STAGED RACE WAGERS"
           actionText="RACE HUB"
           onActionPress={() => navigation.navigate('RaceHub')}
         />
@@ -123,8 +123,8 @@ export const DashboardScreen = ({ navigation }: any) => {
         {upcomingMeet && (
           <>
             <SectionHeader
-              title="NEXT NEARBY MEET"
-              actionText="VIEW MEETS"
+              title="NEXT CAR MEET"
+              actionText="CAR MEETS"
               onActionPress={() => navigation.navigate('CarMeets')}
             />
             <GlassCard onPress={() => navigation.navigate('CarMeets')}>
@@ -147,119 +147,26 @@ export const DashboardScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  welcomeBanner: {
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  welcomeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  welcomeSub: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  welcomeTitle: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: '900',
-    marginTop: 2,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  statCol: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  statVal: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  statValGreen: {
-    color: colors.primary,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  statValGold: {
-    color: colors.warning,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  statLab: {
-    color: colors.textMuted,
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    marginTop: 2,
-  },
-  telemetryWidget: {
-    padding: 8,
-  },
-  telemetryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  telemetryMeta: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  telemetryMetaTitle: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  telemetryMetaSub: {
-    color: colors.textMuted,
-    fontSize: 10,
-    marginTop: 2,
-  },
-  telemetryPills: {
-    marginVertical: 8,
-  },
-  telemetryBtn: {
-    backgroundColor: colors.primary,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-  },
-  telemetryBtnText: {
-    color: colors.background,
-    fontSize: 10,
-    fontWeight: '900',
-    marginLeft: 4,
-  },
-  meetTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-    marginTop: 4,
-  },
-  meetLoc: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    marginTop: 4,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
+  content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  welcomeBanner: { marginTop: 8, marginBottom: 8 },
+  welcomeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  welcomeSub: { color: colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  welcomeTitle: { color: colors.text, fontSize: 22, fontWeight: '900', marginTop: 2 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.08)' },
+  statCol: { alignItems: 'center', flex: 1 },
+  statVal: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  statValGreen: { color: colors.primary, fontSize: 15, fontWeight: '900' },
+  statValGold: { color: colors.warning, fontSize: 15, fontWeight: '900' },
+  statLab: { color: colors.textMuted, fontSize: 8, fontWeight: '800', letterSpacing: 0.8, marginTop: 2 },
+  telemetryWidget: { padding: 8 },
+  telemetryRow: { flexDirection: 'row', alignItems: 'center' },
+  telemetryMeta: { flex: 1, marginLeft: 12 },
+  telemetryMetaTitle: { color: colors.text, fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
+  telemetryMetaSub: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
+  telemetryPills: { marginVertical: 8 },
+  telemetryBtn: { backgroundColor: colors.primary, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start' },
+  telemetryBtnText: { color: colors.background, fontSize: 10, fontWeight: '900', marginLeft: 4 },
+  meetTitle: { color: colors.text, fontSize: 14, fontWeight: '800', marginTop: 4 },
+  meetLoc: { color: colors.textSecondary, fontSize: 11, marginTop: 4 },
 });

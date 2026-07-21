@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, ViewStyle, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ViewStyle, TouchableOpacity, Platform } from 'react-native';
 import { colors } from '../../config/colors';
 
 interface GlassCardProps {
@@ -15,7 +15,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   activeGlow = false,
   onPress,
 }) => {
-  const cardStyle: ViewStyle[] = [
+  const cardStyle: any[] = [
     styles.card,
     activeGlow ? styles.activeGlowBorder : styles.standardBorder,
     style || {},
@@ -39,6 +39,20 @@ const styles = StyleSheet.create({
     padding: 16,
     marginVertical: 6,
     overflow: 'hidden',
+    ...Platform.select({
+      web: {
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.45)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 10,
+        elevation: 5,
+      },
+    }),
   },
   standardBorder: {
     borderWidth: 1,
@@ -49,8 +63,8 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
   },
 });

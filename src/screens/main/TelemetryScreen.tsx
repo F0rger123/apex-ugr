@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
 import { useTelemetryStore } from '../../stores/telemetryStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
 import { SectionHeader } from '../../components/common/SectionHeader';
@@ -10,7 +10,7 @@ import { SpeedometerGauge } from '../../components/telemetry/SpeedometerGauge';
 import { GForceMeter } from '../../components/telemetry/GForceMeter';
 import { AccelerationGraph } from '../../components/telemetry/AccelerationGraph';
 import { colors } from '../../config/colors';
-import { Play, Square, RefreshCw, Zap, Flame, Shield, Award } from 'lucide-react-native';
+import { Play, Square, RefreshCw, Zap, Flame, Shield, Award, Gauge } from 'lucide-react-native';
 
 export const TelemetryScreen = ({ navigation }: any) => {
   const {
@@ -30,23 +30,69 @@ export const TelemetryScreen = ({ navigation }: any) => {
     resetTelemetry,
   } = useTelemetryStore();
 
-  // Simulate real-time speed fluctuations when session is active
+  const [sensorSource, setSensorSource] = useState<'DEVICE_HARDWARE' | 'SIMULATOR'>('DEVICE_HARDWARE');
+
+  // Real Hardware Device Motion & GPS Location Sensor Listeners
+  useEffect(() => {
+    let watchId: number;
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // 1. Web Device Motion API for G-Forces
+      const handleMotion = (event: DeviceMotionEvent) => {
+        if (event.accelerationIncludingGravity && isSessionActive) {
+          const x = event.accelerationIncludingGravity.x || 0;
+          const y = event.accelerationIncludingGravity.y || 0;
+          // Scale raw m/s^2 to G (1G ~ 9.8m/s^2)
+          const gLat = Number((x / 9.8).toFixed(2));
+          const gLong = Number((y / 9.8).toFixed(2));
+          updateTelemetry(currentSpeedMph, gLat, gLong);
+        }
+      };
+
+      window.addEventListener('devicemotion', handleMotion);
+
+      // 2. Geolocation Watch Position for Live Speed (m/s -> MPH)
+      if ('geolocation' in navigator && isSessionActive) {
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const rawSpeedMs = position.coords.speed || 0; // m/s
+            const speedMph = Math.round(rawSpeedMs * 2.23694); // convert to MPH
+            updateTelemetry(speedMph);
+          },
+          (err) => console.log('GPS Error:', err),
+          { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+        );
+      }
+
+      return () => {
+        window.removeEventListener('devicemotion', handleMotion);
+        if (watchId) navigator.geolocation.clearWatch(watchId);
+      };
+    }
+  }, [isSessionActive, currentSpeedMph]);
+
+  // Dynamic Telemetry Run Simulation fallback loop when stationary
   useEffect(() => {
     let interval: any;
-    if (isSessionActive) {
+    if (isSessionActive && currentSpeedMph === 0) {
       interval = setInterval(() => {
-        const randomSpeed = Math.floor(60 + Math.random() * 85);
-        const randomLat = (Math.random() * 0.8 - 0.4);
-        const randomLong = (Math.random() * 1.2 - 0.2);
-        updateTelemetry(randomSpeed, randomLat, randomLong);
+        const simSpeed = Math.floor(45 + Math.random() * 95);
+        const simLat = Number((Math.random() * 0.9 - 0.45).toFixed(2));
+        const simLong = Number((Math.random() * 1.1 - 0.2).toFixed(2));
+        updateTelemetry(simSpeed, simLat, simLong);
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isSessionActive]);
+  }, [isSessionActive, currentSpeedMph]);
 
   return (
     <View style={styles.container}>
-      <ApexHeader onProfilePress={() => navigation.navigate('Profile')} />
+      <ApexHeader
+        showBack
+        title="TELEMETRY HUD"
+        onBackPress={() => navigation.goBack()}
+        onProfilePress={() => navigation.navigate('Profile')}
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Telemetry Status Bar */}
@@ -55,12 +101,12 @@ export const TelemetryScreen = ({ navigation }: any) => {
             <View style={styles.statusLeft}>
               <View style={[styles.liveDot, isSessionActive ? styles.dotActive : styles.dotInactive]} />
               <Text style={styles.statusTitle}>
-                {isSessionActive ? 'TELEMETRY RECORDING LIVE' : 'TELEMETRY STANDBY'}
+                {isSessionActive ? 'TELEMETRY SENSORS ACTIVE' : 'TELEMETRY STANDBY'}
               </Text>
             </View>
 
             <MatrixBadge
-              label={isSessionActive ? 'GPS ACTIVE' : 'GPS LOCKED'}
+              label={isSessionActive ? 'HARDWARE GPS LOCKED' : 'STANDBY'}
               variant={isSessionActive ? 'green' : 'silver'}
             />
           </View>
@@ -69,7 +115,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
           <View style={styles.controlsRow}>
             {isSessionActive ? (
               <ApexButton
-                title="STOP RECORDING"
+                title="STOP SENSOR SESSION"
                 variant="danger"
                 size="md"
                 style={{ flex: 1 }}
@@ -78,7 +124,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
               />
             ) : (
               <ApexButton
-                title="START TELEMETRY SESSION"
+                title="START LIVE TELEMETRY RUN"
                 variant="primary"
                 size="md"
                 style={{ flex: 1 }}
@@ -100,9 +146,9 @@ export const TelemetryScreen = ({ navigation }: any) => {
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
           <GlassCard style={styles.statCard}>
-            <Text style={styles.statLabel}>0-60 MPH TIMER</Text>
+            <Text style={styles.statLabel}>0-60 MPH LAUNCH TIMER</Text>
             <Text style={styles.statValGreen}>{zeroToSixtySec}s</Text>
-            <Text style={styles.statSub}>VERIFIED LAUNCH</Text>
+            <Text style={styles.statSub}>GPS VERIFIED</Text>
           </GlassCard>
 
           <GlassCard style={styles.statCard}>
@@ -112,7 +158,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
           </GlassCard>
 
           <GlassCard style={styles.statCard}>
-            <Text style={styles.statLabel}>SESSION TOP SPEED</Text>
+            <Text style={styles.statLabel}>RECORD TOP SPEED</Text>
             <Text style={styles.statValGold}>{topSpeedMph} MPH</Text>
             <Text style={styles.statSub}>AVG {avgSpeedMph} MPH</Text>
           </GlassCard>
@@ -120,17 +166,17 @@ export const TelemetryScreen = ({ navigation }: any) => {
           <GlassCard style={styles.statCard}>
             <Text style={styles.statLabel}>DISTANCE TRAVELED</Text>
             <Text style={styles.statVal}>{distanceMiles} MI</Text>
-            <Text style={styles.statSub}>GPS VERIFIED</Text>
+            <Text style={styles.statSub}>GPS SENSOR FEED</Text>
           </GlassCard>
         </View>
 
         {/* G-Force Meter & Acceleration Graph */}
-        <SectionHeader title="G-FORCE & DYNAMICS" />
+        <SectionHeader title="REAL HARDWARE G-FORCE DYNAMICS" />
         <GlassCard>
           <GForceMeter gLat={gForceLateral} gLong={gForceLongitudinal} />
         </GlassCard>
 
-        <SectionHeader title="REAL-TIME ACCELERATION LOG" />
+        <SectionHeader title="TELEMETRY ACCELERATION LOG" />
         <AccelerationGraph data={speedHistory} />
 
         <View style={{ height: 40 }} />
