@@ -29,8 +29,10 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
       rules,
       route_name: routeName,
       status: 'open',
-      distance_miles: parseFloat(distanceMiles) || 0.25
-    }, user?.id || '00000000-0000-0000-0000-000000000001');
+      distance_miles: parseFloat(distanceMiles) || 0.25,
+      opponent_id: null,
+      winner_id: null
+    } as any, user?.id || '00000000-0000-0000-0000-000000000001');
     navigation.goBack();
   };
 
