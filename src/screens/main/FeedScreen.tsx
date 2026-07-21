@@ -19,9 +19,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFeedStore, PostWithProfile, CommentWithProfile } from '../../stores/feedStore';
 import { useAuthStore } from '../../stores/authStore';
 import { colors } from '../../config/colors';
-import { Heart, MessageSquare, Repeat2, Share2, Plus, Send, X, Volume2, UserPlus, Camera, Film } from 'lucide-react-native';
+import { Heart, MessageSquare, Repeat2, Share2, Plus, Send, X, Volume2, VolumeX, UserPlus, Camera, Film, Play } from 'lucide-react-native';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+const POST_HEIGHT = Platform.OS === 'web' ? SCREEN_HEIGHT - 60 : SCREEN_HEIGHT - 90;
 
 // ─── Single Post Card (full-screen) ──────────────────────────────────────────
 const FeedPostCard = ({
@@ -37,20 +38,33 @@ const FeedPostCard = ({
   onComment: () => void;
   onFollow: () => void;
 }) => {
+  const [isPaused, setIsPaused] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const author = post.user_profile;
 
   return (
-    <View style={styles.postCard}>
+    <View style={[styles.postCard, { height: POST_HEIGHT }]}>
       {/* Media Background */}
       {post.post_type === 'video' ? (
-        <Video
-          source={{ uri: post.media_url }}
-          style={styles.mediaBackground}
-          resizeMode={(ResizeMode?.COVER || 'cover') as any}
-          shouldPlay={isActive}
-          isLooping
-          isMuted={false}
-        />
+        <TouchableOpacity 
+          activeOpacity={1} 
+          style={styles.mediaBackground} 
+          onPress={() => setIsPaused(!isPaused)}
+        >
+          <Video
+            source={{ uri: post.media_url }}
+            style={styles.mediaBackground}
+            resizeMode={(ResizeMode?.COVER || 'cover') as any}
+            shouldPlay={isActive && !isPaused}
+            isLooping
+            isMuted={isMuted}
+          />
+          {isPaused && (
+            <View style={styles.pauseOverlay}>
+              <Play size={64} color="rgba(255,255,255,0.8)" fill="rgba(255,255,255,0.8)" />
+            </View>
+          )}
+        </TouchableOpacity>
       ) : (
         <Image
           source={{ uri: post.thumbnail_url || post.media_url }}
@@ -60,7 +74,7 @@ const FeedPostCard = ({
       )}
 
       {/* Gradient overlay for readability */}
-      <View style={styles.gradientOverlay} />
+      <View style={styles.gradientOverlay} pointerEvents="none" />
 
       {/* Top bar — post type badge + audio pill */}
       <View style={styles.topBar}>
@@ -68,10 +82,10 @@ const FeedPostCard = ({
           <Text style={styles.typeBadgeText}>{post.post_type.toUpperCase().replace('_', ' ')}</Text>
         </View>
         {post.post_type === 'video' && (
-          <View style={styles.audioPill}>
-            <Volume2 size={11} color={colors.primary} />
-            <Text style={styles.audioPillText}>EXHAUST TELEMETRY AUDIO</Text>
-          </View>
+          <TouchableOpacity style={styles.audioPill} onPress={() => setIsMuted(!isMuted)}>
+            {isMuted ? <VolumeX size={11} color={colors.textMuted} /> : <Volume2 size={11} color={colors.primary} />}
+            <Text style={styles.audioPillText}>{isMuted ? 'MUTED' : 'EXHAUST TELEMETRY AUDIO'}</Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -341,13 +355,9 @@ export const FeedScreen = ({ navigation }: any) => {
           data={posts}
           keyExtractor={(item) => item.id}
           renderItem={renderPost}
-          pagingEnabled
-          snapToInterval={SCREEN_HEIGHT}
-          snapToAlignment="start"
-          decelerationRate="fast"
           showsVerticalScrollIndicator={false}
           onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+          viewabilityConfig={{ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }}
           onEndReached={() => {
             if (hasMore && !isLoadingMore && user) {
               fetchFeed(user.id, feedTab);
@@ -502,8 +512,9 @@ const styles = StyleSheet.create({
   loadingFooter: { height: 60, alignItems: 'center', justifyContent: 'center' },
 
   // Full-screen post card
-  postCard: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT, position: 'relative' },
+  postCard: { width: SCREEN_WIDTH, position: 'relative', overflow: 'hidden' },
   mediaBackground: { width: '100%', height: '100%', position: 'absolute' },
+  pauseOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' },
   gradientOverlay: {
     position: 'absolute',
     top: 0,

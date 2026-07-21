@@ -72,41 +72,41 @@ export const LeaderboardsScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </ScrollView>
 
-        {isLoading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
-        ) : (
-          globalLeaderboard.map((user, idx) => (
-            <GlassCard key={user.id} style={styles.boardCard}>
-              {/* Rank Column */}
-              <View style={styles.rankCol}>
-                <Text style={[styles.rankNum, idx < 3 && { color: colors.primary }]}>
-                  {idx + 1}
-                </Text>
-              </View>
-
-              {/* Avatar */}
-              <Image source={{ uri: user.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop' }} style={styles.avatar} />
-
-              {/* Details */}
-              <View style={styles.infoCol}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.displayName}>{user.display_name}</Text>
-                  {idx < 3 && <ShieldCheck size={12} color={colors.primary} />}
-                </View>
-                <Text style={styles.username}>@{user.username}</Text>
-                
-                <View style={styles.badgeRow}>
-                  <MatrixBadge label={user.reputation_level || 'ROOKIE'} size="sm" variant={idx < 3 ? 'green' : 'silver'} />
-                </View>
-              </View>
-
-              {/* Metric Column */}
-              <View style={styles.metricCol}>
-                <Text style={styles.metricVal}>{getMetricText(user)}</Text>
-              </View>
-            </GlassCard>
-          ))
+        {isLoading && (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 10, marginBottom: 10 }} />
         )}
+
+        {globalLeaderboard.map((user, idx) => (
+          <GlassCard key={user.id} style={styles.boardCard}>
+            {/* Rank Column */}
+            <View style={styles.rankCol}>
+              <Text style={[styles.rankNum, idx < 3 && { color: colors.primary }]}>
+                {idx + 1}
+              </Text>
+            </View>
+
+            {/* Avatar */}
+            <Image source={{ uri: user.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop' }} style={styles.avatar} />
+
+            {/* Details */}
+            <View style={styles.infoCol}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.displayName}>{user.display_name}</Text>
+                {idx < 3 && <ShieldCheck size={12} color={colors.primary} />}
+              </View>
+              <Text style={styles.username}>@{user.username}</Text>
+              
+              <View style={styles.badgeRow}>
+                <MatrixBadge label={user.reputation_level || 'ROOKIE'} size="sm" variant={idx < 3 ? 'green' : 'silver'} />
+              </View>
+            </View>
+
+            {/* Metric Column */}
+            <View style={styles.metricCol}>
+              <Text style={styles.metricVal}>{getMetricText(user)}</Text>
+            </View>
+          </GlassCard>
+        ))}
 
         <View style={{ height: 40 }} />
       </ScrollView>

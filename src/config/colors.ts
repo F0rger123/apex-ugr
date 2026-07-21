@@ -6,10 +6,10 @@ export const colors = {
   primaryBg: 'rgba(0, 38, 15, 0.6)',
 
   // Background Base
-  background: '#060709',       // Deepest Obsidian Black
-  surface: '#0F1117',          // Carbon Surface
-  card: 'rgba(18, 22, 30, 0.82)',// Dark Glass Card
-  cardBorder: 'rgba(255, 255, 255, 0.09)',
+  background: '#040508',       // Deeper Obsidian Black
+  surface: '#0A0C11',          // Darker Carbon Surface
+  card: 'rgba(15, 17, 23, 0.4)', // 40% Opacity Glass Card
+  cardBorder: 'rgba(255, 255, 255, 0.08)',
   activeCardBorder: '#00FF66',
 
   // Status & Accents
@@ -25,8 +25,8 @@ export const colors = {
   textMatrix: '#00FF66',       // Glowing readout text
 
   // Glassmorphism overlays
-  glassBg: 'rgba(18, 22, 30, 0.85)',
-  glassHeader: 'rgba(6, 7, 9, 0.92)',
+  glassBg: 'rgba(15, 17, 23, 0.4)',
+  glassHeader: 'rgba(4, 5, 8, 0.85)',
   overlay: 'rgba(0, 0, 0, 0.85)',
 };
 

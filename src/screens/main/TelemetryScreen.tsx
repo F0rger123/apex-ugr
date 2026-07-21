@@ -130,19 +130,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
     }
   }, [isSessionActive, currentSpeedMph]);
 
-  // Dynamic Telemetry Run Simulation fallback loop when stationary
-  useEffect(() => {
-    let interval: any;
-    if (isSessionActive && currentSpeedMph === 0) {
-      interval = setInterval(() => {
-        const simSpeed = Math.floor(45 + Math.random() * 95);
-        const simLat = Number((Math.random() * 0.9 - 0.45).toFixed(2));
-        const simLong = Number((Math.random() * 1.1 - 0.2).toFixed(2));
-        updateTelemetry(simSpeed, simLat, simLong);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isSessionActive, currentSpeedMph]);
+  // Removed Dynamic Telemetry Run Simulation fallback loop
 
   return (
     <View style={styles.container}>

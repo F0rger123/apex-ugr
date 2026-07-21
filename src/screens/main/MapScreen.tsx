@@ -36,9 +36,12 @@ const STATUS_COLORS: Record<string, string> = {
 
 // ─── Web Interactive Map ──────────────────────────────────────────────────
 const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any) => {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [htmlLoaded, setHtmlLoaded] = useState(false);
   const lat = currentLocation?.latitude || 34.0522;
   const lng = currentLocation?.longitude || -118.2437;
 
+  // Static HTML template — only loaded once!
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -60,74 +63,93 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
     <body>
       <div id="map"></div>
       <script>
-        const map = L.map('map', { zoomControl: true }).setView([${lat}, ${lng}], 12);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          maxZoom: 19,
-          attribution: '© OpenStreetMap, © CARTO'
-        }).addTo(map);
+        let map;
+        let markers = {};
+        
+        function initMap(lat, lng) {
+          if (map) return;
+          map = L.map('map', { zoomControl: true }).setView([lat, lng], 12);
+          L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap, © CARTO'
+          }).addTo(map);
+          window.parent.postMessage({ type: 'MAP_READY' }, '*');
+        }
 
-        // You marker
-        const youIcon = L.divIcon({
-          html: '<div style="width:20px;height:20px;background:#00FF66;border-radius:50%;border:3px solid #fff;box-shadow:0 0 15px #00FF66;"></div>',
-          className: ''
+        window.addEventListener('message', function(event) {
+          const data = event.data;
+          
+          if (data.type === 'INIT') {
+            initMap(data.lat, data.lng);
+          } else if (data.type === 'UPDATE' && map) {
+            // Update Your Location
+            if (data.you) {
+              if (markers['you']) map.removeLayer(markers['you']);
+              const youIcon = L.divIcon({ html: '<div style="width:20px;height:20px;background:#00FF66;border-radius:50%;border:3px solid #fff;box-shadow:0 0 15px #00FF66;"></div>', className: '' });
+              markers['you'] = L.marker([data.you.lat, data.you.lng], { icon: youIcon }).addTo(map)
+                .bindPopup('<div class="racer-tag">YOU (LIVE PILOT)</div><div class="racer-sub">Telemetry Active</div>');
+              map.panTo([data.you.lat, data.you.lng]); // Follow user
+            }
+
+            // Update Drivers (clear old ones first)
+            Object.keys(markers).forEach(id => { if (id !== 'you' && !id.startsWith('meet_')) map.removeLayer(markers[id]); });
+            data.drivers.forEach(d => {
+              const icon = L.divIcon({ html: '<div style="width:16px;height:16px;background:#FFB800;border-radius:50%;border:2px solid #000;box-shadow:0 0 10px #FFB800;"></div>', className: '' });
+              markers[d.id] = L.marker([d.lat, d.lng], { icon: icon }).addTo(map)
+                .bindPopup('<div class="racer-tag">@' + d.name + '</div><div class="racer-sub">' + d.car + '</div><div class="speed-tag">' + d.speed + ' MPH • ' + d.status + '</div>');
+            });
+
+            // Update Meets
+            Object.keys(markers).forEach(id => { if (id.startsWith('meet_')) map.removeLayer(markers[id]); });
+            data.meets.forEach(m => {
+              const icon = L.divIcon({ html: '<div style="width:24px;height:24px;background:#FF0055;border-radius:6px;border:2px solid #fff;box-shadow:0 0 12px #FF0055;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:bold;">MEET</div>', className: '' });
+              markers['meet_'+m.id] = L.marker([m.lat, m.lng], { icon: icon }).addTo(map)
+                .bindPopup('<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div><div class="racer-sub">' + m.location + '</div>');
+            });
+          }
         });
-        L.marker([${lat}, ${lng}], { icon: youIcon }).addTo(map).bindPopup('<div class="racer-tag">YOU (LIVE PILOT)</div><div class="racer-sub">Telemetry Active</div>');
-
-        // Driver markers
-        const drivers = ${JSON.stringify(
-          driversNearby.map((d: any) => ({
-            lat: d.latitude,
-            lng: d.longitude,
-            name: d.profile?.username || 'Racer',
-            speed: d.speed_mph,
-            status: d.status,
-            car: d.vehicle ? `${d.vehicle.year} ${d.vehicle.make} ${d.vehicle.model}` : 'Tuned Vehicle'
-          }))
-        )};
-
-        drivers.forEach(d => {
-          const icon = L.divIcon({
-            html: '<div style="width:16px;height:16px;background:#FFB800;border-radius:50%;border:2px solid #000;box-shadow:0 0 10px #FFB800;"></div>',
-            className: ''
-          });
-          L.marker([d.lat, d.lng], { icon: icon }).addTo(map)
-            .bindPopup('<div class="racer-tag">@' + d.name + '</div><div class="racer-sub">' + d.car + '</div><div class="speed-tag">' + d.speed + ' MPH • ' + d.status + '</div>');
-        });
-
-        // Car meets markers
-        const meets = ${JSON.stringify(
-          meets.map((m: any) => ({
-            lat: m.latitude,
-            lng: m.longitude,
-            title: m.title,
-            location: m.location_name
-          }))
-        )};
-
-        meets.forEach(m => {
-          const icon = L.divIcon({
-            html: '<div style="width:24px;height:24px;background:#FF0055;border-radius:6px;border:2px solid #fff;box-shadow:0 0 12px #FF0055;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:bold;">MEET</div>',
-            className: ''
-          });
-          L.marker([m.lat, m.lng], { icon: icon }).addTo(map)
-            .bindPopup('<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div><div class="racer-sub">' + m.location + '</div>');
-        });
+        
+        // Initialize immediately if lat/lng available
+        initMap(${lat}, ${lng});
       </script>
     </body>
     </html>
   `;
 
+  // Send updates to iframe when data changes
+  useEffect(() => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      const message = {
+        type: 'UPDATE',
+        you: currentLocation ? { lat: currentLocation.latitude, lng: currentLocation.longitude } : null,
+        drivers: driversNearby.map((d: any) => ({
+          id: d.id, lat: d.latitude, lng: d.longitude,
+          name: d.profile?.username || 'Racer', speed: d.speed_mph, status: d.status,
+          car: d.vehicle ? `${d.vehicle.year} ${d.vehicle.make} ${d.vehicle.model}` : 'Tuned Vehicle'
+        })),
+        meets: meets.map((m: any) => ({
+          id: m.id, lat: m.latitude, lng: m.longitude,
+          title: m.title, location: m.location_name
+        }))
+      };
+      // For cross-origin safety in webviews, use '*' in this specific constrained environment,
+      // though typically you'd restrict this to window.location.origin
+      iframeRef.current.contentWindow.postMessage(message, '*');
+    }
+  }, [currentLocation, driversNearby, meets]);
+
   return (
     <View style={{ flex: 1, minHeight: 380, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: colors.cardBorder }}>
       {Platform.OS === 'web' ? (
         <iframe
+          ref={iframeRef}
           srcDoc={htmlContent}
           style={{ width: '100%', height: '100%', border: 'none' }}
           title="Apex UGR Radar Map"
         />
       ) : (
         <View style={styles.webRadarContainer}>
-          <Text style={{ color: colors.textMuted }}>Map Loading...</Text>
+          <Text style={{ color: colors.textMuted }}>Native map enabled below.</Text>
         </View>
       )}
     </View>
@@ -274,7 +296,7 @@ export const MapScreen = ({ navigation }: any) => {
           <View style={styles.privacyChip}>
             <Shield size={11} color={colors.primary} />
             <Text style={styles.privacyChipText}>
-              {privacyMode === 'invisible' ? '⛔ INVISIBLE' : `📡 ${privacyMode.toUpperCase()}`}
+              {privacyMode === 'invisible' ? 'INVISIBLE' : `${privacyMode.toUpperCase()}`}
             </Text>
           </View>
           <View style={styles.locationChip}>
