@@ -8,47 +8,40 @@ import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
 import { VehicleCard } from '../../components/garage/VehicleCard';
 import { colors } from '../../config/colors';
-import { Plus, Car, Wrench, Shield, Check, X } from 'lucide-react-native';
+import { Car, Plus, Shield, Flame, Wrench, X } from 'lucide-react-native';
 
 export const GarageScreen = ({ navigation }: any) => {
-  const { vehicles, setPrimaryVehicle, getTotalBuildValue, getTotalHpGain, addVehicle } = useGarageStore();
-  const [modalVisible, setModalVisible] = useState(false);
+  const { vehicles, activeVehicleId, setActiveVehicle, getTotalBuildValue, addVehicle } = useGarageStore();
 
-  // Form State for Adding Vehicle
+  const [modalVisible, setModalVisible] = useState(false);
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
   const [year, setYear] = useState('2024');
-  const [trim, setTrim] = useState('');
   const [engine, setEngine] = useState('');
-  const [transmission, setTransmission] = useState('');
-  const [horsepower, setHorsepower] = useState('');
-  const [torque, setTorque] = useState('');
-  const [drivetrain, setDrivetrain] = useState<'AWD' | 'RWD' | 'FWD'>('AWD');
+  const [hp, setHp] = useState('');
+  const [topSpeed, setTopSpeed] = useState('');
 
-  const handleAddVehicle = () => {
-    if (!make || !model || !horsepower) return;
+  const handleCreateVehicle = () => {
+    if (!make || !model) return;
     addVehicle({
-      user_id: '00000000-0000-0000-0000-000000000001',
       year: parseInt(year) || 2024,
       make,
       model,
-      trim: trim || undefined,
-      color: 'Custom Stealth',
-      nickname: model.toUpperCase(),
-      engine: engine || 'Twin-Turbo V6',
-      transmission: transmission || 'Sequential Dual Clutch',
-      horsepower: parseInt(horsepower) || 600,
-      torque: parseInt(torque) || 550,
-      weight_lbs: 3500,
-      top_speed_mph: 190,
-      zero_to_sixty_sec: 2.8,
-      drivetrain,
-      fuel_type: 'E85 Flex Fuel',
+      trim: 'Track Edition',
+      color: 'Carbon Obsidian',
+      engine: engine || '3.8L Twin-Turbo',
+      transmission: '7-Speed Dual-Clutch',
+      horsepower: parseInt(hp) || 750,
+      torque: 700,
+      weight_lbs: 3800,
+      top_speed_mph: parseInt(topSpeed) || 205,
+      drivetrain: 'AWD',
+      fuel_type: 'E85',
       photos: ['https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop'],
-      is_primary: false
+      is_primary: false,
     });
     setModalVisible(false);
-    setMake(''); setModel(''); setHorsepower('');
+    setMake(''); setModel(''); setEngine(''); setHp('');
   };
 
   return (
@@ -56,58 +49,44 @@ export const GarageScreen = ({ navigation }: any) => {
       <ApexHeader onProfilePress={() => navigation.navigate('Profile')} />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Garage Summary Header */}
-        <View style={styles.summaryBar}>
+        {/* Header Title */}
+        <View style={styles.topBar}>
           <View>
-            <Text style={styles.summaryTitle}>DIGITAL GARAGE</Text>
-            <Text style={styles.summarySub}>{vehicles.length} VEHICLES LOGGED</Text>
+            <Text style={styles.title}>PILOT GARAGE</Text>
+            <Text style={styles.subTitle}>VEHICLE FLEET • AFTERMARKET SPECS</Text>
           </View>
 
           <ApexButton
-            title="ADD RIDE"
+            title="ADD VEHICLE"
             variant="primary"
             size="sm"
             icon={<Plus size={14} color={colors.background} />}
-            onPress={() => setModalVisible(true)}
+            onPress={() => setModalVisible(false)}
           />
         </View>
 
-        {/* Vehicles List */}
-        <SectionHeader title="FLEET & VEHICLES" />
+        {/* Vehicles Shelf List */}
+        <SectionHeader title={`REGISTERED VEHICLES (${vehicles.length})`} />
         {vehicles.map((v) => {
+          const isPrimary = v.id === activeVehicleId;
           const buildVal = getTotalBuildValue(v.id);
-          const hpGain = getTotalHpGain(v.id);
 
           return (
-            <View key={v.id} style={styles.vehicleWrapper}>
+            <View key={v.id} style={{ marginBottom: 8 }}>
               <VehicleCard
                 vehicle={v}
                 totalBuildValue={buildVal}
                 onPress={() => navigation.navigate('VehicleDetail', { vehicleId: v.id })}
               />
 
-              {/* Quick Action Strip */}
-              <View style={styles.actionStrip}>
-                {!v.is_primary && (
-                  <TouchableOpacity
-                    style={styles.setPrimaryBtn}
-                    onPress={() => setPrimaryVehicle(v.id)}
-                  >
-                    <Check size={12} color={colors.primary} />
-                    <Text style={styles.setPrimaryText}>SET PRIMARY</Text>
-                  </TouchableOpacity>
-                )}
-                {hpGain > 0 && (
-                  <MatrixBadge label={`BUILD HP GAIN: +${hpGain} WHP`} variant="green" size="sm" />
-                )}
+              {!isPrimary && (
                 <TouchableOpacity
-                  style={styles.viewBuildBtn}
-                  onPress={() => navigation.navigate('VehicleDetail', { vehicleId: v.id })}
+                  style={styles.setPrimaryBtn}
+                  onPress={() => setActiveVehicle(v.id)}
                 >
-                  <Wrench size={12} color={colors.textSecondary} />
-                  <Text style={styles.viewBuildText}>MOD LOGS</Text>
+                  <Text style={styles.setPrimaryText}>SET AS ACTIVE RIDE</Text>
                 </TouchableOpacity>
-              </View>
+              )}
             </View>
           );
         })}
@@ -120,46 +99,33 @@ export const GarageScreen = ({ navigation }: any) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>LOG NEW VEHICLE</Text>
+              <Text style={styles.modalTitle}>REGISTER NEW VEHICLE</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
                 <X size={20} color={colors.text} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 420 }}>
+            <ScrollView style={{ maxHeight: 380 }}>
+              <Text style={styles.label}>MAKE (e.g. Porsche, Nissan, Ford)</Text>
+              <TextInput style={styles.input} value={make} onChangeText={setMake} placeholder="e.g. Porsche" placeholderTextColor={colors.textMuted} />
+
+              <Text style={styles.label}>MODEL (e.g. 911 GT3 RS, Supra)</Text>
+              <TextInput style={styles.input} value={model} onChangeText={setModel} placeholder="e.g. 911 GT3 RS" placeholderTextColor={colors.textMuted} />
+
               <Text style={styles.label}>YEAR</Text>
-              <TextInput style={styles.input} value={year} onChangeText={setYear} keyboardType="numeric" />
+              <TextInput style={styles.input} value={year} onChangeText={setYear} keyboardType="numeric" placeholder="2024" placeholderTextColor={colors.textMuted} />
 
-              <Text style={styles.label}>MAKE (e.g. Nissan, Porsche, Toyota)</Text>
-              <TextInput style={styles.input} value={make} onChangeText={setMake} placeholder="e.g. Nissan" placeholderTextColor={colors.textMuted} />
-
-              <Text style={styles.label}>MODEL (e.g. GT-R, 911 GT3, Supra)</Text>
-              <TextInput style={styles.input} value={model} onChangeText={setModel} placeholder="e.g. GT-R" placeholderTextColor={colors.textMuted} />
-
-              <Text style={styles.label}>TRIM (optional)</Text>
-              <TextInput style={styles.input} value={trim} onChangeText={setTrim} placeholder="e.g. Nismo / Track Edition" placeholderTextColor={colors.textMuted} />
+              <Text style={styles.label}>ENGINE</Text>
+              <TextInput style={styles.input} value={engine} onChangeText={setEngine} placeholder="e.g. 4.0L High-RPM Flat-6" placeholderTextColor={colors.textMuted} />
 
               <Text style={styles.label}>HORSEPOWER (WHP)</Text>
-              <TextInput style={styles.input} value={horsepower} onChangeText={setHorsepower} keyboardType="numeric" placeholder="e.g. 850" placeholderTextColor={colors.textMuted} />
+              <TextInput style={styles.input} value={hp} onChangeText={setHp} keyboardType="numeric" placeholder="e.g. 750" placeholderTextColor={colors.textMuted} />
 
-              <Text style={styles.label}>TORQUE (LB-FT)</Text>
-              <TextInput style={styles.input} value={torque} onChangeText={setTorque} keyboardType="numeric" placeholder="e.g. 780" placeholderTextColor={colors.textMuted} />
-
-              <Text style={styles.label}>DRIVETRAIN</Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginVertical: 8 }}>
-                {(['AWD', 'RWD', 'FWD'] as const).map((d) => (
-                  <TouchableOpacity
-                    key={d}
-                    style={[styles.driveBtn, drivetrain === d && styles.driveBtnActive]}
-                    onPress={() => setDrivetrain(d)}
-                  >
-                    <Text style={[styles.driveBtnText, drivetrain === d && { color: colors.background }]}>{d}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <Text style={styles.label}>TOP SPEED (MPH)</Text>
+              <TextInput style={styles.input} value={topSpeed} onChangeText={setTopSpeed} keyboardType="numeric" placeholder="e.g. 210" placeholderTextColor={colors.textMuted} />
             </ScrollView>
 
-            <ApexButton title="SAVE TO GARAGE" onPress={handleAddVehicle} style={{ marginTop: 12 }} />
+            <ApexButton title="SAVE VEHICLE TO GARAGE" onPress={handleCreateVehicle} style={{ marginTop: 12 }} />
           </View>
         </View>
       </Modal>
@@ -170,38 +136,16 @@ export const GarageScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
-  summaryBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: 12,
-  },
-  summaryTitle: { color: colors.text, fontSize: 18, fontWeight: '900', letterSpacing: 1 },
-  summarySub: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
-  vehicleWrapper: { marginBottom: 16 },
-  actionStrip: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    padding: 8,
-    borderRadius: 8,
-    marginTop: -10,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  setPrimaryBtn: { flexDirection: 'row', alignItems: 'center' },
-  setPrimaryText: { color: colors.primary, fontSize: 10, fontWeight: '900', marginLeft: 4 },
-  viewBuildBtn: { flexDirection: 'row', alignItems: 'center' },
-  viewBuildText: { color: colors.textSecondary, fontSize: 10, fontWeight: '800', marginLeft: 4 },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 12 },
+  title: { color: colors.text, fontSize: 18, fontWeight: '900', letterSpacing: 1 },
+  subTitle: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
+  setPrimaryBtn: { backgroundColor: 'rgba(0, 255, 102, 0.1)', borderColor: 'rgba(0, 255, 102, 0.3)', borderWidth: 1, paddingVertical: 6, borderRadius: 8, alignItems: 'center', marginTop: -4, marginBottom: 8 },
+  setPrimaryText: { color: colors.primary, fontSize: 9, fontWeight: '900' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 20 },
   modalCard: { backgroundColor: colors.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.primary },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   modalTitle: { color: colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
   label: { color: colors.textMuted, fontSize: 10, fontWeight: '800', marginTop: 10, marginBottom: 4 },
   input: { backgroundColor: colors.surface, borderRadius: 8, color: colors.text, padding: 10, fontSize: 14, borderWidth: 1, borderColor: colors.cardBorder },
-  driveBtn: { flex: 1, paddingVertical: 8, backgroundColor: colors.surface, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: colors.cardBorder },
-  driveBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  driveBtnText: { color: colors.text, fontSize: 12, fontWeight: '900' },
 });
