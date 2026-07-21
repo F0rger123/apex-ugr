@@ -8,8 +8,10 @@ import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ProductCard } from '../../components/marketplace/ProductCard';
 import { OrderTracker } from '../../components/marketplace/OrderTracker';
+import { PriceComparisonModal } from '../../components/marketplace/PriceComparisonModal';
+import { MarketplaceProduct } from '../../types/database.types';
 import { colors } from '../../config/colors';
-import { ShoppingCart, Search, Filter, DollarSign, SlidersHorizontal } from 'lucide-react-native';
+import { ShoppingCart, Search, Filter, DollarSign, SlidersHorizontal, Tag } from 'lucide-react-native';
 
 export const MarketplaceScreen = ({ navigation }: any) => {
   const {
@@ -35,6 +37,7 @@ export const MarketplaceScreen = ({ navigation }: any) => {
   const [activeTab, setActiveTab] = useState<'catalog' | 'orders'>('catalog');
   const [filterByGarage, setFilterByGarage] = useState(false);
   const [showFilterDrawer, setShowFilterDrawer] = useState(false);
+  const [selectedCompareProduct, setSelectedCompareProduct] = useState<MarketplaceProduct | null>(null);
 
   const products = getFilteredProducts(
     filterByGarage ? activeVehicle?.make : undefined,
@@ -173,15 +176,23 @@ export const MarketplaceScreen = ({ navigation }: any) => {
                 </GlassCard>
               ) : (
                 products.map((p) => (
-                  <ProductCard
-                    key={p.id}
-                    product={p}
-                    activeVehicleName={activeVehicle ? `${activeVehicle.make} ${activeVehicle.model}` : undefined}
-                    isWishlisted={wishlistIds.includes(p.id)}
-                    onToggleWishlist={() => toggleWishlist(p.id)}
-                    onPress={() => navigation.navigate('ProductDetail', { productId: p.id })}
-                    onAddToCart={() => addToCart(p)}
-                  />
+                  <View key={p.id} style={{ marginBottom: 4 }}>
+                    <ProductCard
+                      product={p}
+                      activeVehicleName={activeVehicle ? `${activeVehicle.make} ${activeVehicle.model}` : undefined}
+                      isWishlisted={wishlistIds.includes(p.id)}
+                      onToggleWishlist={() => toggleWishlist(p.id)}
+                      onPress={() => setSelectedCompareProduct(p)}
+                      onAddToCart={() => addToCart(p)}
+                    />
+                    <TouchableOpacity
+                      style={styles.compareLinkBar}
+                      onPress={() => setSelectedCompareProduct(p)}
+                    >
+                      <Tag size={10} color={colors.primary} />
+                      <Text style={styles.compareLinkText}>COMPARE PRICES ACROSS 7 VENDORS</Text>
+                    </TouchableOpacity>
+                  </View>
                 ))
               )}
             </View>
@@ -198,6 +209,12 @@ export const MarketplaceScreen = ({ navigation }: any) => {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <PriceComparisonModal
+        visible={!!selectedCompareProduct}
+        product={selectedCompareProduct}
+        onClose={() => setSelectedCompareProduct(null)}
+      />
     </View>
   );
 };
@@ -241,4 +258,6 @@ const styles = StyleSheet.create({
   catPillText: { color: colors.text, fontSize: 11, fontWeight: '800' },
 
   productList: { marginTop: 8 },
+  compareLinkBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,255,102,0.06)', paddingVertical: 4, borderRadius: 6, marginBottom: 12, marginTop: -4, borderWidth: 1, borderColor: 'rgba(0,255,102,0.2)' },
+  compareLinkText: { color: colors.primary, fontSize: 9, fontWeight: '900', marginLeft: 4, letterSpacing: 0.5 },
 });

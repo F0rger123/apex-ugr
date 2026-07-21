@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '../../stores/authStore';
 import { useGarageStore } from '../../stores/garageStore';
@@ -7,16 +7,24 @@ import { SectionHeader } from '../../components/common/SectionHeader';
 import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
+import { ReportUserModal } from '../../components/common/ReportUserModal';
 import { colors } from '../../config/colors';
-import { ShieldCheck, Award, Coins, MapPin, Settings, LogOut, CheckCircle2 } from 'lucide-react-native';
+import { ShieldCheck, Award, Coins, MapPin, Settings, LogOut, CheckCircle2, ShieldAlert, UserCheck } from 'lucide-react-native';
 
 export const ProfileScreen = ({ navigation }: any) => {
   const { user, logout, togglePrivacyMode } = useAuthStore();
   const { vehicles } = useGarageStore();
 
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+
   return (
     <View style={styles.container}>
-      <ApexHeader />
+      <ApexHeader
+        showBack
+        title="PILOT PROFILE"
+        onBackPress={() => navigation.goBack()}
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* User Hero Banner */}
@@ -34,9 +42,33 @@ export const ProfileScreen = ({ navigation }: any) => {
               <Text style={styles.username}>@{user?.username}</Text>
               <Text style={styles.homeCity}>📍 {user?.home_city}</Text>
             </View>
+
+            <TouchableOpacity style={styles.reportBtn} onPress={() => setShowReportModal(true)}>
+              <ShieldAlert size={18} color={colors.textMuted} />
+            </TouchableOpacity>
           </View>
 
           <Text style={styles.bioText}>{user?.bio}</Text>
+
+          {/* Followers / Following Row */}
+          <View style={styles.followStatsRow}>
+            <View style={styles.followCol}>
+              <Text style={styles.followVal}>1,420</Text>
+              <Text style={styles.followLab}>FOLLOWERS</Text>
+            </View>
+            <View style={styles.followCol}>
+              <Text style={styles.followVal}>389</Text>
+              <Text style={styles.followLab}>FOLLOWING</Text>
+            </View>
+
+            <ApexButton
+              title={isFollowing ? "FOLLOWING" : "FOLLOW RACER"}
+              variant={isFollowing ? "secondary" : "primary"}
+              size="sm"
+              icon={isFollowing ? <UserCheck size={14} color={colors.primary} /> : undefined}
+              onPress={() => setIsFollowing(!isFollowing)}
+            />
+          </View>
 
           {/* Specialties Pills */}
           <View style={styles.specialtiesRow}>
@@ -102,6 +134,14 @@ export const ProfileScreen = ({ navigation }: any) => {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <ReportUserModal
+        visible={showReportModal}
+        targetUsername={user?.username}
+        onClose={() => setShowReportModal(false)}
+        onSubmitReport={(reason) => console.log('Report submitted:', reason)}
+        onBlockUser={() => setShowReportModal(false)}
+      />
     </View>
   );
 };
@@ -115,7 +155,14 @@ const styles = StyleSheet.create({
   displayName: { color: colors.text, fontSize: 18, fontWeight: '900' },
   username: { color: colors.primary, fontSize: 12, fontWeight: '800' },
   homeCity: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  reportBtn: { padding: 8 },
   bioText: { color: colors.textSecondary, fontSize: 12, marginTop: 10, lineHeight: 16 },
+
+  followStatsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  followCol: { alignItems: 'center' },
+  followVal: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  followLab: { color: colors.textMuted, fontSize: 9, fontWeight: '800' },
+
   specialtiesRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
 
   statsRow: { flexDirection: 'row', gap: 10, marginVertical: 4 },

@@ -8,6 +8,7 @@ import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
 import { RaceChallengeCard } from '../../components/race/RaceChallengeCard';
+import { RaceReplayViewer } from '../../components/race/RaceReplayViewer';
 import { colors } from '../../config/colors';
 import { Flag, Plus, ShieldAlert, Check, X, Trophy, Video } from 'lucide-react-native';
 
@@ -21,7 +22,12 @@ export const RaceHubScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      <ApexHeader onProfilePress={() => navigation.navigate('Profile')} />
+      <ApexHeader
+        showBack
+        title="RACE HUB & WAGERS"
+        onBackPress={() => navigation.goBack()}
+        onProfilePress={() => navigation.navigate('Profile')}
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Race Hub Title Bar */}
@@ -91,10 +97,13 @@ export const RaceHubScreen = ({ navigation }: any) => {
                 <Text style={styles.disputeReasonLabel}>REASON FOR APPEAL:</Text>
                 <Text style={styles.disputeReasonText}>{selectedDispute.reason}</Text>
 
-                <View style={styles.videoPreviewBox}>
-                  <Video size={32} color={colors.primary} />
-                  <Text style={styles.videoPreviewText}>RACE TELEMETRY VIDEO LOG PROOF</Text>
-                </View>
+                {/* Race Telemetry Replay Component */}
+                <RaceReplayViewer
+                  challengerName="Ryder Vance (GT-R)"
+                  opponentName="Kenji Sato (Supra 2JZ)"
+                  challengerFinishMs={selectedDispute.gps_log_data.finish_time_ms || 8850}
+                  opponentFinishMs={10420}
+                />
 
                 <View style={styles.logBox}>
                   <Text style={styles.logTitle}>GPS SENSOR LOGS</Text>
@@ -151,8 +160,6 @@ const styles = StyleSheet.create({
   modalTitle: { color: colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
   disputeReasonLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
   disputeReasonText: { color: colors.text, fontSize: 13, fontWeight: '700', marginVertical: 4 },
-  videoPreviewBox: { height: 140, backgroundColor: colors.surface, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.cardBorder, marginVertical: 10 },
-  videoPreviewText: { color: colors.primary, fontSize: 11, fontWeight: '800', marginTop: 6 },
   logBox: { backgroundColor: colors.surface, padding: 10, borderRadius: 8, marginVertical: 6 },
   logTitle: { color: colors.textMuted, fontSize: 9, fontWeight: '800' },
   logText: { color: colors.text, fontSize: 11, fontWeight: '800', marginTop: 2 },

@@ -7,8 +7,10 @@ import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
 import { ModificationItem } from '../../components/garage/ModificationItem';
+import { DynoChart } from '../../components/garage/DynoChart';
+import { playEngineSound } from '../../utils/soundSynthesizer';
 import { colors } from '../../config/colors';
-import { Wrench, Plus, ArrowLeft, Flame, Gauge, DollarSign, Activity, X } from 'lucide-react-native';
+import { Wrench, Plus, ArrowLeft, Flame, Gauge, DollarSign, Activity, X, Volume2 } from 'lucide-react-native';
 
 export const VehicleDetailScreen = ({ route, navigation }: any) => {
   const vehicleId = route.params?.vehicleId || '11111111-1111-1111-1111-111111111111';
@@ -22,7 +24,7 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [partName, setPartName] = useState('');
   const [brand, setBrand] = useState('');
-  const [category, setCategory] = useState<'Turbo' | 'Exhaust' | 'Tune' | 'Intake' | 'Brakes'>('Turbo');
+  const [category, setCategory] = useState<string>('Turbo');
   const [price, setPrice] = useState('');
   const [hpGain, setHpGain] = useState('');
   const [torqueGain, setTorqueGain] = useState('');
@@ -44,17 +46,20 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
     setPartName(''); setBrand(''); setPrice(''); setHpGain('');
   };
 
+  const handlePlaySound = () => {
+    playEngineSound(vehicle.engine);
+  };
+
   return (
     <View style={styles.container}>
-      <ApexHeader onProfilePress={() => navigation.navigate('Profile')} />
+      <ApexHeader
+        showBack
+        title="VEHICLE PROFILE"
+        onBackPress={() => navigation.goBack()}
+        onProfilePress={() => navigation.navigate('Profile')}
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Navigation Back Header */}
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <ArrowLeft size={16} color={colors.primary} />
-          <Text style={styles.backText}>BACK TO GARAGE</Text>
-        </TouchableOpacity>
-
         {/* Hero Image */}
         <View style={styles.heroImageContainer}>
           <Image source={{ uri: vehicle.photos[0] }} style={styles.heroImage} resizeMode="cover" />
@@ -64,10 +69,17 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
           </View>
         </View>
 
+        {/* Audio Sound Synth Rev Button */}
+        <TouchableOpacity style={styles.revSoundBanner} onPress={handlePlaySound}>
+          <Flame size={18} color={colors.primary} />
+          <Text style={styles.revSoundText}>PLAY EXHAUST AUDIO SYNTHESIZER REV</Text>
+          <Volume2 size={16} color={colors.primary} />
+        </TouchableOpacity>
+
         {/* Build Summary Metrics */}
         <View style={styles.metricsRow}>
           <GlassCard style={styles.metricCard}>
-            <Text style={styles.metricLab}>TOTAL HP</Text>
+            <Text style={styles.metricLab}>TOTAL POWER</Text>
             <Text style={styles.metricValGreen}>{vehicle.horsepower} WHP</Text>
             <Text style={styles.metricSub}>+{totalHpGain} HP MOD GAIN</Text>
           </GlassCard>
@@ -78,6 +90,10 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
             <Text style={styles.metricSub}>{modifications.length} MODS LOGGED</Text>
           </GlassCard>
         </View>
+
+        {/* Interactive Dyno Chart */}
+        <SectionHeader title="DYNO POWER & TORQUE CURVE" />
+        <DynoChart maxHp={vehicle.horsepower} maxTorque={vehicle.torque} engineName={vehicle.engine} />
 
         {/* Specs Table */}
         <SectionHeader title="VEHICLE FACTORY & DYNO SPECS" />
@@ -99,8 +115,16 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
             <Text style={styles.specValText}>{vehicle.fuel_type}</Text>
           </View>
           <View style={styles.specRow}>
-            <Text style={styles.specKey}>VIN Number</Text>
-            <Text style={styles.specValText}>{vehicle.vin || 'VERIFIED APEX SPEC'}</Text>
+            <Text style={styles.specKey}>0-60 MPH Sprint</Text>
+            <Text style={styles.specValText}>{vehicle.zero_to_sixty_sec || 2.5} seconds</Text>
+          </View>
+          <View style={styles.specRow}>
+            <Text style={styles.specKey}>1/4 Mile Sprint</Text>
+            <Text style={styles.specValText}>{vehicle.quarter_mile_sec || 9.5} seconds</Text>
+          </View>
+          <View style={styles.specRow}>
+            <Text style={styles.specKey}>Top Speed</Text>
+            <Text style={styles.specValText}>{vehicle.top_speed_mph} MPH</Text>
           </View>
         </GlassCard>
 
@@ -141,7 +165,7 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
             <ScrollView style={{ maxHeight: 420 }}>
               <Text style={styles.label}>CATEGORY</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
-                {(['Turbo', 'Exhaust', 'Tune', 'Intake', 'Brakes'] as const).map((c) => (
+                {(['Turbo', 'Exhaust', 'Tune', 'Intake', 'Brakes', 'Suspension', 'Supercharger', 'Nitrous'] as const).map((c) => (
                   <TouchableOpacity
                     key={c}
                     style={[styles.catChip, category === c && styles.catChipActive]}
@@ -179,13 +203,15 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
-  backBtn: { flexDirection: 'row', alignItems: 'center', marginVertical: 8 },
-  backText: { color: colors.primary, fontSize: 11, fontWeight: '900', marginLeft: 6, letterSpacing: 1 },
   heroImageContainer: { height: 200, width: '100%', borderRadius: 16, overflow: 'hidden', marginVertical: 8 },
   heroImage: { width: '100%', height: '100%' },
   heroOverlay: { position: 'absolute', bottom: 12, left: 16, right: 16 },
   heroMake: { color: colors.primary, fontSize: 12, fontWeight: '800', letterSpacing: 1 },
   heroModel: { color: colors.text, fontSize: 24, fontWeight: '900' },
+
+  revSoundBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0, 255, 102, 0.12)', borderColor: colors.primary, borderWidth: 1, paddingVertical: 10, borderRadius: 12, marginVertical: 6 },
+  revSoundText: { color: colors.primary, fontSize: 11, fontWeight: '900', marginHorizontal: 8, letterSpacing: 0.5 },
+
   metricsRow: { flexDirection: 'row', gap: 10, marginVertical: 8 },
   metricCard: { flex: 1, alignItems: 'center', padding: 12 },
   metricLab: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 },

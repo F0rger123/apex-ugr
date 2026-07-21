@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '../../stores/authStore';
+import { useNotificationStore } from '../../stores/notificationStore';
+import { NotificationModal } from './NotificationModal';
 import { colors } from '../../config/colors';
 import { Bell, Coins, ArrowLeft } from 'lucide-react-native';
 
@@ -20,6 +22,16 @@ export const ApexHeader: React.FC<ApexHeaderProps> = ({
   title,
 }) => {
   const { user } = useAuthStore();
+  const { unreadCount } = useNotificationStore();
+  const [showNotifModal, setShowNotifModal] = useState(false);
+
+  const handleNotifPress = () => {
+    if (onNotificationPress) {
+      onNotificationPress();
+    } else {
+      setShowNotifModal(true);
+    }
+  };
 
   return (
     <View style={styles.headerContainer}>
@@ -47,12 +59,14 @@ export const ApexHeader: React.FC<ApexHeaderProps> = ({
           </Text>
         </View>
 
-        {onNotificationPress && (
-          <TouchableOpacity style={styles.iconBtn} onPress={onNotificationPress}>
-            <Bell size={18} color={colors.text} />
-            <View style={styles.notifDot} />
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={styles.iconBtn} onPress={handleNotifPress}>
+          <Bell size={18} color={colors.text} />
+          {unreadCount > 0 && (
+            <View style={styles.notifBadge}>
+              <Text style={styles.notifBadgeText}>{unreadCount}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
 
         {onProfilePress && (
           <TouchableOpacity style={styles.avatarBtn} onPress={onProfilePress}>
@@ -63,6 +77,8 @@ export const ApexHeader: React.FC<ApexHeaderProps> = ({
           </TouchableOpacity>
         )}
       </View>
+
+      <NotificationModal visible={showNotifModal} onClose={() => setShowNotifModal(false)} />
     </View>
   );
 };
@@ -137,14 +153,21 @@ const styles = StyleSheet.create({
     padding: 6,
     marginRight: 8,
   },
-  notifDot: {
+  notifBadge: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.primary,
+    top: 2,
+    right: 2,
+    backgroundColor: colors.danger,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notifBadgeText: {
+    color: colors.text,
+    fontSize: 8,
+    fontWeight: '900',
   },
   avatarBtn: {
     padding: 2,
