@@ -128,6 +128,16 @@ export const ProfileScreen = ({ navigation }: any) => {
           </View>
         </GlassCard>
 
+        {/* Admin Dashboard (Visible to all for demo purposes, usually restricted) */}
+        <ApexButton
+          title="APEX ADMIN SYSTEM"
+          variant="outline"
+          size="md"
+          icon={<ShieldAlert size={16} color={colors.warning} />}
+          style={{ marginVertical: 10, borderColor: colors.warning }}
+          onPress={() => navigation.navigate('AdminDashboard')}
+        />
+
         {/* Logout Button */}
         <ApexButton
           title="LOGOUT FROM APEX OS"

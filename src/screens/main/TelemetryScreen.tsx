@@ -11,8 +11,9 @@ import { ApexButton } from '../../components/common/ApexButton';
 import { SpeedometerGauge } from '../../components/telemetry/SpeedometerGauge';
 import { GForceMeter } from '../../components/telemetry/GForceMeter';
 import { AccelerationGraph } from '../../components/telemetry/AccelerationGraph';
+import { supabase } from '../../config/supabase';
 import { colors } from '../../config/colors';
-import { Play, Square, RefreshCw, Zap, Flame, Shield, Award, Gauge } from 'lucide-react-native';
+import { Play, Square, RefreshCw, Zap, Flame, Shield, Award, Gauge, History } from 'lucide-react-native';
 
 export const TelemetryScreen = ({ navigation }: any) => {
   const {
@@ -50,6 +51,23 @@ export const TelemetryScreen = ({ navigation }: any) => {
 
   // Pulse animation for HUD
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Lifetime Stats State
+  const [lifetimeStats, setLifetimeStats] = useState<any>(null);
+
+  useEffect(() => {
+    if (user) {
+      const fetchLifetime = async () => {
+        const { data } = await supabase
+          .from('vw_telemetry_lifetime')
+          .select('*')
+          .eq('driver_id', user.id)
+          .single();
+        if (data) setLifetimeStats(data);
+      };
+      fetchLifetime();
+    }
+  }, [user]);
 
   useEffect(() => {
     if (isHudOverlay && isSessionActive) {
@@ -258,6 +276,37 @@ export const TelemetryScreen = ({ navigation }: any) => {
 
         <SectionHeader title="TELEMETRY ACCELERATION LOG" />
         <AccelerationGraph data={speedHistory} />
+
+        {lifetimeStats && (
+          <>
+            <SectionHeader title="LIFETIME HISTORICAL STATISTICS" />
+            <View style={styles.statsGrid}>
+              <GlassCard style={styles.statCard}>
+                <Text style={styles.statLabel}>TOTAL LOGGED RUNS</Text>
+                <Text style={styles.statVal}>{lifetimeStats.total_runs}</Text>
+                <Text style={styles.statSub}>LIFETIME TOTAL</Text>
+              </GlassCard>
+
+              <GlassCard style={styles.statCard}>
+                <Text style={styles.statLabel}>ALL-TIME TOP SPEED</Text>
+                <Text style={styles.statValGold}>{lifetimeStats.top_speed || 0} MPH</Text>
+                <Text style={styles.statSub}>AVG {Math.round(lifetimeStats.avg_speed || 0)} MPH</Text>
+              </GlassCard>
+
+              <GlassCard style={styles.statCard}>
+                <Text style={styles.statLabel}>BEST 0-60 LAUNCH</Text>
+                <Text style={styles.statValGreen}>{lifetimeStats.best_0_60 || '--'}s</Text>
+                <Text style={styles.statSub}>ALL VEHICLES</Text>
+              </GlassCard>
+
+              <GlassCard style={styles.statCard}>
+                <Text style={styles.statLabel}>BEST 1/4 MILE SPRINT</Text>
+                <Text style={styles.statValGreen}>{lifetimeStats.best_1_4_mile || '--'}s</Text>
+                <Text style={styles.statSub}>ALL VEHICLES</Text>
+              </GlassCard>
+            </View>
+          </>
+        )}
 
         <View style={{ height: 40 }} />
       </ScrollView>

@@ -17,6 +17,7 @@ import { ProfileScreen } from '../screens/main/ProfileScreen';
 import { CarMeetsScreen } from '../screens/main/CarMeetsScreen';
 import { TelemetryScreen } from '../screens/main/TelemetryScreen';
 import { RaceHubScreen } from '../screens/main/RaceHubScreen';
+import { AdminDashboardScreen } from '../screens/main/AdminDashboardScreen';
 import { colors } from '../config/colors';
 
 const Stack = createNativeStackNavigator();
@@ -135,6 +136,11 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="RaceHub"
               component={RaceHubScreen}
+              options={{ animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="AdminDashboard"
+              component={AdminDashboardScreen}
               options={{ animation: 'slide_from_bottom' }}
             />
           </Stack.Group>

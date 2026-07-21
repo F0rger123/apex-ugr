@@ -46,8 +46,21 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
     setPartName(''); setBrand(''); setPrice(''); setHpGain('');
   };
 
+  const [customAudio, setCustomAudio] = useState<string | null>(null);
+
   const handlePlaySound = () => {
-    playEngineSound(vehicle.engine);
+    if (customAudio) {
+      // In a real app, use expo-av to play the customAudio URI
+      console.log('Playing uploaded audio clip:', customAudio);
+    } else {
+      playEngineSound(vehicle.engine);
+    }
+  };
+
+  const handleUploadSound = () => {
+    // In a real app, use DocumentPicker to select an audio file and upload to Supabase Storage
+    console.log('Opening audio picker...');
+    setCustomAudio('uploaded_exhaust_clip.mp3');
   };
 
   return (
@@ -69,12 +82,19 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
           </View>
         </View>
 
-        {/* Audio Sound Synth Rev Button */}
-        <TouchableOpacity style={styles.revSoundBanner} onPress={handlePlaySound}>
-          <Flame size={18} color={colors.primary} />
-          <Text style={styles.revSoundText}>PLAY EXHAUST AUDIO SYNTHESIZER REV</Text>
-          <Volume2 size={16} color={colors.primary} />
-        </TouchableOpacity>
+        {/* Audio Sound Control */}
+        <View style={{ flexDirection: 'row', gap: 10, marginVertical: 10 }}>
+          <TouchableOpacity style={[styles.revSoundBanner, { flex: 1 }]} onPress={handlePlaySound}>
+            <Flame size={18} color={colors.primary} />
+            <Text style={styles.revSoundText}>
+              {customAudio ? 'PLAY CUSTOM EXHAUST CLIP' : 'PLAY AUDIO SYNTHESIZER'}
+            </Text>
+            <Volume2 size={16} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.revSoundBanner, { backgroundColor: colors.surface }]} onPress={handleUploadSound}>
+            <Plus size={18} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
 
         {/* Build Summary Metrics */}
         <View style={styles.metricsRow}>
