@@ -52,6 +52,10 @@ export const TelemetryScreen = ({ navigation }: any) => {
   // Pulse animation for HUD
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
+  // Slide and Fade animations for HUD entrance
+  const hudFadeAnim = useRef(new Animated.Value(0)).current;
+  const hudSlideAnim = useRef(new Animated.Value(50)).current;
+
   // Lifetime Stats State
   const [lifetimeStats, setLifetimeStats] = useState<any>(null);
 
@@ -81,6 +85,26 @@ export const TelemetryScreen = ({ navigation }: any) => {
       pulseAnim.setValue(1);
     }
   }, [isHudOverlay, isSessionActive]);
+
+  useEffect(() => {
+    if (isHudOverlay) {
+      Animated.parallel([
+        Animated.timing(hudFadeAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: false,
+        }),
+        Animated.timing(hudSlideAnim, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: false,
+        })
+      ]).start();
+    } else {
+      hudFadeAnim.setValue(0);
+      hudSlideAnim.setValue(50);
+    }
+  }, [isHudOverlay]);
 
   // Real Hardware Device Motion & GPS Location Sensor Listeners
   useEffect(() => {
@@ -246,30 +270,32 @@ export const TelemetryScreen = ({ navigation }: any) => {
 
         {/* WINDSHIELD HUD OVERLAY MODE */}
         {isHudOverlay ? (
-          <GlassCard style={{ alignItems: 'center', paddingVertical: 40, backgroundColor: 'rgba(0,0,0,0.85)', borderWidth: 2, borderColor: colors.primary }}>
-            <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginBottom: 10 }}>WINDSHIELD HUD OVERLAY</Text>
-            
-            <Animated.View style={{ opacity: pulseAnim, alignItems: 'center' }}>
-              <Text style={{ color: colors.primary, fontSize: 110, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
-                {currentSpeedMph}
-              </Text>
-              <Text style={{ color: colors.text, fontSize: 22, fontWeight: '900', letterSpacing: 3, marginTop: -15 }}>MPH</Text>
-            </Animated.View>
+          <GlassCard style={{ alignItems: 'center', justifyContent: 'center', flex: 1, paddingVertical: 40, backgroundColor: 'rgba(0,0,0,0.85)', borderWidth: 2, borderColor: colors.primary }}>
+            <Animated.View style={{ opacity: hudFadeAnim, transform: [{ translateY: hudSlideAnim }], alignItems: 'center', width: '100%' }}>
+              <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginBottom: 10 }}>WINDSHIELD HUD OVERLAY</Text>
 
-            <View style={{ flexDirection: 'row', gap: 20, marginTop: 40 }}>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LATERAL G</Text>
-                <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '900' }}>{gForceLateral} G</Text>
+              <Animated.View style={{ opacity: pulseAnim, alignItems: 'center' }}>
+                <Text style={{ color: colors.primary, fontSize: 160, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
+                  {currentSpeedMph}
+                </Text>
+                <Text style={{ color: colors.text, fontSize: 32, fontWeight: '900', letterSpacing: 3, marginTop: -15 }}>MPH</Text>
+              </Animated.View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '100%', marginTop: 60 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LATERAL G</Text>
+                  <Text style={{ color: colors.primary, fontSize: 26, fontWeight: '900' }}>{gForceLateral} G</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>0-60 LAUNCH</Text>
+                  <Text style={{ color: colors.warning, fontSize: 26, fontWeight: '900' }}>{zeroToSixtySec}s</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LONG G</Text>
+                  <Text style={{ color: colors.primary, fontSize: 26, fontWeight: '900' }}>{gForceLongitudinal} G</Text>
+                </View>
               </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>0-60 LAUNCH</Text>
-                <Text style={{ color: colors.warning, fontSize: 20, fontWeight: '900' }}>{zeroToSixtySec}s</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LONG G</Text>
-                <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '900' }}>{gForceLongitudinal} G</Text>
-              </View>
-            </View>
+            </Animated.View>
           </GlassCard>
         ) : (
           <GlassCard style={{ alignItems: 'center', paddingVertical: 20 }}>
