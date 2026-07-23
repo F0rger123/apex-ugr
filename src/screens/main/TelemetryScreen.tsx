@@ -130,34 +130,39 @@ export const TelemetryScreen = ({ navigation }: any) => {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
             let speedMph = 0;
+            let distMiles = 0;
             const rawSpeedMs = position.coords.speed;
             const now = Date.now();
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            if (rawSpeedMs !== null && rawSpeedMs > 0) {
-              speedMph = Math.round(rawSpeedMs * 2.23694);
-            } else if (lastPosRef.current) {
+            if (lastPosRef.current) {
               const prev = lastPosRef.current;
               const dtSec = (now - prev.time) / 1000;
-              if (dtSec > 0.5) {
-                // Haversine formula
-                const R = 6371; // km
-                const dLat = (lat - prev.lat) * (Math.PI / 180);
-                const dLng = (lng - prev.lng) * (Math.PI / 180);
-                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                          Math.cos(prev.lat * (Math.PI / 180)) * Math.cos(lat * (Math.PI / 180)) *
-                          Math.sin(dLng / 2) * Math.sin(dLng / 2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                const distKm = R * c;
+              // Haversine formula for distance
+              const R = 6371; // km
+              const dLat = (lat - prev.lat) * (Math.PI / 180);
+              const dLng = (lng - prev.lng) * (Math.PI / 180);
+              const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                        Math.cos(prev.lat * (Math.PI / 180)) * Math.cos(lat * (Math.PI / 180)) *
+                        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+              const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+              const distKm = R * c;
+              distMiles = distKm * 0.621371;
+
+              if (rawSpeedMs !== null && rawSpeedMs > 0) {
+                speedMph = Math.round(rawSpeedMs * 2.23694);
+              } else if (dtSec > 0.5) {
                 const speedKmh = (distKm / dtSec) * 3600;
                 speedMph = Math.round(speedKmh * 0.621371);
               }
+            } else if (rawSpeedMs !== null && rawSpeedMs > 0) {
+              speedMph = Math.round(rawSpeedMs * 2.23694);
             }
 
             lastPosRef.current = { lat, lng, time: now };
             if (speedMph >= 0 && speedMph < 350) {
-              updateTelemetry(speedMph);
+              updateTelemetry(speedMph, undefined, undefined, distMiles);
             }
           },
           (err) => console.log('GPS Error:', err),
@@ -186,7 +191,8 @@ export const TelemetryScreen = ({ navigation }: any) => {
           if (mockSpeed >= 160) {
             accelPhase = false;
           }
-          updateTelemetry(mockSpeed, gLat, gLong);
+          const distMiles = (mockSpeed / 3600) * 0.5;
+          updateTelemetry(mockSpeed, gLat, gLong, distMiles);
         } else {
           mockSpeed -= Math.floor(Math.random() * 8) + 4;
           const gLong = -(Math.random() * 0.6 + 0.2);
@@ -195,7 +201,8 @@ export const TelemetryScreen = ({ navigation }: any) => {
             mockSpeed = 0;
             accelPhase = true; // reset cycle for fun
           }
-          updateTelemetry(mockSpeed, gLat, gLong);
+          const distMiles = (mockSpeed / 3600) * 0.5;
+          updateTelemetry(mockSpeed, gLat, gLong, distMiles);
         }
       }, 500);
     }
