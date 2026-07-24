@@ -143,9 +143,13 @@ export const useMapStore = create<MapState>((set, get) => ({
 
       // Client-side haversine filter (Supabase doesn't have PostGIS enabled by default)
       const nearby = (data as any[]).filter((driver) => {
-        const dist = haversineDistance(lat, lng, driver.latitude, driver.longitude);
         // Also respect the driver's own privacy mode
         if (driver.profile?.privacy_mode === 'invisible') return false;
+
+        // If radiusKm is -1, return all (Global View)
+        if (radiusKm === -1) return true;
+
+        const dist = haversineDistance(lat, lng, driver.latitude, driver.longitude);
         return dist <= radiusKm;
       });
 

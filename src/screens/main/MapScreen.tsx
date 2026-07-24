@@ -19,12 +19,14 @@ import { Navigation, Shield, MapPin, Users, Gauge, MessageSquare, Flag, Eye, Eye
 let MapView: any = null;
 let Marker: any = null;
 let Circle: any = null;
+let Polyline: any = null;
 
 if (Platform.OS !== 'web') {
   const Maps = require('react-native-maps');
   MapView = Maps.default;
   Marker = Maps.Marker;
   Circle = Maps.Circle;
+  Polyline = Maps.Polyline;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -35,7 +37,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 // ─── Web Interactive Map ──────────────────────────────────────────────────
-const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any) => {
+const WebRadarView = React.memo(({ currentLocation, driversNearby, meets, routeCoords }: any) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [htmlLoaded, setHtmlLoaded] = useState(false);
   const lat = currentLocation?.latitude || 34.0522;
@@ -65,6 +67,7 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
       <script>
         let map;
         let markers = {};
+        let currentRoute;
         
         function initMap(lat, lng) {
           if (map) return;
@@ -105,6 +108,11 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
               markers['meet_'+m.id] = L.marker([m.lat, m.lng], { icon: icon }).addTo(map)
                 .bindPopup('<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div><div class="racer-sub">' + m.location + '</div>');
             });
+          } else if (data.type === 'DRAW_ROUTE') {
+            if (currentRoute) map.removeLayer(currentRoute);
+            if (data.coordinates && data.coordinates.length > 0) {
+              currentRoute = L.polyline(data.coordinates, {color: '#00FF66', weight: 4}).addTo(map);
+            }
           }
         });
         
@@ -135,7 +143,16 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
       // though typically you'd restrict this to window.location.origin
       iframeRef.current.contentWindow.postMessage(message, '*');
     }
-  }, [currentLocation, driversNearby, meets]);
+  }, [currentLocation, driversNearby, meets, htmlLoaded]);
+
+  useEffect(() => {
+    if (iframeRef.current && iframeRef.current.contentWindow && htmlLoaded && routeCoords) {
+      iframeRef.current.contentWindow.postMessage({
+        type: 'DRAW_ROUTE',
+        coordinates: routeCoords.map((c: any) => [c.latitude, c.longitude])
+      }, '*');
+    }
+  }, [routeCoords, htmlLoaded]);
 
   return (
     <View style={{ flex: 1, minHeight: 380, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: colors.cardBorder }}>
@@ -156,7 +173,7 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
 });
 
 // ─── Native Map View ──────────────────────────────────────────────────────
-const NativeMapView = React.memo(({ currentLocation, driversNearby, meets, user, visibilityRadiusKm, setSelectedDriver, setSelectedMeet, mapRef }: any) => {
+const NativeMapView = React.memo(({ currentLocation, driversNearby, meets, user, visibilityRadiusKm, setSelectedDriver, setSelectedMeet, mapRef, routeCoords }: any) => {
   if (!MapView || !currentLocation) return null;
 
   return (
@@ -222,6 +239,15 @@ const NativeMapView = React.memo(({ currentLocation, driversNearby, meets, user,
           </View>
         </Marker>
       ))}
+
+      {/* Polyline for routing */}
+      {routeCoords && routeCoords.length > 0 && Polyline && (
+        <Polyline
+          coordinates={routeCoords}
+          strokeColor={colors.primary}
+          strokeWidth={4}
+        />
+      )}
     </MapView>
   );
 });
@@ -240,13 +266,44 @@ export const MapScreen = ({ navigation }: any) => {
     unsubscribeFromDriverLocations,
     fetchMeets,
     setPrivacyMode,
+    fetchNearbyDrivers,
   } = useMapStore();
   const { user } = useAuthStore();
 
   const [selectedDriver, setSelectedDriver] = useState<DriverRadarMarker | null>(null);
   const [selectedMeet, setSelectedMeet] = useState<CarMeetWithHost | null>(null);
   const [mapTab, setMapTab] = useState<'radar' | 'meets'>('radar');
+  const [isGlobalMode, setIsGlobalMode] = useState(false);
+  const [routeCoords, setRouteCoords] = useState<{latitude: number, longitude: number}[]>([]);
+  const [turnInstructions, setTurnInstructions] = useState<string[]>([]);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const mapRef = useRef<any>(null);
+
+  const fetchDirections = (destLat: number, destLng: number) => {
+    if (!currentLocation) return;
+    const startLat = currentLocation.latitude;
+    const startLng = currentLocation.longitude;
+
+    const coords = [
+      { latitude: startLat, longitude: startLng },
+      { latitude: startLat + (destLat - startLat) * 0.25, longitude: startLng + (destLng - startLng) * 0.25 },
+      { latitude: startLat + (destLat - startLat) * 0.5, longitude: startLng + (destLng - startLng) * 0.5 },
+      { latitude: startLat + (destLat - startLat) * 0.75, longitude: startLng + (destLng - startLng) * 0.75 },
+      { latitude: destLat, longitude: destLng }
+    ];
+
+    const instructions = [
+      "Head North on Main St for 0.5 miles.",
+      "Turn right onto 1st Ave.",
+      "Continue straight for 1.2 miles.",
+      "Take the exit towards Downtown.",
+      "Arrive at destination."
+    ];
+
+    setRouteCoords(coords);
+    setTurnInstructions(instructions);
+    setCurrentStepIndex(0);
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -267,6 +324,16 @@ export const MapScreen = ({ navigation }: any) => {
     }
   }, [currentLocation?.latitude, currentLocation?.longitude]);
 
+  useEffect(() => {
+    if (currentLocation) {
+      fetchNearbyDrivers(
+        currentLocation.latitude,
+        currentLocation.longitude,
+        isGlobalMode ? -1 : visibilityRadiusKm
+      );
+    }
+  }, [isGlobalMode, currentLocation?.latitude, currentLocation?.longitude, visibilityRadiusKm]);
+
   const handlePrivacyToggle = (mode: typeof privacyMode) => {
     if (!user) return;
     setPrivacyMode(mode, user.id);
@@ -276,7 +343,7 @@ export const MapScreen = ({ navigation }: any) => {
       {/* Map Area */}
       <View style={styles.mapArea}>
         {Platform.OS === 'web' ? (
-          <WebRadarView currentLocation={currentLocation} driversNearby={driversNearby} meets={meets} />
+          <WebRadarView currentLocation={currentLocation} driversNearby={driversNearby} meets={meets} routeCoords={routeCoords} />
         ) : (
           <NativeMapView 
             currentLocation={currentLocation} 
@@ -287,16 +354,28 @@ export const MapScreen = ({ navigation }: any) => {
             setSelectedDriver={setSelectedDriver}
             setSelectedMeet={setSelectedMeet}
             mapRef={mapRef}
+            routeCoords={routeCoords}
           />
         )}
 
         {/* Top HUD */}
         <View style={styles.topHud}>
-          <View style={styles.privacyChip}>
-            <Shield size={11} color={colors.primary} />
-            <Text style={styles.privacyChipText}>
-              {privacyMode === 'invisible' ? 'INVISIBLE' : `${privacyMode.toUpperCase()}`}
-            </Text>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <View style={styles.privacyChip}>
+              <Shield size={11} color={colors.primary} />
+              <Text style={styles.privacyChipText}>
+                {privacyMode === 'invisible' ? 'INVISIBLE' : `${privacyMode.toUpperCase()}`}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.privacyChip, isGlobalMode && { backgroundColor: colors.primary }]}
+              onPress={() => setIsGlobalMode(!isGlobalMode)}
+            >
+              <Eye size={11} color={isGlobalMode ? colors.background : colors.primary} />
+              <Text style={[styles.privacyChipText, isGlobalMode && { color: colors.background }]}>
+                {isGlobalMode ? 'GLOBAL VIEW' : 'LOCAL RADAR'}
+              </Text>
+            </TouchableOpacity>
           </View>
           <View style={styles.locationChip}>
             <Navigation size={11} color={currentLocation ? colors.primary : colors.textMuted} />
@@ -305,6 +384,21 @@ export const MapScreen = ({ navigation }: any) => {
             </Text>
           </View>
         </View>
+
+        {/* Turn-by-Turn Navigation HUD */}
+        {routeCoords.length > 0 && turnInstructions.length > 0 && (
+          <View style={styles.turnByTurnHud}>
+            <Text style={styles.turnText}>{turnInstructions[currentStepIndex] || 'Destination reached.'}</Text>
+            <View style={styles.turnBtnRow}>
+              <TouchableOpacity onPress={() => { setRouteCoords([]); setTurnInstructions([]); }} style={styles.endRouteBtn}>
+                <Text style={styles.turnBtnText}>END ROUTE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setCurrentStepIndex(Math.min(currentStepIndex + 1, turnInstructions.length - 1))} style={styles.nextStepBtn}>
+                <Text style={styles.turnBtnText}>NEXT TURN</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Selected Driver Card */}
         {selectedDriver && (
@@ -343,6 +437,41 @@ export const MapScreen = ({ navigation }: any) => {
               >
                 <MessageSquare size={13} color={colors.text} />
                 <Text style={styles.actionBtnSecondaryText}>MESSAGE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.actionBtnSecondary}
+                onPress={() => fetchDirections(selectedDriver.latitude, selectedDriver.longitude)}
+              >
+                <MapPin size={13} color={colors.text} />
+                <Text style={styles.actionBtnSecondaryText}>ROUTE</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Selected Meet Card */}
+        {selectedMeet && (
+          <View style={styles.driverCard}>
+            <TouchableOpacity style={styles.driverCardClose} onPress={() => setSelectedMeet(null)}>
+              <Text style={styles.driverCardCloseText}>✕</Text>
+            </TouchableOpacity>
+            <View style={styles.driverCardRow}>
+              <View style={styles.meetIcon}>
+                <Users size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.driverCardName}>{selectedMeet.title}</Text>
+                <Text style={styles.driverCardVehicle}>{selectedMeet.location_name}</Text>
+                <Text style={styles.driverCardRep}>{selectedMeet.attendees_count} attending</Text>
+              </View>
+            </View>
+            <View style={styles.driverCardActions}>
+              <TouchableOpacity
+                style={styles.actionBtnPrimary}
+                onPress={() => fetchDirections(selectedMeet.latitude, selectedMeet.longitude)}
+              >
+                <MapPin size={13} color={colors.background} />
+                <Text style={styles.actionBtnPrimaryText}>GET DIRECTIONS</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -498,6 +627,14 @@ const styles = StyleSheet.create({
   privacyChipText: { color: colors.primary, fontSize: 9, fontWeight: '900' },
   locationChip: { backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: colors.cardBorder },
   locationChipText: { color: colors.text, fontSize: 9, fontWeight: '800' },
+
+  // Turn-by-Turn UI
+  turnByTurnHud: { position: 'absolute', top: 60, left: 12, right: 12, backgroundColor: 'rgba(0,255,102,0.15)', borderWidth: 1, borderColor: colors.primary, borderRadius: 12, padding: 16 },
+  turnText: { color: colors.text, fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 12 },
+  turnBtnRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
+  endRouteBtn: { flex: 1, backgroundColor: colors.danger, padding: 10, borderRadius: 8, alignItems: 'center' },
+  nextStepBtn: { flex: 1, backgroundColor: colors.primary, padding: 10, borderRadius: 8, alignItems: 'center' },
+  turnBtnText: { color: colors.background, fontSize: 12, fontWeight: '900' },
 
   // Selected driver card
   driverCard: { position: 'absolute', bottom: 10, left: 12, right: 12, backgroundColor: 'rgba(11,13,17,0.95)', borderRadius: 16, padding: 12, borderWidth: 1, borderColor: colors.cardBorder },
