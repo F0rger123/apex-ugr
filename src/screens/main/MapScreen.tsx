@@ -96,7 +96,14 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets, routeC
             // Update Drivers (clear old ones first)
             Object.keys(markers).forEach(id => { if (id !== 'you' && !id.startsWith('meet_')) map.removeLayer(markers[id]); });
             data.drivers.forEach(d => {
-              const icon = L.divIcon({ html: '<div style="width:16px;height:16px;background:#FFB800;border-radius:50%;border:2px solid #000;box-shadow:0 0 10px #FFB800;"></div>', className: '' });
+              const isDriving = d.status === 'Cruising' || d.status === 'In Telemetry Run';
+              const statusColor = isDriving ? '#00FF66' : '#64748B';
+              const showQuestionMark = !d.avatar || !isDriving;
+              const innerHtml = showQuestionMark
+                ? '<div style="width:100%;height:100%;border-radius:50%;background:#0A0C11;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:10px;">?</div>'
+                : '<img src="' + d.avatar + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />';
+
+              const icon = L.divIcon({ html: '<div style="width:24px;height:24px;border-radius:50%;border:2px solid ' + statusColor + ';box-shadow:0 0 10px ' + statusColor + ';">' + innerHtml + '</div>', className: '' });
               markers[d.id] = L.marker([d.lat, d.lng], { icon: icon }).addTo(map)
                 .bindPopup('<div class="racer-tag">@' + d.name + '</div><div class="racer-sub">' + d.car + '</div><div class="speed-tag">' + d.speed + ' MPH • ' + d.status + '</div>');
             });
@@ -132,6 +139,7 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets, routeC
         drivers: driversNearby.map((d: any) => ({
           id: d.id, lat: d.latitude, lng: d.longitude,
           name: d.profile?.username || 'Racer', speed: d.speed_mph, status: d.status,
+          avatar: d.profile?.avatar_url,
           car: d.vehicle ? `${d.vehicle.year} ${d.vehicle.make} ${d.vehicle.model}` : 'Tuned Vehicle'
         })),
         meets: meets.map((m: any) => ({
@@ -214,17 +222,29 @@ const NativeMapView = React.memo(({ currentLocation, driversNearby, meets, user,
       )}
 
       {/* Nearby driver markers */}
-      {driversNearby.map((driver: any) => (
-        <Marker
-          key={driver.id}
-          coordinate={{ latitude: driver.latitude, longitude: driver.longitude }}
-          onPress={() => setSelectedDriver(driver)}
-        >
-          <View style={[styles.driverMarker, { borderColor: STATUS_COLORS[driver.status] || colors.primary }]}>
-            <Image source={{ uri: driver.profile?.avatar_url || '' }} style={styles.driverMarkerAvatar} />
-          </View>
-        </Marker>
-      ))}
+      {driversNearby.map((driver: any) => {
+        const isDriving = driver.status === 'Cruising' || driver.status === 'In Telemetry Run';
+        const pinColor = isDriving ? colors.primary : colors.textMuted;
+        const showQuestionMark = !driver.profile?.avatar_url || !isDriving;
+
+        return (
+          <Marker
+            key={driver.id}
+            coordinate={{ latitude: driver.latitude, longitude: driver.longitude }}
+            onPress={() => setSelectedDriver(driver)}
+          >
+            <View style={[styles.driverMarker, { borderColor: pinColor }]}>
+              {showQuestionMark ? (
+                <View style={{ flex: 1, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: colors.text, fontWeight: 'bold' }}>?</Text>
+                </View>
+              ) : (
+                <Image source={{ uri: driver.profile.avatar_url }} style={styles.driverMarkerAvatar} />
+              )}
+            </View>
+          </Marker>
+        );
+      })}
 
       {/* Meet location markers */}
       {meets.map((meet: any) => (
