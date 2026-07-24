@@ -45,12 +45,15 @@ export const TelemetryScreen = ({ navigation }: any) => {
     stopSession();
   };
 
-  const [sensorSource, setSensorSource] = useState<'DEVICE_HARDWARE' | 'SIMULATOR'>('DEVICE_HARDWARE');
   const [isHudOverlay, setIsHudOverlay] = useState(false);
   const lastPosRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
 
   // Pulse animation for HUD
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Slide and Fade animations for HUD entrance
+  const hudFadeAnim = useRef(new Animated.Value(0)).current;
+  const hudSlideAnim = useRef(new Animated.Value(50)).current;
 
   // Lifetime Stats State
   const [lifetimeStats, setLifetimeStats] = useState<any>(null);
@@ -82,6 +85,26 @@ export const TelemetryScreen = ({ navigation }: any) => {
     }
   }, [isHudOverlay, isSessionActive]);
 
+  useEffect(() => {
+    if (isHudOverlay) {
+      Animated.parallel([
+        Animated.timing(hudFadeAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: false,
+        }),
+        Animated.timing(hudSlideAnim, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: false,
+        })
+      ]).start();
+    } else {
+      hudFadeAnim.setValue(0);
+      hudSlideAnim.setValue(50);
+    }
+  }, [isHudOverlay]);
+
   // Real Hardware Device Motion & GPS Location Sensor Listeners
   useEffect(() => {
     let watchId: number;
@@ -106,34 +129,39 @@ export const TelemetryScreen = ({ navigation }: any) => {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
             let speedMph = 0;
+            let distMiles = 0;
             const rawSpeedMs = position.coords.speed;
             const now = Date.now();
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            if (rawSpeedMs !== null && rawSpeedMs > 0) {
-              speedMph = Math.round(rawSpeedMs * 2.23694);
-            } else if (lastPosRef.current) {
+            if (lastPosRef.current) {
               const prev = lastPosRef.current;
               const dtSec = (now - prev.time) / 1000;
-              if (dtSec > 0.5) {
-                // Haversine formula
-                const R = 6371; // km
-                const dLat = (lat - prev.lat) * (Math.PI / 180);
-                const dLng = (lng - prev.lng) * (Math.PI / 180);
-                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                          Math.cos(prev.lat * (Math.PI / 180)) * Math.cos(lat * (Math.PI / 180)) *
-                          Math.sin(dLng / 2) * Math.sin(dLng / 2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                const distKm = R * c;
+              // Haversine formula for distance
+              const R = 6371; // km
+              const dLat = (lat - prev.lat) * (Math.PI / 180);
+              const dLng = (lng - prev.lng) * (Math.PI / 180);
+              const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                        Math.cos(prev.lat * (Math.PI / 180)) * Math.cos(lat * (Math.PI / 180)) *
+                        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+              const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+              const distKm = R * c;
+              distMiles = distKm * 0.621371;
+
+              if (rawSpeedMs !== null && rawSpeedMs > 0) {
+                speedMph = Math.round(rawSpeedMs * 2.23694);
+              } else if (dtSec > 0.5) {
                 const speedKmh = (distKm / dtSec) * 3600;
                 speedMph = Math.round(speedKmh * 0.621371);
               }
+            } else if (rawSpeedMs !== null && rawSpeedMs > 0) {
+              speedMph = Math.round(rawSpeedMs * 2.23694);
             }
 
             lastPosRef.current = { lat, lng, time: now };
             if (speedMph >= 0 && speedMph < 350) {
-              updateTelemetry(speedMph);
+              updateTelemetry(speedMph, undefined, undefined, distMiles);
             }
           },
           (err) => console.log('GPS Error:', err),
@@ -147,36 +175,6 @@ export const TelemetryScreen = ({ navigation }: any) => {
       };
     }
   }, [isSessionActive, currentSpeedMph]);
-
-  // Simulator Telemetry Fallback Loop
-  useEffect(() => {
-    let simInterval: any;
-    if (isSessionActive && sensorSource === 'SIMULATOR') {
-      let mockSpeed = currentSpeedMph;
-      let accelPhase = true;
-      simInterval = setInterval(() => {
-        if (accelPhase) {
-          mockSpeed += Math.floor(Math.random() * 12) + 2;
-          const gLong = (Math.random() * 0.8 + 0.4);
-          const gLat = (Math.random() * 0.1);
-          if (mockSpeed >= 160) {
-            accelPhase = false;
-          }
-          updateTelemetry(mockSpeed, gLat, gLong);
-        } else {
-          mockSpeed -= Math.floor(Math.random() * 8) + 4;
-          const gLong = -(Math.random() * 0.6 + 0.2);
-          const gLat = (Math.random() * 0.1);
-          if (mockSpeed <= 0) {
-            mockSpeed = 0;
-            accelPhase = true; // reset cycle for fun
-          }
-          updateTelemetry(mockSpeed, gLat, gLong);
-        }
-      }, 500);
-    }
-    return () => clearInterval(simInterval);
-  }, [isSessionActive, sensorSource, currentSpeedMph]);
 
   return (
     <View style={styles.container}>
@@ -225,14 +223,6 @@ export const TelemetryScreen = ({ navigation }: any) => {
                 onPress={startSession}
               />
             )}
-            <TouchableOpacity 
-              style={[styles.resetBtn, sensorSource === 'SIMULATOR' && { borderColor: colors.primary }]} 
-              onPress={() => setSensorSource(s => s === 'SIMULATOR' ? 'DEVICE_HARDWARE' : 'SIMULATOR')}
-            >
-              <Text style={{ color: sensorSource === 'SIMULATOR' ? colors.primary : colors.text, fontSize: 10, fontWeight: '900' }}>
-                {sensorSource === 'SIMULATOR' ? 'SIM MODE' : 'LIVE GPS'}
-              </Text>
-            </TouchableOpacity>
             <TouchableOpacity style={styles.resetBtn} onPress={() => setIsHudOverlay(!isHudOverlay)}>
               <Text style={{ color: isHudOverlay ? colors.primary : colors.text, fontSize: 10, fontWeight: '900' }}>
                 {isHudOverlay ? 'EXIT HUD' : 'HUD MODE'}
@@ -246,30 +236,32 @@ export const TelemetryScreen = ({ navigation }: any) => {
 
         {/* WINDSHIELD HUD OVERLAY MODE */}
         {isHudOverlay ? (
-          <GlassCard style={{ alignItems: 'center', paddingVertical: 40, backgroundColor: 'rgba(0,0,0,0.85)', borderWidth: 2, borderColor: colors.primary }}>
-            <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginBottom: 10 }}>WINDSHIELD HUD OVERLAY</Text>
-            
-            <Animated.View style={{ opacity: pulseAnim, alignItems: 'center' }}>
-              <Text style={{ color: colors.primary, fontSize: 110, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
-                {currentSpeedMph}
-              </Text>
-              <Text style={{ color: colors.text, fontSize: 22, fontWeight: '900', letterSpacing: 3, marginTop: -15 }}>MPH</Text>
-            </Animated.View>
+          <GlassCard style={{ alignItems: 'center', justifyContent: 'center', flex: 1, paddingVertical: 40, backgroundColor: 'rgba(0,0,0,0.85)', borderWidth: 2, borderColor: colors.primary }}>
+            <Animated.View style={{ opacity: hudFadeAnim, transform: [{ translateY: hudSlideAnim }], alignItems: 'center', width: '100%' }}>
+              <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginBottom: 10 }}>WINDSHIELD HUD OVERLAY</Text>
 
-            <View style={{ flexDirection: 'row', gap: 20, marginTop: 40 }}>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LATERAL G</Text>
-                <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '900' }}>{gForceLateral} G</Text>
+              <Animated.View style={{ opacity: pulseAnim, alignItems: 'center' }}>
+                <Text style={{ color: colors.primary, fontSize: 160, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
+                  {currentSpeedMph}
+                </Text>
+                <Text style={{ color: colors.text, fontSize: 32, fontWeight: '900', letterSpacing: 3, marginTop: -15 }}>MPH</Text>
+              </Animated.View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '100%', marginTop: 60 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LATERAL G</Text>
+                  <Text style={{ color: colors.primary, fontSize: 26, fontWeight: '900' }}>{gForceLateral} G</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>0-60 LAUNCH</Text>
+                  <Text style={{ color: colors.warning, fontSize: 26, fontWeight: '900' }}>{zeroToSixtySec}s</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LONG G</Text>
+                  <Text style={{ color: colors.primary, fontSize: 26, fontWeight: '900' }}>{gForceLongitudinal} G</Text>
+                </View>
               </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>0-60 LAUNCH</Text>
-                <Text style={{ color: colors.warning, fontSize: 20, fontWeight: '900' }}>{zeroToSixtySec}s</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '800' }}>LONG G</Text>
-                <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '900' }}>{gForceLongitudinal} G</Text>
-              </View>
-            </View>
+            </Animated.View>
           </GlassCard>
         ) : (
           <GlassCard style={{ alignItems: 'center', paddingVertical: 20 }}>

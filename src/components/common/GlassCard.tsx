@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { View, StyleSheet, ViewStyle, TouchableWithoutFeedback, Animated, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { colors } from '../../config/colors';
@@ -17,6 +17,23 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   onPress,
 }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
@@ -49,14 +66,18 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   if (onPress) {
     return (
       <TouchableWithoutFeedback onPressIn={handlePressIn} onPressOut={handlePressOut} onPress={onPress}>
-        <Animated.View style={[containerStyle, { transform: [{ scale: scaleAnim }] }]}>
+        <Animated.View style={[containerStyle, { opacity: fadeAnim, transform: [{ scale: scaleAnim }, { translateY: slideAnim }] }]}>
           {content}
         </Animated.View>
       </TouchableWithoutFeedback>
     );
   }
 
-  return <View style={containerStyle}>{content}</View>;
+  return (
+    <Animated.View style={[containerStyle, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+      {content}
+    </Animated.View>
+  );
 };
 
 const styles = StyleSheet.create({
