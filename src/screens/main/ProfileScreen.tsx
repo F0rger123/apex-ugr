@@ -120,7 +120,7 @@ export const ProfileScreen = ({ navigation }: any) => {
                 style={[styles.pBtn, user?.privacy_mode === m && styles.pBtnActive]}
                 onPress={() => togglePrivacyMode(m)}
               >
-                <Text style={[styles.pBtnText, user?.privacy_mode === m && { color: colors.background }]}>
+                <Text style={[styles.pBtnText, user?.privacy_mode === m && { color: '#FFFFFF' }]}>
                   {m.replace('_', ' ').toUpperCase()}
                 </Text>
               </TouchableOpacity>
@@ -163,7 +163,7 @@ export const ProfileScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   profileHero: { marginVertical: 8 },
   heroRow: { flexDirection: 'row', alignItems: 'center' },

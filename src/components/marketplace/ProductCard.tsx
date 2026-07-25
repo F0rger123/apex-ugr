@@ -81,7 +81,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.cartBtn} onPress={onAddToCart}>
-              <ShoppingCart size={13} color={colors.background} />
+              <ShoppingCart size={13} color="#FFFFFF" />
               <Text style={styles.cartBtnText}>ADD</Text>
             </TouchableOpacity>
           </View>
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cartBtnText: {
-    color: colors.background,
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '900',
     marginLeft: 4,

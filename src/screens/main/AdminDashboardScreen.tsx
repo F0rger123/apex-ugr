@@ -79,7 +79,7 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
                     variant="danger" 
                     size="sm" 
                     style={{ flex: 1 }} 
-                    icon={<Ban size={14} color={colors.background} />}
+                    icon={<Ban size={14} color="#FFFFFF" />}
                     onPress={() => handleAction(report.id, 'resolved')} 
                   />
                 </View>
@@ -95,7 +95,7 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   emptyCard: { alignItems: 'center', padding: 40, gap: 10 },
   emptyText: { color: colors.primary, fontSize: 16, fontWeight: '900', letterSpacing: 2 },

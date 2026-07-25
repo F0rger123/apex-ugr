@@ -116,7 +116,7 @@ export const MessagesScreen = ({ navigation }: any) => {
                         <Text style={styles.audioBubbleText}>{m.content}</Text>
                       </View>
                     ) : (
-                      <Text style={[styles.msgText, isMe && { color: colors.background }]}>{m.content}</Text>
+                      <Text style={[styles.msgText, isMe && { color: '#FFFFFF' }]}>{m.content}</Text>
                     )}
                     <Text style={[styles.timeText, isMe && { color: 'rgba(0,0,0,0.5)' }]}>
                       {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -140,7 +140,7 @@ export const MessagesScreen = ({ navigation }: any) => {
             />
 
             <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
-              <Send size={16} color={colors.background} />
+              <Send size={16} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -150,7 +150,7 @@ export const MessagesScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   layoutRow: { flex: 1, flexDirection: 'row' },
   convoSidebar: { width: 110, backgroundColor: colors.surface, borderRightWidth: 1, borderRightColor: colors.cardBorder, paddingVertical: 8 },
   convoItem: { padding: 8, alignItems: 'center', marginVertical: 4, borderRadius: 8 },

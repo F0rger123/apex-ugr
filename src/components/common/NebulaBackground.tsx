@@ -110,6 +110,6 @@ const styles = StyleSheet.create({
   } as any,
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(6, 14, 32, 0.6)', // deep space wash
+    backgroundColor: 'rgba(0, 0, 0, 0.6)', // deep space wash
   },
 });

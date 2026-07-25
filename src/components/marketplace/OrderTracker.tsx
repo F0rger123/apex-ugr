@@ -55,7 +55,7 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({ order }) => {
                     isCurrent && styles.currentGlowCircle,
                   ]}
                 >
-                  <IconComp size={14} color={isDone ? colors.background : colors.textMuted} />
+                  <IconComp size={14} color={isDone ? '#FFFFFF' : colors.textMuted} />
                 </View>
                 <Text style={[styles.stepLabel, isDone ? styles.doneLabel : styles.pendingLabel]}>
                   {step.label}

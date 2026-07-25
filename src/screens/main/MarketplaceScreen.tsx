@@ -76,7 +76,7 @@ export const MarketplaceScreen = ({ navigation }: any) => {
           </View>
 
           <TouchableOpacity style={styles.cartBtn} onPress={() => navigation.navigate('Cart')}>
-            <ShoppingCart size={18} color={colors.background} />
+            <ShoppingCart size={18} color="#FFFFFF" />
             {cart.length > 0 && (
               <View style={styles.cartBadge}>
                 <Text style={styles.cartBadgeText}>{cart.length}</Text>
@@ -91,14 +91,14 @@ export const MarketplaceScreen = ({ navigation }: any) => {
             style={[styles.tabItem, activeTab === 'catalog' && styles.tabItemActive]}
             onPress={() => setActiveTab('catalog')}
           >
-            <Text style={[styles.tabText, activeTab === 'catalog' && { color: colors.background }]}>PARTS CATALOG</Text>
+            <Text style={[styles.tabText, activeTab === 'catalog' && { color: '#FFFFFF' }]}>PARTS CATALOG</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.tabItem, activeTab === 'orders' && styles.tabItemActive]}
             onPress={() => setActiveTab('orders')}
           >
-            <Text style={[styles.tabText, activeTab === 'orders' && { color: colors.background }]}>ORDERS ({orders.length})</Text>
+            <Text style={[styles.tabText, activeTab === 'orders' && { color: '#FFFFFF' }]}>ORDERS ({orders.length})</Text>
           </TouchableOpacity>
         </View>
 
@@ -131,8 +131,8 @@ export const MarketplaceScreen = ({ navigation }: any) => {
                 style={[styles.garageFitPill, filterByGarage && styles.garageFitPillActive]}
                 onPress={() => setFilterByGarage(!filterByGarage)}
               >
-                <Filter size={12} color={filterByGarage ? colors.background : colors.primary} />
-                <Text style={[styles.garageFitText, filterByGarage && { color: colors.background }]}>
+                <Filter size={12} color={filterByGarage ? '#FFFFFF' : colors.primary} />
+                <Text style={[styles.garageFitText, filterByGarage && { color: '#FFFFFF' }]}>
                   {filterByGarage ? `MATCHING ONLY: ${activeVehicle.year} ${activeVehicle.make} ${activeVehicle.model}` : `FILTER FOR MY ${activeVehicle.make} ${activeVehicle.model}`}
                 </Text>
               </TouchableOpacity>
@@ -149,7 +149,7 @@ export const MarketplaceScreen = ({ navigation }: any) => {
                       style={[styles.vendorPill, selectedVendor === v && styles.vendorPillActive]}
                       onPress={() => setVendor(v)}
                     >
-                      <Text style={[styles.vendorPillText, selectedVendor === v && { color: colors.background }]}>{v}</Text>
+                      <Text style={[styles.vendorPillText, selectedVendor === v && { color: '#FFFFFF' }]}>{v}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -162,7 +162,7 @@ export const MarketplaceScreen = ({ navigation }: any) => {
                       style={[styles.budgetChip, maxBudget === val && styles.budgetChipActive]}
                       onPress={() => setMaxBudget(val)}
                     >
-                      <Text style={[styles.budgetChipText, maxBudget === val && { color: colors.background }]}>&lt; ${val.toLocaleString()}</Text>
+                      <Text style={[styles.budgetChipText, maxBudget === val && { color: '#FFFFFF' }]}>&lt; ${val.toLocaleString()}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -177,7 +177,7 @@ export const MarketplaceScreen = ({ navigation }: any) => {
                   style={[styles.catPill, selectedCategory === cat && styles.catPillActive]}
                   onPress={() => setCategory(cat)}
                 >
-                  <Text style={[styles.catPillText, selectedCategory === cat && { color: colors.background }]}>{cat}</Text>
+                  <Text style={[styles.catPillText, selectedCategory === cat && { color: '#FFFFFF' }]}>{cat}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -236,7 +236,7 @@ export const MarketplaceScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 10 },
   title: { color: colors.text, fontSize: 18, fontWeight: '900', letterSpacing: 1 },

@@ -219,7 +219,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
                 variant="primary"
                 size="md"
                 style={{ flex: 1 }}
-                icon={<Play size={16} color={colors.background} />}
+                icon={<Play size={16} color="#FFFFFF" />}
                 onPress={startSession}
               />
             )}
@@ -240,11 +240,11 @@ export const TelemetryScreen = ({ navigation }: any) => {
             <Animated.View style={{ opacity: hudFadeAnim, transform: [{ translateY: hudSlideAnim }], alignItems: 'center', width: '100%' }}>
               <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginBottom: 10 }}>WINDSHIELD HUD OVERLAY</Text>
 
-              <Animated.View style={{ opacity: pulseAnim, alignItems: 'center' }}>
-                <Text style={{ color: colors.primary, fontSize: 160, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
+              <Animated.View style={{ opacity: pulseAnim, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: colors.primary, fontSize: 120, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20, textAlign: 'center', includeFontPadding: false }}>
                   {currentSpeedMph}
                 </Text>
-                <Text style={{ color: colors.text, fontSize: 32, fontWeight: '900', letterSpacing: 3, marginTop: -15 }}>MPH</Text>
+                <Text style={{ color: colors.text, fontSize: 32, fontWeight: '900', letterSpacing: 3, marginTop: -10, textAlign: 'center' }}>MPH</Text>
               </Animated.View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '100%', marginTop: 60 }}>
@@ -343,7 +343,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   statusCard: { marginVertical: 8 },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },

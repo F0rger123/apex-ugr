@@ -6,7 +6,7 @@ export const colors = {
   primaryBg: 'rgba(0, 38, 15, 0.6)',
 
   // The Digital Astral Background Base (Depth)
-  deepSpace: '#060E20',        // Deep space base color for nebula
+  deepSpace: '#000000',        // Deep space base color for nebula
   background: 'transparent',   // Transparent to allow nebula to show through
   surface: '#0A0C11',          
   surfaceContainerLow: '#091328',
@@ -22,8 +22,8 @@ export const colors = {
   warning: '#FFB800',          // Telemetry Gold
   info: '#00E5FF',             // Cyber Cyan
   success: '#00FF66',
-  astralPurple: '#be83fa',
-  astralIndigo: '#6366f1',
+  astralPurple: '#111111',
+  astralIndigo: '#222222',
 
   // Text Hierarchy
   text: '#DEE5FF',             // High contrast white/indigo
@@ -33,7 +33,7 @@ export const colors = {
 
   // Glassmorphism overlays
   glassBg: 'rgba(25, 37, 64, 0.4)',
-  glassHeader: 'rgba(6, 14, 32, 0.85)',
+  glassHeader: 'rgba(10, 10, 10, 0.85)',
   overlay: 'rgba(0, 0, 0, 0.85)',
 };
 

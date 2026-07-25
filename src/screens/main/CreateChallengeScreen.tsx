@@ -57,7 +57,7 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
                 style={[styles.chip, raceType === t && styles.chipActive]}
                 onPress={() => setRaceType(t)}
               >
-                <Text style={[styles.chipText, raceType === t && { color: colors.background }]}>{t}</Text>
+                <Text style={[styles.chipText, raceType === t && { color: '#FFFFFF' }]}>{t}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -126,7 +126,7 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   backBtn: { flexDirection: 'row', alignItems: 'center', marginVertical: 8 },
   backText: { color: colors.primary, fontSize: 11, fontWeight: '900', marginLeft: 6, letterSpacing: 1 },

@@ -62,7 +62,7 @@ export const CarMeetsScreen = ({ navigation }: any) => {
             title="HOST EVENT"
             variant="primary"
             size="sm"
-            icon={<Plus size={14} color={colors.background} />}
+            icon={<Plus size={14} color="#FFFFFF" />}
             onPress={() => setShowCreateModal(true)}
           />
         </View>
@@ -116,8 +116,8 @@ export const CarMeetsScreen = ({ navigation }: any) => {
                     style={[styles.rsvpBtn, userRsvp === 'going' && styles.rsvpBtnActive]}
                     onPress={() => toggleRsvp(meet.id, 'going')}
                   >
-                    <CheckCircle2 size={12} color={userRsvp === 'going' ? colors.background : colors.primary} />
-                    <Text style={[styles.rsvpBtnText, userRsvp === 'going' && { color: colors.background }]}>
+                    <CheckCircle2 size={12} color={userRsvp === 'going' ? '#FFFFFF' : colors.primary} />
+                    <Text style={[styles.rsvpBtnText, userRsvp === 'going' && { color: '#FFFFFF' }]}>
                       {userRsvp === 'going' ? 'RSVP: GOING' : 'RSVP GOING'}
                     </Text>
                   </TouchableOpacity>
@@ -126,7 +126,7 @@ export const CarMeetsScreen = ({ navigation }: any) => {
                     style={[styles.rsvpBtn, userRsvp === 'maybe' && styles.rsvpBtnActiveGold]}
                     onPress={() => toggleRsvp(meet.id, 'maybe')}
                   >
-                    <Text style={[styles.rsvpBtnText, userRsvp === 'maybe' && { color: colors.background }]}>MAYBE</Text>
+                    <Text style={[styles.rsvpBtnText, userRsvp === 'maybe' && { color: '#FFFFFF' }]}>MAYBE</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -165,7 +165,7 @@ export const CarMeetsScreen = ({ navigation }: any) => {
                     style={[styles.typeChip, meetType === t && styles.typeChipActive]}
                     onPress={() => setMeetType(t)}
                   >
-                    <Text style={[styles.typeChipText, meetType === t && { color: colors.background }]}>{t}</Text>
+                    <Text style={[styles.typeChipText, meetType === t && { color: '#FFFFFF' }]}>{t}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -189,7 +189,7 @@ export const CarMeetsScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 12 },
   title: { color: colors.text, fontSize: 18, fontWeight: '900', letterSpacing: 1 },

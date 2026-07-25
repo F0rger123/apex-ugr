@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   logoText: {
-    color: colors.background,
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 1,
