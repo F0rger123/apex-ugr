@@ -610,7 +610,7 @@ const DARK_MAP_STYLE = [
 ];
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
 
   mapArea: { height: 340, position: 'relative', backgroundColor: '#070A0F' },
 

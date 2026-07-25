@@ -505,7 +505,7 @@ export const FeedScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
 
   tabBar: {
     position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,

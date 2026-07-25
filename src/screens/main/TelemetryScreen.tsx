@@ -343,7 +343,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   statusCard: { marginVertical: 8 },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },

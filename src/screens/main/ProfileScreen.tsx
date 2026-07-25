@@ -163,7 +163,7 @@ export const ProfileScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   profileHero: { marginVertical: 8 },
   heroRow: { flexDirection: 'row', alignItems: 'center' },

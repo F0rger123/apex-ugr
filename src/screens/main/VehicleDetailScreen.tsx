@@ -221,7 +221,7 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   heroImageContainer: { height: 200, width: '100%', borderRadius: 16, overflow: 'hidden', marginVertical: 8 },
   heroImage: { width: '100%', height: '100%' },

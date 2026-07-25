@@ -161,7 +161,7 @@ export const DashboardScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   welcomeBanner: { marginTop: 8, marginBottom: 8 },
   welcomeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },

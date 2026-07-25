@@ -150,7 +150,7 @@ export const MessagesScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
   layoutRow: { flex: 1, flexDirection: 'row' },
   convoSidebar: { width: 110, backgroundColor: colors.surface, borderRightWidth: 1, borderRightColor: colors.cardBorder, paddingVertical: 8 },
   convoItem: { padding: 8, alignItems: 'center', marginVertical: 4, borderRadius: 8 },

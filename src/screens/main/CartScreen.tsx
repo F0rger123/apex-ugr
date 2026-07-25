@@ -224,7 +224,7 @@ export const CartScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   cartCard: { marginBottom: 8, padding: 10 },
   itemRow: { flexDirection: 'row', alignItems: 'center' },
