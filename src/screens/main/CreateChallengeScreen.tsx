@@ -57,7 +57,7 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
                 style={[styles.chip, raceType === t && styles.chipActive]}
                 onPress={() => setRaceType(t)}
               >
-                <Text style={[styles.chipText, raceType === t && { color: colors.background }]}>{t}</Text>
+                <Text style={[styles.chipText, raceType === t && { color: '#FFFFFF' }]}>{t}</Text>
               </TouchableOpacity>
             ))}
           </View>

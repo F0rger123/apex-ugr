@@ -139,8 +139,8 @@ export const CartScreen = ({ navigation }: any) => {
                   style={[styles.payBtn, paymentMethod === 'credits' && styles.payBtnActive]}
                   onPress={() => setPaymentMethod('credits')}
                 >
-                  <Coins size={16} color={paymentMethod === 'credits' ? colors.background : colors.warning} />
-                  <Text style={[styles.payText, paymentMethod === 'credits' && { color: colors.background }]}>
+                  <Coins size={16} color={paymentMethod === 'credits' ? '#FFFFFF' : colors.warning} />
+                  <Text style={[styles.payText, paymentMethod === 'credits' && { color: '#FFFFFF' }]}>
                     APEX CREDITS (${user?.credits_balance.toLocaleString()})
                   </Text>
                 </TouchableOpacity>
@@ -149,8 +149,8 @@ export const CartScreen = ({ navigation }: any) => {
                   style={[styles.payBtn, paymentMethod === 'card' && styles.payBtnActive]}
                   onPress={() => setPaymentMethod('card')}
                 >
-                  <CreditCard size={16} color={paymentMethod === 'card' ? colors.background : colors.text} />
-                  <Text style={[styles.payText, paymentMethod === 'card' && { color: colors.background }]}>
+                  <CreditCard size={16} color={paymentMethod === 'card' ? '#FFFFFF' : colors.text} />
+                  <Text style={[styles.payText, paymentMethod === 'card' && { color: '#FFFFFF' }]}>
                     CREDIT CARD / APPLE PAY
                   </Text>
                 </TouchableOpacity>
@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
   promoRow: { flexDirection: 'row', gap: 6 },
   promoInput: { flex: 1, backgroundColor: colors.surface, borderRadius: 8, color: colors.text, paddingHorizontal: 10, paddingVertical: 8, fontSize: 12, borderWidth: 1, borderColor: colors.cardBorder },
   applyBtn: { backgroundColor: colors.primary, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 8 },
-  applyBtnText: { color: colors.background, fontSize: 10, fontWeight: '900' },
+  applyBtnText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
   errorText: { color: colors.danger, fontSize: 10, fontWeight: '800', marginTop: 4 },
   successText: { color: colors.primary, fontSize: 10, fontWeight: '800', marginTop: 4 },
 

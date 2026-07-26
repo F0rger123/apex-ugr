@@ -76,7 +76,7 @@ export const GarageScreen = ({ navigation }: any) => {
             title="ADD VEHICLE"
             variant="primary"
             size="sm"
-            icon={<Plus size={14} color={colors.background} />}
+            icon={<Plus size={14} color="#FFFFFF" />}
             onPress={() => setModalVisible(true)}
           />
         </View>

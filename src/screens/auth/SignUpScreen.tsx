@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderRadius: 20, borderWidth: 1, borderColor: colors.cardBorder },
   brandBox: { alignItems: 'center' },
   logoBadge: { backgroundColor: colors.primary, paddingVertical: 3, paddingHorizontal: 8, borderRadius: 4 },
-  logoText: { color: colors.background, fontSize: 13, fontWeight: '900', letterSpacing: 2 },
+  logoText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', letterSpacing: 2 },
   brandTitle: { color: colors.text, fontSize: 22, fontWeight: '900', letterSpacing: 4, marginTop: 2 },
 
   pageTitle: { color: colors.text, fontSize: 20, fontWeight: '900', letterSpacing: 1, textAlign: 'center' },

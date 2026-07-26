@@ -115,10 +115,10 @@ export const DynoChart: React.FC<DynoChartProps> = ({
         <Path d={hpPathD} fill="none" stroke={colors.primary} strokeWidth={3} />
 
         {/* Peak HP Point Marker */}
-        <Circle cx={getX(6800)} cy={getY(maxHp)} r={4} fill={colors.background} stroke={colors.primary} strokeWidth={2} />
+        <Circle cx={getX(6800)} cy={getY(maxHp)} r={4} fill={'#FFFFFF'} stroke={colors.primary} strokeWidth={2} />
 
         {/* Peak TQ Point Marker */}
-        <Circle cx={getX(4500)} cy={getY(maxTorque)} r={4} fill={colors.background} stroke={colors.warning} strokeWidth={2} />
+        <Circle cx={getX(4500)} cy={getY(maxTorque)} r={4} fill={'#FFFFFF'} stroke={colors.warning} strokeWidth={2} />
       </Svg>
     </View>
   );

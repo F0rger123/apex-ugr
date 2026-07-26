@@ -109,7 +109,7 @@ export const DashboardScreen = ({ navigation }: any) => {
                 style={styles.telemetryBtn}
                 onPress={() => navigation.navigate('Telemetry')}
               >
-                <Gauge size={14} color={colors.background} />
+                <Gauge size={14} color="#FFFFFF" />
                 <Text style={styles.telemetryBtnText}>START LAUNCH RUN</Text>
               </TouchableOpacity>
             </View>
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   telemetryMetaSub: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
   telemetryPills: { marginVertical: 8 },
   telemetryBtn: { backgroundColor: colors.primary, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start' },
-  telemetryBtnText: { color: colors.background, fontSize: 10, fontWeight: '900', marginLeft: 4 },
+  telemetryBtnText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900', marginLeft: 4 },
   meetTitle: { color: colors.text, fontSize: 14, fontWeight: '800', marginTop: 4 },
   meetLoc: { color: colors.textSecondary, fontSize: 11, marginTop: 4 },
 });

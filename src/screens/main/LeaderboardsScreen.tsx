@@ -42,7 +42,7 @@ export const LeaderboardsScreen = ({ navigation }: any) => {
               style={[styles.tabItem, scopeTab === tab && styles.tabItemActive]}
               onPress={() => setScopeTab(tab)}
             >
-              <Text style={[styles.tabText, scopeTab === tab && { color: colors.background }]}>
+              <Text style={[styles.tabText, scopeTab === tab && { color: '#FFFFFF' }]}>
                 {tab.toUpperCase()}
               </Text>
             </TouchableOpacity>
@@ -52,23 +52,23 @@ export const LeaderboardsScreen = ({ navigation }: any) => {
         {/* Metric Category Selector */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.catScroll}>
           <TouchableOpacity style={[styles.catChip, category === 'reputation' && styles.catChipActive]} onPress={() => setCategory('reputation')}>
-            <Trophy size={14} color={category === 'reputation' ? colors.background : colors.primary} />
-            <Text style={[styles.catText, category === 'reputation' && { color: colors.background }]}>REPUTATION</Text>
+            <Trophy size={14} color={category === 'reputation' ? '#FFFFFF' : colors.primary} />
+            <Text style={[styles.catText, category === 'reputation' && { color: '#FFFFFF' }]}>REPUTATION</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.catChip, category === 'wins' && styles.catChipActive]} onPress={() => setCategory('wins')}>
-            <Award size={14} color={category === 'wins' ? colors.background : colors.warning} />
-            <Text style={[styles.catText, category === 'wins' && { color: colors.background }]}>WINS</Text>
+            <Award size={14} color={category === 'wins' ? '#FFFFFF' : colors.warning} />
+            <Text style={[styles.catText, category === 'wins' && { color: '#FFFFFF' }]}>WINS</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.catChip, category === 'horsepower' && styles.catChipActive]} onPress={() => setCategory('horsepower')}>
-            <Zap size={14} color={category === 'horsepower' ? colors.background : '#00E5FF'} />
-            <Text style={[styles.catText, category === 'horsepower' && { color: colors.background }]}>TOP SPEED</Text>
+            <Zap size={14} color={category === 'horsepower' ? '#FFFFFF' : '#00E5FF'} />
+            <Text style={[styles.catText, category === 'horsepower' && { color: '#FFFFFF' }]}>TOP SPEED</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.catChip, category === 'credits' && styles.catChipActive]} onPress={() => setCategory('credits')}>
-            <Coins size={14} color={category === 'credits' ? colors.background : '#FFD700'} />
-            <Text style={[styles.catText, category === 'credits' && { color: colors.background }]}>WEALTH</Text>
+            <Coins size={14} color={category === 'credits' ? '#FFFFFF' : '#FFD700'} />
+            <Text style={[styles.catText, category === 'credits' && { color: '#FFFFFF' }]}>WEALTH</Text>
           </TouchableOpacity>
         </ScrollView>
 

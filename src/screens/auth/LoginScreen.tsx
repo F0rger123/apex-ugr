@@ -105,7 +105,7 @@ export const LoginScreen = ({ navigation }: any) => {
             variant="primary"
             size="lg"
             style={{ marginTop: 16 }}
-            icon={<ArrowRight size={16} color={colors.background} />}
+            icon={<ArrowRight size={16} color="#FFFFFF" />}
             onPress={handleLogin}
             disabled={isLoading}
           />
@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
 
   brandBox: { alignItems: 'center', marginBottom: 28 },
   logoBadge: { backgroundColor: colors.primary, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 },
-  logoText: { color: colors.background, fontSize: 16, fontWeight: '900', letterSpacing: 2 },
+  logoText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900', letterSpacing: 2 },
   brandTitle: { color: colors.text, fontSize: 40, fontWeight: '900', letterSpacing: 6, marginTop: 6 },
   brandSub: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1.5, marginTop: 4 },
 

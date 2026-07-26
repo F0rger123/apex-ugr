@@ -254,7 +254,7 @@ const NativeMapView = React.memo(({ currentLocation, driversNearby, meets, user,
           onPress={() => setSelectedMeet(meet)}
         >
           <View style={styles.meetMarker}>
-            <Users size={12} color={colors.background} />
+            <Users size={12} color="#FFFFFF" />
             <Text style={styles.meetMarkerText}>{meet.attendees_count}</Text>
           </View>
         </Marker>
@@ -391,8 +391,8 @@ export const MapScreen = ({ navigation }: any) => {
               style={[styles.privacyChip, isGlobalMode && { backgroundColor: colors.primary }]}
               onPress={() => setIsGlobalMode(!isGlobalMode)}
             >
-              <Eye size={11} color={isGlobalMode ? colors.background : colors.primary} />
-              <Text style={[styles.privacyChipText, isGlobalMode && { color: colors.background }]}>
+              <Eye size={11} color={isGlobalMode ? '#FFFFFF' : colors.primary} />
+              <Text style={[styles.privacyChipText, isGlobalMode && { color: '#FFFFFF' }]}>
                 {isGlobalMode ? 'GLOBAL VIEW' : 'LOCAL RADAR'}
               </Text>
             </TouchableOpacity>
@@ -448,7 +448,7 @@ export const MapScreen = ({ navigation }: any) => {
                 style={styles.actionBtnPrimary}
                 onPress={() => navigation.navigate('CreateChallenge')}
               >
-                <Flag size={13} color={colors.background} />
+                <Flag size={13} color="#FFFFFF" />
                 <Text style={styles.actionBtnPrimaryText}>WAGER RACE</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -490,7 +490,7 @@ export const MapScreen = ({ navigation }: any) => {
                 style={styles.actionBtnPrimary}
                 onPress={() => fetchDirections(selectedMeet.latitude, selectedMeet.longitude)}
               >
-                <MapPin size={13} color={colors.background} />
+                <MapPin size={13} color="#FFFFFF" />
                 <Text style={styles.actionBtnPrimaryText}>GET DIRECTIONS</Text>
               </TouchableOpacity>
             </View>
@@ -506,7 +506,7 @@ export const MapScreen = ({ navigation }: any) => {
             style={[styles.tabBtn, mapTab === 'radar' && styles.tabBtnActive]}
             onPress={() => setMapTab('radar')}
           >
-            <Gauge size={14} color={mapTab === 'radar' ? colors.background : colors.textMuted} />
+            <Gauge size={14} color={mapTab === 'radar' ? '#FFFFFF' : colors.textMuted} />
             <Text style={[styles.tabBtnText, mapTab === 'radar' && styles.tabBtnTextActive]}>
               RADAR ({driversNearby.length})
             </Text>
@@ -515,7 +515,7 @@ export const MapScreen = ({ navigation }: any) => {
             style={[styles.tabBtn, mapTab === 'meets' && styles.tabBtnActive]}
             onPress={() => setMapTab('meets')}
           >
-            <Users size={14} color={mapTab === 'meets' ? colors.background : colors.textMuted} />
+            <Users size={14} color={mapTab === 'meets' ? '#FFFFFF' : colors.textMuted} />
             <Text style={[styles.tabBtnText, mapTab === 'meets' && styles.tabBtnTextActive]}>
               MEETS ({meets.length})
             </Text>
@@ -620,7 +620,7 @@ const styles = StyleSheet.create({
   radarCrossH: { position: 'absolute', width: '100%', height: 1, backgroundColor: 'rgba(0,255,102,0.07)' },
   radarCrossV: { position: 'absolute', height: '100%', width: 1, backgroundColor: 'rgba(0,255,102,0.07)' },
   youDot: { alignItems: 'center' },
-  youPulse: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.background },
+  youPulse: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.primary, borderWidth: 2, borderColor: '#FFFFFF' },
   youLabel: { color: colors.primary, fontSize: 8, fontWeight: '900', marginTop: 2 },
   driverPin: { position: 'absolute', backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder, padding: 5, alignItems: 'center' },
   driverPinSelected: { borderColor: colors.primary },
@@ -639,7 +639,7 @@ const styles = StyleSheet.create({
   driverMarker: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, overflow: 'hidden' },
   driverMarkerAvatar: { width: '100%', height: '100%' },
   meetMarker: { backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 6, borderRadius: 8, gap: 3 },
-  meetMarkerText: { color: colors.background, fontSize: 10, fontWeight: '900' },
+  meetMarkerText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
 
   // Top HUD
   topHud: { position: 'absolute', top: 12, left: 12, right: 12, flexDirection: 'row', justifyContent: 'space-between' },
@@ -654,7 +654,7 @@ const styles = StyleSheet.create({
   turnBtnRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   endRouteBtn: { flex: 1, backgroundColor: colors.danger, padding: 10, borderRadius: 8, alignItems: 'center' },
   nextStepBtn: { flex: 1, backgroundColor: colors.primary, padding: 10, borderRadius: 8, alignItems: 'center' },
-  turnBtnText: { color: colors.background, fontSize: 12, fontWeight: '900' },
+  turnBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
 
   // Selected driver card
   driverCard: { position: 'absolute', bottom: 10, left: 12, right: 12, backgroundColor: 'rgba(11,13,17,0.95)', borderRadius: 16, padding: 12, borderWidth: 1, borderColor: colors.cardBorder },
@@ -670,7 +670,7 @@ const styles = StyleSheet.create({
   speedBadgeUnit: { color: colors.textMuted, fontSize: 8, fontWeight: '800' },
   driverCardActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
   actionBtnPrimary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10 },
-  actionBtnPrimaryText: { color: colors.background, fontSize: 11, fontWeight: '900' },
+  actionBtnPrimaryText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },
   actionBtnSecondary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: colors.cardBorder },
   actionBtnSecondaryText: { color: colors.text, fontSize: 11, fontWeight: '900' },
 
@@ -680,12 +680,12 @@ const styles = StyleSheet.create({
   tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: colors.cardBorder },
   tabBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabBtnText: { color: colors.textMuted, fontSize: 11, fontWeight: '900' },
-  tabBtnTextActive: { color: colors.background },
+  tabBtnTextActive: { color: '#FFFFFF' },
   privacyRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
   privacyBtn: { flex: 1, paddingVertical: 6, backgroundColor: colors.surface, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: colors.cardBorder },
   privacyBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   privacyBtnText: { color: colors.textMuted, fontSize: 8, fontWeight: '900' },
-  privacyBtnTextActive: { color: colors.background },
+  privacyBtnTextActive: { color: '#FFFFFF' },
   listScroll: { flex: 1 },
   listItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
   listAvatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: colors.cardBorder },

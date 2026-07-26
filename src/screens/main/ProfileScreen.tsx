@@ -120,7 +120,7 @@ export const ProfileScreen = ({ navigation }: any) => {
                 style={[styles.pBtn, user?.privacy_mode === m && styles.pBtnActive]}
                 onPress={() => togglePrivacyMode(m)}
               >
-                <Text style={[styles.pBtnText, user?.privacy_mode === m && { color: colors.background }]}>
+                <Text style={[styles.pBtnText, user?.privacy_mode === m && { color: '#FFFFFF' }]}>
                   {m.replace('_', ' ').toUpperCase()}
                 </Text>
               </TouchableOpacity>

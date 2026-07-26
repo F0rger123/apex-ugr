@@ -191,7 +191,7 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
                     style={[styles.catChip, category === c && styles.catChipActive]}
                     onPress={() => setCategory(c)}
                   >
-                    <Text style={[styles.catChipText, category === c && { color: colors.background }]}>{c}</Text>
+                    <Text style={[styles.catChipText, category === c && { color: '#FFFFFF' }]}>{c}</Text>
                   </TouchableOpacity>
                 ))}
               </View>

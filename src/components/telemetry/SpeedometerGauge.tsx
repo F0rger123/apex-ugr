@@ -136,7 +136,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    top: '40%',
+    top: '30%',
+    width: '100%',
   },
   speedNumber: {
     fontSize: 54,

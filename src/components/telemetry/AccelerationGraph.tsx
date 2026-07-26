@@ -46,7 +46,7 @@ export const AccelerationGraph: React.FC<AccelerationGraphProps> = ({
 
         {/* Data points */}
         {points.map((p, idx) => (
-          <Circle key={`p-${idx}`} cx={p.x} cy={p.y} r={3} fill={colors.background} stroke={colors.primary} strokeWidth={2} />
+          <Circle key={`p-${idx}`} cx={p.x} cy={p.y} r={3} fill={'#FFFFFF'} stroke={colors.primary} strokeWidth={2} />
         ))}
       </Svg>
     </View>

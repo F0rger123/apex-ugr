@@ -72,7 +72,7 @@ export const ReportUserModal: React.FC<ReportUserModalProps> = ({
                     style={[styles.reasonChip, selectedReason === r && styles.reasonChipActive]}
                     onPress={() => setSelectedReason(r)}
                   >
-                    <Text style={[styles.reasonText, selectedReason === r && { color: colors.background }]}>{r}</Text>
+                    <Text style={[styles.reasonText, selectedReason === r && { color: '#FFFFFF' }]}>{r}</Text>
                   </TouchableOpacity>
                 ))}
               </View>

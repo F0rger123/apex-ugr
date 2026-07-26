@@ -98,7 +98,7 @@ export const RaceReplayViewer: React.FC<RaceReplayViewerProps> = ({
       {/* Controls */}
       <View style={styles.controlsRow}>
         <TouchableOpacity style={styles.playBtn} onPress={() => setIsPlaying(!isPlaying)}>
-          {isPlaying ? <Pause size={14} color={colors.background} /> : <Play size={14} color={colors.background} />}
+          {isPlaying ? <Pause size={14} color="#FFFFFF" /> : <Play size={14} color="#FFFFFF" />}
           <Text style={styles.playText}>{isPlaying ? 'PAUSE' : 'PLAY REPLAY'}</Text>
         </TouchableOpacity>
 
@@ -123,6 +123,6 @@ const styles = StyleSheet.create({
   racerTime: { color: colors.primary, fontSize: 11, fontWeight: '900' },
   controlsRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
   playBtn: { flex: 1, backgroundColor: colors.primary, paddingVertical: 6, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  playText: { color: colors.background, fontSize: 10, fontWeight: '900', marginLeft: 4 },
+  playText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900', marginLeft: 4 },
   resetBtn: { padding: 6, backgroundColor: colors.card, borderRadius: 8, borderWidth: 1, borderColor: colors.cardBorder },
 });

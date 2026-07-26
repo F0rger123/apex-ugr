@@ -79,7 +79,7 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
                     variant="danger" 
                     size="sm" 
                     style={{ flex: 1 }} 
-                    icon={<Ban size={14} color={colors.background} />}
+                    icon={<Ban size={14} color="#FFFFFF" />}
                     onPress={() => handleAction(report.id, 'resolved')} 
                   />
                 </View>

@@ -111,7 +111,7 @@ const FeedPostCard = ({
             style={styles.authorAvatar}
           />
           <View style={styles.followPlusBadge}>
-            <UserPlus size={9} color={colors.background} />
+            <UserPlus size={9} color="#FFFFFF" />
           </View>
         </TouchableOpacity>
 
@@ -350,7 +350,7 @@ export const FeedScreen = ({ navigation }: any) => {
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.createBtn} onPress={() => setCreateModalVisible(true)}>
-          <Plus size={18} color={colors.background} />
+          <Plus size={18} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
 
@@ -443,7 +443,7 @@ export const FeedScreen = ({ navigation }: any) => {
                 onPress={handleSendComment}
                 disabled={!commentText.trim()}
               >
-                <Send size={16} color={commentText.trim() ? colors.background : colors.textMuted} />
+                <Send size={16} color={commentText.trim() ? '#FFFFFF' : colors.textMuted} />
               </TouchableOpacity>
             </View>
           </View>
@@ -492,7 +492,7 @@ export const FeedScreen = ({ navigation }: any) => {
               disabled={!newCaption.trim() || isPosting}
             >
               {isPosting ? (
-                <ActivityIndicator color={colors.background} />
+                <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text style={styles.postBtnText}>POST TO FEED</Text>
               )}
@@ -562,7 +562,7 @@ const styles = StyleSheet.create({
   authorName: { color: colors.text, fontSize: 16, fontWeight: '900' },
   authorHandle: { color: colors.primary, fontSize: 12, fontWeight: '800' },
   verifiedBadge: { backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 4, marginLeft: 4 },
-  verifiedText: { color: colors.background, fontSize: 9, fontWeight: '900' },
+  verifiedText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900' },
   caption: { color: 'rgba(255,255,255,0.9)', fontSize: 13, lineHeight: 19 },
   tagsRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 4 },
   tag: { color: colors.primary, fontSize: 12, fontWeight: '800' },
@@ -601,5 +601,5 @@ const styles = StyleSheet.create({
   formInput: { backgroundColor: colors.surface, borderRadius: 12, color: colors.text, padding: 12, fontSize: 13, borderWidth: 1, borderColor: colors.cardBorder },
   postBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
   postBtnDisabled: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.cardBorder },
-  postBtnText: { color: colors.background, fontSize: 13, fontWeight: '900', letterSpacing: 1 },
+  postBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', letterSpacing: 1 },
 });

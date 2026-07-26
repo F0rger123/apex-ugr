@@ -79,7 +79,7 @@ export const PriceComparisonModal: React.FC<PriceComparisonModalProps> = ({
 
                       <TouchableOpacity style={styles.visitBtn} onPress={() => openLink(offer.link)}>
                         <Text style={styles.visitText}>BUY ON {offer.vendor.toUpperCase()}</Text>
-                        <ExternalLink size={10} color={colors.background} style={{ marginLeft: 4 }} />
+                        <ExternalLink size={10} color="#FFFFFF" style={{ marginLeft: 4 }} />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -108,5 +108,5 @@ const styles = StyleSheet.create({
   shippingText: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
   offerPrice: { color: colors.text, fontSize: 16, fontWeight: '900', marginBottom: 4 },
   visitBtn: { backgroundColor: colors.primary, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
-  visitText: { color: colors.background, fontSize: 9, fontWeight: '900' },
+  visitText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900' },
 });
