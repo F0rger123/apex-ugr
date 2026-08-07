@@ -33,7 +33,7 @@ export const ApexButton: React.FC<ApexButtonProps> = ({
         return { bg: 'rgba(255, 51, 102, 0.2)', border: colors.danger, text: colors.danger };
       case 'primary':
       default:
-        return { bg: colors.primary, border: colors.primary, text: colors.background };
+        return { bg: colors.primary, border: colors.primary, text: '#000000' };
     }
   };
 

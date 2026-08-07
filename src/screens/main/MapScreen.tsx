@@ -374,7 +374,7 @@ export const MapScreen = ({ navigation }: any) => {
           />
         </View>
         <TouchableOpacity style={styles.searchBtn} onPress={handleSearchLocation}>
-          <Route size={16} color={colors.background} />
+          <Route size={16} color="#000000" />
         </TouchableOpacity>
       </View>
 
@@ -395,12 +395,27 @@ export const MapScreen = ({ navigation }: any) => {
           {/* Follow Me Lock Toggle */}
           <TouchableOpacity
             style={[styles.floatingBtn, followMode ? styles.floatingBtnActive : styles.floatingBtnInactive]}
-            onPress={() => setFollowMode(!followMode)}
+            onPress={() => {
+              setFollowMode(!followMode);
+              if (!followMode) setMapZoom(16);
+            }}
           >
-            <Crosshair size={18} color={followMode ? colors.background : colors.primary} />
-            <Text style={[styles.floatingBtnText, followMode && { color: colors.background }]}>
-              {followMode ? 'LOCKED' : 'FREE PAN'}
+            <Crosshair size={18} color={followMode ? '#000000' : colors.primary} />
+            <Text style={[styles.floatingBtnText, followMode && { color: '#000000' }]}>
+              {followMode ? 'LOCKED (GPS)' : 'FREE PAN'}
             </Text>
+          </TouchableOpacity>
+
+          {/* Center to My Location Button */}
+          <TouchableOpacity
+            style={styles.floatingSquareBtn}
+            onPress={() => {
+              setFollowMode(true);
+              setMapZoom(16);
+              Alert.alert('Centered on GPS', 'Map focused on your live driver location.');
+            }}
+          >
+            <Navigation size={18} color={colors.primary} />
           </TouchableOpacity>
 
           {/* 3D Tilt Toggle */}
@@ -434,22 +449,22 @@ export const MapScreen = ({ navigation }: any) => {
             style={[styles.tabBtn, mapTab === 'radar' && styles.tabBtnActive]}
             onPress={() => setMapTab('radar')}
           >
-            <Globe size={14} color={mapTab === 'radar' ? colors.background : colors.textMuted} />
-            <Text style={[styles.tabText, mapTab === 'radar' && { color: colors.background }]}>RADAR ({driversNearby.length})</Text>
+            <Globe size={14} color={mapTab === 'radar' ? '#000000' : colors.textMuted} />
+            <Text style={[styles.tabText, mapTab === 'radar' && { color: '#000000' }]}>RADAR ({driversNearby.length})</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabBtn, mapTab === 'meets' && styles.tabBtnActive]}
             onPress={() => setMapTab('meets')}
           >
-            <Users size={14} color={mapTab === 'meets' ? colors.background : colors.textMuted} />
-            <Text style={[styles.tabText, mapTab === 'meets' && { color: colors.background }]}>MEETS ({meets.length})</Text>
+            <Users size={14} color={mapTab === 'meets' ? '#000000' : colors.textMuted} />
+            <Text style={[styles.tabText, mapTab === 'meets' && { color: '#000000' }]}>MEETS ({meets.length})</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabBtn, mapTab === 'routes' && styles.tabBtnActive]}
             onPress={() => setMapTab('routes')}
           >
-            <Route size={14} color={mapTab === 'routes' ? colors.background : colors.textMuted} />
-            <Text style={[styles.tabText, mapTab === 'routes' && { color: colors.background }]}>ROUTES</Text>
+            <Route size={14} color={mapTab === 'routes' ? '#000000' : colors.textMuted} />
+            <Text style={[styles.tabText, mapTab === 'routes' && { color: '#000000' }]}>ROUTES</Text>
           </TouchableOpacity>
         </View>
 

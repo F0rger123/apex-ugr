@@ -7,7 +7,9 @@ export const colors = {
 
   // The Digital Astral Background Base (Depth)
   deepSpace: '#060E20',        // Deep space base color for nebula
-  background: 'transparent',   // Transparent to allow nebula to show through
+  background: '#08090C',       // High-contrast deep dark base
+  buttonTextDark: '#000000',   // Deep solid black for primary neon green buttons
+  buttonTextLight: '#FFFFFF',  // High-contrast crisp white for dark buttons
   surface: '#0A0C11',          
   surfaceContainerLow: '#091328',
   surfaceContainerHigh: '#141F38',

@@ -81,7 +81,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.cartBtn} onPress={onAddToCart}>
-              <ShoppingCart size={13} color={colors.background} />
+              <ShoppingCart size={13} color="#000000" />
               <Text style={styles.cartBtnText}>ADD</Text>
             </TouchableOpacity>
           </View>
@@ -98,9 +98,9 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   imageContainer: {
-    height: 130,
+    height: 140,
     width: '100%',
-    backgroundColor: colors.surface,
+    position: 'relative',
   },
   image: {
     width: '100%',
@@ -123,16 +123,16 @@ const styles = StyleSheet.create({
   hpBadge: {
     position: 'absolute',
     bottom: 8,
-    left: 8,
+    right: 8,
   },
   content: {
-    padding: 10,
+    padding: 12,
   },
   brand: {
-    color: colors.textMuted,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.8,
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
   title: {
@@ -140,16 +140,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     marginTop: 2,
-    lineHeight: 17,
   },
   compatPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 255, 102, 0.1)',
-    borderColor: 'rgba(0, 255, 102, 0.3)',
-    borderWidth: 1,
-    paddingVertical: 2,
+    backgroundColor: 'rgba(0, 255, 102, 0.08)',
     paddingHorizontal: 6,
+    paddingVertical: 3,
     borderRadius: 4,
     marginTop: 6,
     alignSelf: 'flex-start',
@@ -211,7 +208,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cartBtnText: {
-    color: colors.background,
+    color: '#000000',
     fontSize: 10,
     fontWeight: '900',
     marginLeft: 4,
