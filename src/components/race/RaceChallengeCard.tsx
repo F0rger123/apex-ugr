@@ -9,6 +9,7 @@ import { Flag, Trophy, Clock, MapPin, ShieldAlert } from 'lucide-react-native';
 
 interface RaceChallengeCardProps {
   challenge: any;
+  onPress?: () => void;
   onAccept?: () => void;
   onDecline?: () => void;
   onViewDispute?: () => void;
@@ -16,6 +17,7 @@ interface RaceChallengeCardProps {
 
 export const RaceChallengeCard: React.FC<RaceChallengeCardProps> = ({
   challenge,
+  onPress,
   onAccept,
   onDecline,
   onViewDispute,
@@ -24,7 +26,7 @@ export const RaceChallengeCard: React.FC<RaceChallengeCardProps> = ({
   const isPending = challenge.status === 'open';
 
   return (
-    <GlassCard activeGlow={isPending} style={styles.card}>
+    <GlassCard onPress={onPress} activeGlow={isPending} style={styles.card}>
       {/* Header Row */}
       <View style={styles.headerRow}>
         <View style={styles.raceTypeGroup}>

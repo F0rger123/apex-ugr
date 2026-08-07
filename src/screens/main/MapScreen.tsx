@@ -13,9 +13,8 @@ import {
 import { useMapStore, DriverRadarMarker, CarMeetWithHost } from '../../stores/mapStore';
 import { useAuthStore } from '../../stores/authStore';
 import { colors } from '../../config/colors';
-import { Navigation, Shield, MapPin, Users, Gauge, MessageSquare, Flag, Eye, EyeOff, ChevronRight } from 'lucide-react-native';
+import { Navigation, Shield, MapPin, Users, Gauge, MessageSquare, Flag, Eye, EyeOff, ChevronRight, Map as MapIcon, Globe } from 'lucide-react-native';
 
-// react-native-maps is not available in web — conditional import
 let MapView: any = null;
 let Marker: any = null;
 let Circle: any = null;
@@ -34,30 +33,26 @@ const STATUS_COLORS: Record<string, string> = {
   'In Telemetry Run': '#FF4444',
 };
 
-// ─── Web Interactive Map ──────────────────────────────────────────────────
+// ─── Web MapLibre GL Map (3D Globe-Like) ──────────────────────────────────────────────────
 const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [htmlLoaded, setHtmlLoaded] = useState(false);
-  const lat = currentLocation?.latitude || 34.0522;
-  const lng = currentLocation?.longitude || -118.2437;
 
-  // Static HTML template — only loaded once!
+  // We only set htmlContent ONCE.
   const [htmlContent] = useState(`
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+      <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
       <style>
-        html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; background: #08090C; font-family: system-ui, sans-serif; }
-        .leaflet-container { background: #08090C !important; }
-        .leaflet-popup-content-wrapper { background: rgba(15,17,23,0.95) !important; color: #fff !important; border: 1px solid #00FF66 !important; border-radius: 10px !important; backdrop-filter: blur(8px); }
-        .leaflet-popup-tip { background: #00FF66 !important; }
-        .racer-tag { color: #00FF66; font-weight: 900; font-size: 13px; margin-bottom: 2px; }
-        .racer-sub { color: #8E9BAE; font-size: 11px; }
-        .speed-tag { color: #FFB800; font-weight: 800; font-size: 12px; margin-top: 4px; }
+        html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; background: #08090C; font-family: system-ui, sans-serif; overflow: hidden; }
+        .maplibregl-popup-content { background: rgba(15,17,23,0.95) !important; color: #fff !important; border: 1px solid #00FF66 !important; border-radius: 10px !important; backdrop-filter: blur(8px); padding: 12px; }
+        .maplibregl-popup-tip { border-top-color: #00FF66 !important; }
+        .racer-tag { color: #00FF66; font-weight: 900; font-size: 14px; margin-bottom: 2px; }
+        .racer-sub { color: #8E9BAE; font-size: 12px; }
+        .speed-tag { color: #FFB800; font-weight: 800; font-size: 13px; margin-top: 6px; }
       </style>
     </head>
     <body>
@@ -68,12 +63,17 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
         
         function initMap(lat, lng) {
           if (map) return;
-          map = L.map('map', { zoomControl: true }).setView([lat, lng], 4);
-          L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap, © CARTO'
-          }).addTo(map);
-          window.parent.postMessage({ type: 'MAP_READY' }, '*');
+          map = new maplibregl.Map({
+            container: 'map',
+            style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+            center: [lng, lat],
+            zoom: 14,
+            pitch: 60, // 3D Pitch
+            bearing: -15, // Slight rotation for cool effect
+            antialias: true
+          });
+          
+          map.addControl(new maplibregl.NavigationControl(), 'top-right');
         }
 
         window.addEventListener('message', function(event) {
@@ -83,39 +83,71 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
             initMap(data.lat, data.lng);
           } else if (data.type === 'UPDATE' && map) {
             if (data.you) {
-              if (markers['you']) map.removeLayer(markers['you']);
-              const youIcon = L.divIcon({ html: '<div style="width:20px;height:20px;background:#00FF66;border-radius:50%;border:3px solid #fff;box-shadow:0 0 15px #00FF66;"></div>', className: '' });
-              markers['you'] = L.marker([data.you.lat, data.you.lng], { icon: youIcon }).addTo(map)
-                .bindPopup('<div class="racer-tag">YOU (LIVE PILOT)</div><div class="racer-sub">Telemetry Active</div>');
-              // Removed map.panTo so user can freely zoom/pan "globe style"
+              if (markers['you']) markers['you'].remove();
+              
+              const el = document.createElement('div');
+              el.style.width = '24px';
+              el.style.height = '24px';
+              el.style.background = '#00FF66';
+              el.style.borderRadius = '50%';
+              el.style.border = '3px solid #fff';
+              el.style.boxShadow = '0 0 20px #00FF66';
+              
+              markers['you'] = new maplibregl.Marker(el)
+                .setLngLat([data.you.lng, data.you.lat])
+                .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML('<div class="racer-tag">YOU (LIVE PILOT)</div><div class="racer-sub">Telemetry Active</div>'))
+                .addTo(map);
             }
 
-            // Update Drivers (clear old ones first)
-            Object.keys(markers).forEach(id => { if (id !== 'you' && !id.startsWith('meet_')) map.removeLayer(markers[id]); });
+            // Update Drivers
+            Object.keys(markers).forEach(id => { if (id !== 'you' && !id.startsWith('meet_')) markers[id].remove(); });
             data.drivers.forEach(d => {
-              const icon = L.divIcon({ html: '<div style="width:16px;height:16px;background:#FFB800;border-radius:50%;border:2px solid #000;box-shadow:0 0 10px #FFB800;"></div>', className: '' });
-              markers[d.id] = L.marker([d.lat, d.lng], { icon: icon }).addTo(map)
-                .bindPopup('<div class="racer-tag">@' + d.name + '</div><div class="racer-sub">' + d.car + '</div><div class="speed-tag">' + d.speed + ' MPH • ' + d.status + '</div>');
+              const el = document.createElement('div');
+              el.style.width = '18px';
+              el.style.height = '18px';
+              el.style.background = '#FFB800';
+              el.style.borderRadius = '50%';
+              el.style.border = '2px solid #000';
+              el.style.boxShadow = '0 0 15px #FFB800';
+
+              markers[d.id] = new maplibregl.Marker(el)
+                .setLngLat([d.lng, d.lat])
+                .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML('<div class="racer-tag">@' + d.name + '</div><div class="racer-sub">' + d.car + '</div><div class="speed-tag">' + d.speed + ' MPH • ' + d.status + '</div>'))
+                .addTo(map);
             });
 
             // Update Meets
-            Object.keys(markers).forEach(id => { if (id.startsWith('meet_')) map.removeLayer(markers[id]); });
+            Object.keys(markers).forEach(id => { if (id.startsWith('meet_')) markers[id].remove(); });
             data.meets.forEach(m => {
-              const icon = L.divIcon({ html: '<div style="width:24px;height:24px;background:#FF0055;border-radius:6px;border:2px solid #fff;box-shadow:0 0 12px #FF0055;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:bold;">MEET</div>', className: '' });
-              markers['meet_'+m.id] = L.marker([m.lat, m.lng], { icon: icon }).addTo(map)
-                .bindPopup('<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div><div class="racer-sub">' + m.location + '</div>');
+              const el = document.createElement('div');
+              el.style.width = '30px';
+              el.style.height = '30px';
+              el.style.background = '#FF0055';
+              el.style.borderRadius = '8px';
+              el.style.border = '2px solid #fff';
+              el.style.boxShadow = '0 0 15px #FF0055';
+              el.style.display = 'flex';
+              el.style.alignItems = 'center';
+              el.style.justifyContent = 'center';
+              el.style.color = '#fff';
+              el.style.fontSize = '10px';
+              el.style.fontWeight = 'bold';
+              el.innerText = 'MEET';
+
+              markers['meet_'+m.id] = new maplibregl.Marker(el)
+                .setLngLat([m.lng, m.lat])
+                .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML('<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div><div class="racer-sub">' + m.location + '</div>'))
+                .addTo(map);
             });
           }
         });
         
-        // Initialize with default, will be overridden by UPDATE
         initMap(34.0522, -118.2437);
       </script>
     </body>
     </html>
   `);
 
-  // Send updates to iframe when data changes
   useEffect(() => {
     if (iframeRef.current && iframeRef.current.contentWindow) {
       const message = {
@@ -131,14 +163,12 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
           title: m.title, location: m.location_name
         }))
       };
-      // For cross-origin safety in webviews, use '*' in this specific constrained environment,
-      // though typically you'd restrict this to window.location.origin
       iframeRef.current.contentWindow.postMessage(message, '*');
     }
   }, [currentLocation, driversNearby, meets]);
 
   return (
-    <View style={{ flex: 1, minHeight: 380, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: colors.cardBorder }}>
+    <View style={{ flex: 1, minHeight: 480, borderRadius: 16, overflow: 'hidden', borderWidth: 2, borderColor: colors.cardBorder }}>
       {Platform.OS === 'web' ? (
         <iframe
           ref={iframeRef}
@@ -153,6 +183,11 @@ const WebRadarView = React.memo(({ currentLocation, driversNearby, meets }: any)
       )}
     </View>
   );
+}, (prev, next) => {
+  // Only re-render if we really need to, to prevent iframe flashing
+  return prev.currentLocation?.latitude === next.currentLocation?.latitude 
+      && prev.driversNearby.length === next.driversNearby.length 
+      && prev.meets.length === next.meets.length;
 });
 
 // ─── Native Map View ──────────────────────────────────────────────────────
@@ -170,22 +205,12 @@ const NativeMapView = React.memo(({ currentLocation, driversNearby, meets, user,
         longitudeDelta: 0.05,
       }}
       customMapStyle={DARK_MAP_STYLE}
+      pitchEnabled={true}
+      showsUserLocation={true}
+      showsCompass={true}
+      showsBuildings={true}
+      showsTraffic={true}
     >
-      {/* User's own location */}
-      {currentLocation && (
-        <Marker
-          coordinate={{ latitude: currentLocation.latitude, longitude: currentLocation.longitude }}
-          title="You"
-          description={user?.display_name}
-        >
-          <View style={styles.youMarker}>
-            <Image source={{ uri: user?.avatar_url || '' }} style={styles.youMarkerAvatar} />
-            <View style={styles.youMarkerPulse} />
-          </View>
-        </Marker>
-      )}
-
-      {/* Visibility radius circle */}
       {currentLocation && (
         <Circle
           center={{ latitude: currentLocation.latitude, longitude: currentLocation.longitude }}
@@ -196,7 +221,6 @@ const NativeMapView = React.memo(({ currentLocation, driversNearby, meets, user,
         />
       )}
 
-      {/* Nearby driver markers */}
       {driversNearby.map((driver: any) => (
         <Marker
           key={driver.id}
@@ -209,7 +233,6 @@ const NativeMapView = React.memo(({ currentLocation, driversNearby, meets, user,
         </Marker>
       ))}
 
-      {/* Meet location markers */}
       {meets.map((meet: any) => (
         <Marker
           key={meet.id}
@@ -249,294 +272,220 @@ export const MapScreen = ({ navigation }: any) => {
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
-    if (!user) return;
-
-    // Start real GPS tracking and Realtime driver subscription
-    startLocationTracking(user.id);
+    startLocationTracking(user?.id);
     subscribeToDriverLocations();
-
+    fetchMeets(currentLocation?.latitude, currentLocation?.longitude);
     return () => {
       stopLocationTracking();
       unsubscribeFromDriverLocations();
     };
   }, [user?.id]);
 
-  useEffect(() => {
-    if (currentLocation) {
-      fetchMeets(currentLocation.latitude, currentLocation.longitude);
-    }
-  }, [currentLocation?.latitude, currentLocation?.longitude]);
-
-  const handlePrivacyToggle = (mode: typeof privacyMode) => {
-    if (!user) return;
-    setPrivacyMode(mode, user.id);
-  };
   return (
     <View style={styles.container}>
-      {/* Map Area */}
-      <View style={styles.mapArea}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerTitle}>CITY MAP</Text>
+          <Text style={styles.headerSub}>3D STREET RADAR</Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.privacyBtn, privacyMode === 'invisible' && styles.privacyBtnActive]}
+          onPress={() => setPrivacyMode(privacyMode === 'invisible' ? 'all' : 'invisible', user?.id)}
+        >
+          {privacyMode === 'invisible' ? <EyeOff size={16} color={colors.danger} /> : <Eye size={16} color={colors.primary} />}
+          <Text style={[styles.privacyText, privacyMode === 'invisible' && { color: colors.danger }]}>
+            {privacyMode === 'invisible' ? 'GHOST' : 'LIVE'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.mapContainer}>
         {Platform.OS === 'web' ? (
-          <WebRadarView currentLocation={currentLocation} driversNearby={driversNearby} meets={meets} />
+          <WebRadarView
+            currentLocation={currentLocation}
+            driversNearby={driversNearby}
+            meets={meets}
+          />
         ) : (
-          <NativeMapView 
-            currentLocation={currentLocation} 
-            driversNearby={driversNearby} 
-            meets={meets} 
+          <NativeMapView
+            mapRef={mapRef}
+            currentLocation={currentLocation}
+            driversNearby={driversNearby}
+            meets={meets}
             user={user}
             visibilityRadiusKm={visibilityRadiusKm}
             setSelectedDriver={setSelectedDriver}
             setSelectedMeet={setSelectedMeet}
-            mapRef={mapRef}
           />
         )}
 
-        {/* Top HUD */}
-        <View style={styles.topHud}>
-          <View style={styles.privacyChip}>
-            <Shield size={11} color={colors.primary} />
-            <Text style={styles.privacyChipText}>
-              {privacyMode === 'invisible' ? 'INVISIBLE' : `${privacyMode.toUpperCase()}`}
-            </Text>
-          </View>
-          <View style={styles.locationChip}>
-            <Navigation size={11} color={currentLocation ? colors.primary : colors.textMuted} />
-            <Text style={styles.locationChipText}>
-              {currentLocation ? 'GPS LOCKED' : 'ACQUIRING GPS...'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Selected Driver Card */}
-        {selectedDriver && (
-          <View style={styles.driverCard}>
-            <TouchableOpacity style={styles.driverCardClose} onPress={() => setSelectedDriver(null)}>
-              <Text style={styles.driverCardCloseText}>✕</Text>
-            </TouchableOpacity>
-            <View style={styles.driverCardRow}>
-              <Image
-                source={{ uri: selectedDriver.profile?.avatar_url || '' }}
-                style={styles.driverCardAvatar}
-              />
-              <View style={{ flex: 1, marginLeft: 10 }}>
-                <Text style={styles.driverCardName}>{selectedDriver.profile?.display_name || selectedDriver.profile?.username}</Text>
-                <Text style={styles.driverCardVehicle}>{selectedDriver.status}</Text>
-                <Text style={styles.driverCardRep}>{selectedDriver.profile?.reputation_level}</Text>
-              </View>
-              <View style={[styles.speedBadge, { borderColor: STATUS_COLORS[selectedDriver.status] || colors.primary }]}>
-                <Text style={[styles.speedBadgeText, { color: STATUS_COLORS[selectedDriver.status] || colors.primary }]}>
-                  {selectedDriver.speed_mph}
-                </Text>
-                <Text style={styles.speedBadgeUnit}>MPH</Text>
-              </View>
-            </View>
-            <View style={styles.driverCardActions}>
-              <TouchableOpacity
-                style={styles.actionBtnPrimary}
-                onPress={() => navigation.navigate('CreateChallenge')}
-              >
-                <Flag size={13} color={colors.background} />
-                <Text style={styles.actionBtnPrimaryText}>WAGER RACE</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.actionBtnSecondary}
-                onPress={() => navigation.navigate('Messages')}
-              >
-                <MessageSquare size={13} color={colors.text} />
-                <Text style={styles.actionBtnSecondaryText}>MESSAGE</Text>
-              </TouchableOpacity>
-            </View>
+        {isLoading && !currentLocation && (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator color={colors.primary} size="large" />
+            <Text style={styles.loadingText}>CALIBRATING GPS SENSORS...</Text>
           </View>
         )}
       </View>
 
-      {/* Bottom Panel */}
-      <View style={styles.bottomPanel}>
-        {/* Tab switcher */}
-        <View style={styles.tabRow}>
+      <ScrollView style={styles.infoPanel} showsVerticalScrollIndicator={false}>
+        <View style={styles.tabBar}>
           <TouchableOpacity
             style={[styles.tabBtn, mapTab === 'radar' && styles.tabBtnActive]}
             onPress={() => setMapTab('radar')}
           >
-            <Gauge size={14} color={mapTab === 'radar' ? colors.background : colors.textMuted} />
-            <Text style={[styles.tabBtnText, mapTab === 'radar' && styles.tabBtnTextActive]}>
-              RADAR ({driversNearby.length})
-            </Text>
+            <Globe size={16} color={mapTab === 'radar' ? colors.background : colors.textMuted} />
+            <Text style={[styles.tabText, mapTab === 'radar' && { color: colors.background }]}>LIVE RADAR</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabBtn, mapTab === 'meets' && styles.tabBtnActive]}
             onPress={() => setMapTab('meets')}
           >
-            <Users size={14} color={mapTab === 'meets' ? colors.background : colors.textMuted} />
-            <Text style={[styles.tabBtnText, mapTab === 'meets' && styles.tabBtnTextActive]}>
-              MEETS ({meets.length})
-            </Text>
+            <MapPin size={16} color={mapTab === 'meets' ? colors.background : colors.textMuted} />
+            <Text style={[styles.tabText, mapTab === 'meets' && { color: colors.background }]}>LOCAL MEETS</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Privacy controls */}
-        {mapTab === 'radar' && (
-          <View style={styles.privacyRow}>
-            {(['all', 'friends', 'meet_only', 'invisible'] as const).map((mode) => (
-              <TouchableOpacity
-                key={mode}
-                style={[styles.privacyBtn, privacyMode === mode && styles.privacyBtnActive]}
-                onPress={() => handlePrivacyToggle(mode)}
-              >
-                <Text style={[styles.privacyBtnText, privacyMode === mode && styles.privacyBtnTextActive]}>
-                  {mode === 'meet_only' ? 'MEETS' : mode.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Driver list or meets list */}
-        <ScrollView style={styles.listScroll} showsVerticalScrollIndicator={false}>
-          {mapTab === 'radar' ? (
-            driversNearby.length > 0 ? (
-              driversNearby.map((driver) => (
+        {mapTab === 'radar' ? (
+          <View style={styles.radarList}>
+            {driversNearby.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Globe size={32} color={colors.textMuted} style={{ marginBottom: 12 }} />
+                <Text style={styles.emptyTitle}>NO DRIVERS DETECTED</Text>
+                <Text style={styles.emptySub}>Expand your radar range or wait for active drivers.</Text>
+              </View>
+            ) : (
+              driversNearby.map(driver => (
                 <TouchableOpacity
                   key={driver.id}
-                  style={styles.listItem}
+                  style={[styles.driverCard, selectedDriver?.id === driver.id && styles.driverCardActive]}
                   onPress={() => setSelectedDriver(driver)}
                 >
-                  <Image source={{ uri: driver.profile?.avatar_url || '' }} style={styles.listAvatar} />
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={styles.listName}>{driver.profile?.display_name || driver.profile?.username}</Text>
-                    <Text style={styles.listSub}>{driver.status}</Text>
+                  <Image source={{ uri: driver.profile?.avatar_url || '' }} style={styles.driverAvatar} />
+                  <View style={styles.driverInfo}>
+                    <Text style={styles.driverName}>@{driver.profile?.username || 'Racer'}</Text>
+                    <Text style={styles.driverCar}>{driver.vehicle ? `${driver.vehicle.year} ${driver.vehicle.make} ${driver.vehicle.model}` : 'Tuned Performance Car'}</Text>
                   </View>
-                  <View style={styles.listRight}>
-                    <Text style={[styles.listSpeed, { color: STATUS_COLORS[driver.status] || colors.primary }]}>
-                      {driver.speed_mph} MPH
-                    </Text>
-                    <ChevronRight size={14} color={colors.textMuted} />
+                  <View style={styles.driverStatusBlock}>
+                    <Text style={[styles.driverSpeed, { color: STATUS_COLORS[driver.status] || colors.primary }]}>{driver.speed_mph} MPH</Text>
+                    <Text style={styles.driverStatus}>{driver.status}</Text>
                   </View>
                 </TouchableOpacity>
               ))
-            ) : (
-              <View style={styles.emptyList}>
-                <Text style={styles.emptyListText}>No drivers nearby. Your GPS is broadcasting.</Text>
+            )}
+          </View>
+        ) : (
+          <View style={styles.meetsList}>
+            {meets.length === 0 ? (
+              <View style={styles.emptyState}>
+                <MapPin size={32} color={colors.textMuted} style={{ marginBottom: 12 }} />
+                <Text style={styles.emptyTitle}>NO MEETS SCHEDULED</Text>
+                <Text style={styles.emptySub}>Host your own car meet to populate the map.</Text>
               </View>
-            )
-          ) : (
-            meets.length > 0 ? (
-              meets.map((meet) => (
+            ) : (
+              meets.map(meet => (
                 <TouchableOpacity
                   key={meet.id}
-                  style={styles.listItem}
+                  style={[styles.meetCard, selectedMeet?.id === meet.id && styles.meetCardActive]}
                   onPress={() => setSelectedMeet(meet)}
                 >
-                  <View style={styles.meetIcon}>
-                    <Users size={16} color={colors.primary} />
+                  <View style={styles.meetIconBox}>
+                    <Users size={20} color={colors.background} />
                   </View>
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={styles.listName} numberOfLines={1}>{meet.title}</Text>
-                    <Text style={styles.listSub}>{meet.location_name} • {meet.attendees_count} attending</Text>
+                  <View style={styles.meetInfo}>
+                    <Text style={styles.meetTitle}>{meet.title}</Text>
+                    <Text style={styles.meetLocation}>{meet.location_name}</Text>
+                    <Text style={styles.meetTime}>{new Date(meet.start_time).toLocaleString()}</Text>
                   </View>
-                  <ChevronRight size={14} color={colors.textMuted} />
+                  <View style={styles.meetAttendees}>
+                    <Text style={styles.attendeeCount}>{meet.attendees_count}</Text>
+                    <Text style={styles.attendeeLabel}>RSVP</Text>
+                  </View>
                 </TouchableOpacity>
               ))
-            ) : (
-              <View style={styles.emptyList}>
-                <Text style={styles.emptyListText}>No meets in your area.</Text>
-              </View>
-            )
-          )}
-          <View style={{ height: 20 }} />
-        </ScrollView>
-      </View>
+            )}
+          </View>
+        )}
+        <View style={{ height: 40 }} />
+      </ScrollView>
     </View>
   );
 };
 
-// Dark map style for react-native-maps
-const DARK_MAP_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#08090C' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#6b7280' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#08090C' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1a1d24' }] },
-  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#141720' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#1e2128' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#060710' }] },
-];
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-
-  mapArea: { height: 340, position: 'relative', backgroundColor: '#070A0F' },
-
-  // Web radar
-  webRadarContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  radarRing: { position: 'absolute', borderWidth: 1, borderColor: 'rgba(0,255,102,0.12)' },
-  radarCrossH: { position: 'absolute', width: '100%', height: 1, backgroundColor: 'rgba(0,255,102,0.07)' },
-  radarCrossV: { position: 'absolute', height: '100%', width: 1, backgroundColor: 'rgba(0,255,102,0.07)' },
-  youDot: { alignItems: 'center' },
-  youPulse: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.background },
-  youLabel: { color: colors.primary, fontSize: 8, fontWeight: '900', marginTop: 2 },
-  driverPin: { position: 'absolute', backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder, padding: 5, alignItems: 'center' },
-  driverPinSelected: { borderColor: colors.primary },
-  driverPinDot: { width: 6, height: 6, borderRadius: 3, marginBottom: 2 },
-  pinAvatar: { width: 24, height: 24, borderRadius: 12 },
-  pinName: { color: colors.text, fontSize: 7, fontWeight: '800', marginTop: 2 },
-  pinSpeed: { fontSize: 7, fontWeight: '900' },
-  radarStats: { position: 'absolute', top: 10, left: 12 },
-  radarStatText: { color: colors.primary, fontSize: 9, fontWeight: '900' },
-
-  // Native map
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, paddingTop: 40, backgroundColor: colors.surface },
+  headerTitle: { color: colors.text, fontSize: 20, fontWeight: '900', letterSpacing: 1 },
+  headerSub: { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 2, marginTop: 2 },
+  privacyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0, 255, 102, 0.1)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.primary },
+  privacyBtnActive: { backgroundColor: 'rgba(255, 68, 68, 0.1)', borderColor: colors.danger },
+  privacyText: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  
+  mapContainer: { flex: 0.6, margin: 12, borderRadius: 16, overflow: 'hidden', position: 'relative' },
+  webRadarContainer: { flex: 1, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   nativeMap: { flex: 1 },
-  youMarker: { alignItems: 'center' },
-  youMarkerAvatar: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: colors.primary },
-  youMarkerPulse: { position: 'absolute', width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, borderColor: colors.primary, opacity: 0.4 },
-  driverMarker: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, overflow: 'hidden' },
+  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8, 9, 12, 0.8)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+  loadingText: { color: colors.primary, fontSize: 12, fontWeight: '900', letterSpacing: 2, marginTop: 12 },
+  
+  infoPanel: { flex: 0.4, paddingHorizontal: 16 },
+  tabBar: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 10, padding: 3, marginVertical: 12 },
+  tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8, gap: 6 },
+  tabBtnActive: { backgroundColor: colors.primary },
+  tabText: { color: colors.textMuted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  
+  radarList: { gap: 10 },
+  meetsList: { gap: 10 },
+  
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder },
+  emptyTitle: { color: colors.text, fontSize: 14, fontWeight: '900', letterSpacing: 1 },
+  emptySub: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+  
+  driverCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder },
+  driverCardActive: { borderColor: colors.primary, backgroundColor: 'rgba(0, 255, 102, 0.05)' },
+  driverAvatar: { width: 44, height: 44, borderRadius: 22, marginRight: 12, borderWidth: 2, borderColor: colors.cardBorder },
+  driverInfo: { flex: 1 },
+  driverName: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  driverCar: { color: colors.textMuted, fontSize: 11, fontWeight: '700', marginTop: 2 },
+  driverStatusBlock: { alignItems: 'flex-end' },
+  driverSpeed: { fontSize: 16, fontWeight: '900' },
+  driverStatus: { color: colors.textSecondary, fontSize: 9, fontWeight: '800', marginTop: 2, letterSpacing: 0.5 },
+  
+  meetCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder },
+  meetCardActive: { borderColor: '#FF0055', backgroundColor: 'rgba(255, 0, 85, 0.05)' },
+  meetIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FF0055', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  meetInfo: { flex: 1 },
+  meetTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  meetLocation: { color: colors.textMuted, fontSize: 11, fontWeight: '700', marginTop: 2 },
+  meetTime: { color: colors.primary, fontSize: 10, fontWeight: '800', marginTop: 4 },
+  meetAttendees: { alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  attendeeCount: { color: colors.text, fontSize: 16, fontWeight: '900' },
+  attendeeLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', marginTop: 2 },
+  
+  youMarker: { alignItems: 'center', justifyContent: 'center' },
+  youMarkerAvatar: { width: 32, height: 32, borderRadius: 16, borderWidth: 3, borderColor: colors.primary, zIndex: 2 },
+  youMarkerPulse: { position: 'absolute', width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0, 255, 102, 0.3)', zIndex: 1 },
+  driverMarker: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, overflow: 'hidden' },
   driverMarkerAvatar: { width: '100%', height: '100%' },
-  meetMarker: { backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 6, borderRadius: 8, gap: 3 },
+  meetMarker: { backgroundColor: '#FF0055', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 2, borderColor: colors.background },
   meetMarkerText: { color: colors.background, fontSize: 10, fontWeight: '900' },
-
-  // Top HUD
-  topHud: { position: 'absolute', top: 12, left: 12, right: 12, flexDirection: 'row', justifyContent: 'space-between' },
-  privacyChip: { backgroundColor: 'rgba(0,255,102,0.1)', borderWidth: 1, borderColor: colors.primary, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  privacyChipText: { color: colors.primary, fontSize: 9, fontWeight: '900' },
-  locationChip: { backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: colors.cardBorder },
-  locationChipText: { color: colors.text, fontSize: 9, fontWeight: '800' },
-
-  // Selected driver card
-  driverCard: { position: 'absolute', bottom: 10, left: 12, right: 12, backgroundColor: 'rgba(11,13,17,0.95)', borderRadius: 16, padding: 12, borderWidth: 1, borderColor: colors.cardBorder },
-  driverCardClose: { position: 'absolute', top: 10, right: 10, zIndex: 1 },
-  driverCardCloseText: { color: colors.textMuted, fontSize: 14 },
-  driverCardRow: { flexDirection: 'row', alignItems: 'center' },
-  driverCardAvatar: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: colors.primary },
-  driverCardName: { color: colors.text, fontSize: 14, fontWeight: '900' },
-  driverCardVehicle: { color: colors.primary, fontSize: 11, fontWeight: '700', marginTop: 1 },
-  driverCardRep: { color: colors.textMuted, fontSize: 9, marginTop: 1 },
-  speedBadge: { alignItems: 'center', borderWidth: 1, borderRadius: 8, padding: 6, minWidth: 48 },
-  speedBadgeText: { fontSize: 18, fontWeight: '900', lineHeight: 20 },
-  speedBadgeUnit: { color: colors.textMuted, fontSize: 8, fontWeight: '800' },
-  driverCardActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  actionBtnPrimary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10 },
-  actionBtnPrimaryText: { color: colors.background, fontSize: 11, fontWeight: '900' },
-  actionBtnSecondary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: colors.cardBorder },
-  actionBtnSecondaryText: { color: colors.text, fontSize: 11, fontWeight: '900' },
-
-  // Bottom panel
-  bottomPanel: { flex: 1, paddingHorizontal: 16, paddingTop: 10 },
-  tabRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: colors.cardBorder },
-  tabBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  tabBtnText: { color: colors.textMuted, fontSize: 11, fontWeight: '900' },
-  tabBtnTextActive: { color: colors.background },
-  privacyRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
-  privacyBtn: { flex: 1, paddingVertical: 6, backgroundColor: colors.surface, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: colors.cardBorder },
-  privacyBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  privacyBtnText: { color: colors.textMuted, fontSize: 8, fontWeight: '900' },
-  privacyBtnTextActive: { color: colors.background },
-  listScroll: { flex: 1 },
-  listItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
-  listAvatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: colors.cardBorder },
-  listName: { color: colors.text, fontSize: 13, fontWeight: '800' },
-  listSub: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
-  listRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  listSpeed: { fontSize: 14, fontWeight: '900' },
-  meetIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(0,255,102,0.1)', borderWidth: 1, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  emptyList: { padding: 20, alignItems: 'center' },
-  emptyListText: { color: colors.textMuted, fontSize: 12, textAlign: 'center' },
 });
+
+const DARK_MAP_STYLE = [
+  { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+  { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+  { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#263c3f" }] },
+  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6b9a76" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
+  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9ca5b3" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#746855" }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#1f2835" }] },
+  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#f3d19c" }] },
+  { featureType: "transit", elementType: "geometry", stylers: [{ color: "#2f3948" }] },
+  { featureType: "transit.station", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#515c6d" }] },
+  { featureType: "water", elementType: "labels.text.stroke", stylers: [{ color: "#17263c" }] }
+];

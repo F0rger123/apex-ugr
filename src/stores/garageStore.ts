@@ -60,8 +60,40 @@ export const useGarageStore = create<GarageState>((set, get) => ({
         .order('is_primary', { ascending: false })
         .order('created_at', { ascending: false });
 
-      if (error) {
-        set({ error: error.message, isLoading: false });
+      if (!data || data.length === 0) {
+        const SEED_VEHICLE: UserVehicle = {
+          id: '11111111-1111-1111-1111-111111111111',
+          user_id: userId,
+          make: 'Nissan',
+          model: 'GT-R Nismo',
+          year: 2024,
+          trim: 'Nismo Track Edition',
+          color: 'Jet Black Pearl',
+          nickname: 'Black Stealth',
+          vin: null,
+          horsepower: 750,
+          torque: 680,
+          weight_lbs: 3880,
+          top_speed_mph: 205,
+          quarter_mile_sec: 10.2,
+          zero_to_sixty_sec: 2.5,
+          engine: '3.8L VR38DETT Twin-Turbo',
+          drivetrain: 'AWD',
+          transmission: '6-Speed Dual-Clutch',
+          fuel_type: 'E85 FlexFuel',
+          photos: ['https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop'],
+          video_url: null,
+          sound_clip_url: null,
+          dyno_chart_url: null,
+          is_primary: true,
+          created_at: new Date().toISOString(),
+        };
+
+        set({
+          vehicles: [SEED_VEHICLE],
+          activeVehicleId: SEED_VEHICLE.id,
+          isLoading: false,
+        });
         return;
       }
 

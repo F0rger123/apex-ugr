@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   Image,
   TouchableOpacity,
   Modal,
@@ -24,167 +25,8 @@ import { Heart, MessageSquare, Repeat2, Share2, Plus, Send, X, Volume2, VolumeX,
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const POST_HEIGHT = Platform.OS === 'web' ? SCREEN_HEIGHT - 60 : SCREEN_HEIGHT - 90;
 
-// ─── Single Post Card (full-screen) ──────────────────────────────────────────
-const FeedPostCard = ({
-  post,
-  isActive,
-  onLike,
-  onComment,
-  onFollow,
-}: {
-  post: PostWithProfile;
-  isActive: boolean;
-  onLike: () => void;
-  onComment: () => void;
-  onFollow: () => void;
-}) => {
-  const [isPaused, setIsPaused] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const author = post.user_profile;
-
-  const lastTapRef = useRef<number>(0);
-  const handlePress = () => {
-    const now = Date.now();
-    const DOUBLE_PRESS_DELAY = 300;
-    if (lastTapRef.current && (now - lastTapRef.current) < DOUBLE_PRESS_DELAY) {
-      onLike();
-      // Optional: We could trigger a local heart animation here
-    } else {
-      setIsPaused(!isPaused);
-    }
-    lastTapRef.current = now;
-  };
-
-  return (
-    <View style={[styles.postCard, { height: POST_HEIGHT }]}>
-      {/* Media Background */}
-      {post.post_type === 'video' ? (
-        <TouchableOpacity 
-          activeOpacity={1} 
-          style={styles.mediaBackground} 
-          onPress={handlePress}
-        >
-          <Video
-            source={{ uri: post.media_url }}
-            style={styles.mediaBackground}
-            resizeMode={(ResizeMode?.COVER || 'cover') as any}
-            shouldPlay={isActive && !isPaused}
-            isLooping
-            isMuted={isMuted}
-          />
-          {isPaused && (
-            <View style={styles.pauseOverlay}>
-              <Play size={64} color="rgba(255,255,255,0.8)" fill="rgba(255,255,255,0.8)" />
-            </View>
-          )}
-        </TouchableOpacity>
-      ) : (
-        <Image
-          source={{ uri: post.thumbnail_url || post.media_url }}
-          style={styles.mediaBackground}
-          resizeMode="cover"
-        />
-      )}
-
-      {/* Gradient overlay for readability */}
-      <View style={styles.gradientOverlay} pointerEvents="none" />
-
-      {/* Top bar — post type badge + audio pill */}
-      <View style={styles.topBar}>
-        <View style={styles.typeBadge}>
-          <Text style={styles.typeBadgeText}>{post.post_type.toUpperCase().replace('_', ' ')}</Text>
-        </View>
-        {post.post_type === 'video' && (
-          <TouchableOpacity style={styles.audioPill} onPress={() => setIsMuted(!isMuted)}>
-            {isMuted ? <VolumeX size={11} color={colors.textMuted} /> : <Volume2 size={11} color={colors.primary} />}
-            <Text style={styles.audioPillText}>{isMuted ? 'MUTED' : 'EXHAUST TELEMETRY AUDIO'}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Right sidebar — social actions */}
-      <View style={styles.rightSidebar}>
-        {/* Avatar + follow */}
-        <TouchableOpacity style={styles.avatarContainer} onPress={onFollow}>
-          <Image
-            source={{ uri: author?.avatar_url || '' }}
-            style={styles.authorAvatar}
-          />
-          <View style={styles.followPlusBadge}>
-            <UserPlus size={9} color={colors.background} />
-          </View>
-        </TouchableOpacity>
-
-        {/* Like */}
-        <TouchableOpacity style={styles.actionItem} onPress={onLike}>
-          <View style={[styles.actionCircle, post.user_has_liked && styles.actionCircleLiked]}>
-            <Heart
-              size={24}
-              color={post.user_has_liked ? '#FF3366' : colors.text}
-              fill={post.user_has_liked ? '#FF3366' : 'none'}
-            />
-          </View>
-          <Text style={[styles.actionCount, post.user_has_liked && { color: '#FF3366' }]}>
-            {post.likes_count >= 1000
-              ? `${(post.likes_count / 1000).toFixed(1)}K`
-              : post.likes_count}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Comment */}
-        <TouchableOpacity style={styles.actionItem} onPress={onComment}>
-          <View style={styles.actionCircle}>
-            <MessageSquare size={24} color={colors.text} />
-          </View>
-          <Text style={styles.actionCount}>{post.comments_count}</Text>
-        </TouchableOpacity>
-
-        {/* Repost */}
-        <TouchableOpacity style={styles.actionItem}>
-          <View style={styles.actionCircle}>
-            <Repeat2 size={24} color={colors.text} />
-          </View>
-          <Text style={styles.actionCount}>{post.reposts_count}</Text>
-        </TouchableOpacity>
-
-        {/* Share */}
-        <TouchableOpacity style={styles.actionItem}>
-          <View style={styles.actionCircle}>
-            <Share2 size={22} color={colors.text} />
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      {/* Bottom info overlay */}
-      <View style={styles.bottomOverlay}>
-        <View style={styles.authorRow}>
-          <Text style={styles.authorName}>{author?.display_name}</Text>
-          <Text style={styles.authorHandle}> @{author?.username}</Text>
-          {author?.is_verified && (
-            <View style={styles.verifiedBadge}>
-              <Text style={styles.verifiedText}>✓</Text>
-            </View>
-          )}
-        </View>
-
-        <Text style={styles.caption} numberOfLines={3}>{post.caption}</Text>
-
-        <View style={styles.tagsRow}>
-          {(post.tags || []).map((tag, i) => (
-            <Text key={i} style={styles.tag}>{tag} </Text>
-          ))}
-        </View>
-
-        {/* Rep badge */}
-        {author?.reputation_level && (
-          <View style={styles.repBadge}>
-            <Text style={styles.repText}>{author.reputation_level.toUpperCase()}</Text>
-          </View>
-        )}
-      </View>
-    </View>
-  );
-};
+import { FeedPostCard } from '../../components/feed/FeedPostCard';
+import { CommentsDrawer } from '../../components/feed/CommentsDrawer';
 
 // ─── Main Feed Screen ─────────────────────────────────────────────────────────
 export const FeedScreen = ({ navigation }: any) => {
@@ -208,12 +50,12 @@ export const FeedScreen = ({ navigation }: any) => {
   const [feedTab, setFeedTab] = useState<'foryou' | 'following'>('foryou');
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [commentPostId, setCommentPostId] = useState<string | null>(null);
-  const [commentText, setCommentText] = useState('');
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newCaption, setNewCaption] = useState('');
   const [newMediaUri, setNewMediaUri] = useState<string | null>(null);
   const [newMediaType, setNewMediaType] = useState<'photo' | 'video'>('photo');
   const [isPosting, setIsPosting] = useState(false);
+  const [postHeight, setPostHeight] = useState(0);
 
   useEffect(() => {
     if (user) {
@@ -239,10 +81,10 @@ export const FeedScreen = ({ navigation }: any) => {
     fetchComments(postId);
   };
 
-  const handleSendComment = async () => {
-    if (!commentText.trim() || !commentPostId || !user) return;
-    await addComment(commentPostId, user.id, commentText.trim());
-    setCommentText('');
+  const handleSendComment = async (text: string, parentId?: string) => {
+    if (!text.trim() || !commentPostId || !user) return;
+    await addComment(commentPostId, user.id, text.trim());
+    // NOTE: If parentId is used, backend needs support. For now, addComment ignores it or handles it via store update.
   };
 
   const handlePickMedia = async () => {
@@ -354,6 +196,32 @@ export const FeedScreen = ({ navigation }: any) => {
         </TouchableOpacity>
       </View>
 
+      {/* Racer Stories Carousel */}
+      <View style={styles.storiesContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 12 }}>
+          <TouchableOpacity style={styles.addStoryItem} onPress={() => setCreateModalVisible(true)}>
+            <View style={styles.addStoryCircle}>
+              <Plus size={20} color={colors.primary} />
+            </View>
+            <Text style={styles.storyName}>YOUR LOG</Text>
+          </TouchableOpacity>
+
+          {[
+            { id: '1', name: 'phantom_gtr', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop', live: true },
+            { id: '2', name: 'apex_gt3', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=400&auto=format&fit=crop', live: true },
+            { id: '3', name: 'boosted_2jz', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=400&auto=format&fit=crop', live: false },
+            { id: '4', name: 'coyote_50', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=400&auto=format&fit=crop', live: false },
+          ].map((s) => (
+            <TouchableOpacity key={s.id} style={styles.storyItem}>
+              <View style={[styles.storyRing, s.live && styles.storyRingLive]}>
+                <Image source={{ uri: s.avatar }} style={styles.storyAvatar} />
+              </View>
+              <Text style={styles.storyName} numberOfLines={1}>@{s.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
       {/* Loading state */}
       {isLoading && (
         <View style={styles.loadingCenter}>
@@ -364,89 +232,64 @@ export const FeedScreen = ({ navigation }: any) => {
 
       {/* Full-screen paginated feed */}
       {!isLoading && (
-        <FlatList
-          data={posts}
-          keyExtractor={(item) => item.id}
-          renderItem={renderPost}
-          showsVerticalScrollIndicator={false}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={{ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }}
-          snapToInterval={POST_HEIGHT}
-          snapToAlignment="start"
-          decelerationRate="fast"
-          disableIntervalMomentum={true}
-          onEndReached={() => {
-            if (hasMore && !isLoadingMore && user) {
-              fetchFeed(user.id, feedTab);
-            }
-          }}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={renderFooter}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>NO POSTS YET</Text>
-              <Text style={styles.emptySub}>
-                {feedTab === 'following'
-                  ? 'Follow other racers to see their posts here.'
-                  : 'Be the first to post in the underground.'}
-              </Text>
-            </View>
-          }
-        />
+        <View 
+          style={{ flex: 1 }} 
+          onLayout={(e) => setPostHeight(e.nativeEvent.layout.height)}
+        >
+          {postHeight > 0 && (
+            <FlatList
+              data={posts}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <View style={{ height: postHeight }}>
+                  <FeedPostCard
+                    post={item}
+                    isActive={item.id === activePostId}
+                    onLike={() => user && toggleLike(item.id, user.id)}
+                    onComment={() => handleOpenComments(item.id)}
+                    onFollow={() => {}}
+                  />
+                </View>
+              )}
+              showsVerticalScrollIndicator={false}
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 200 }}
+              pagingEnabled={true}
+              decelerationRate="fast"
+              onEndReached={() => {
+                if (hasMore && !isLoadingMore && user) {
+                  fetchFeed(user.id, feedTab);
+                }
+              }}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={renderFooter}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyTitle}>NO POSTS YET</Text>
+                  <Text style={styles.emptySub}>
+                    {feedTab === 'following'
+                      ? 'Follow other racers to see their posts here.'
+                      : 'Be the first to post in the underground.'}
+                  </Text>
+                </View>
+              }
+            />
+          )}
+        </View>
       )}
 
       {/* Comment Drawer */}
       <Modal visible={!!commentPostId} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.commentsDrawer}>
-            <View style={styles.drawerHandle} />
-            <View style={styles.drawerHeader}>
-              <Text style={styles.drawerTitle}>
-                {commentPostId && posts.find(p => p.id === commentPostId)?.comments_count || 0} COMMENTS
-              </Text>
-              <TouchableOpacity onPress={() => setCommentPostId(null)}>
-                <X size={20} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              style={styles.commentsList}
-              data={commentPostId ? (commentsMap[commentPostId] || []) : []}
-              keyExtractor={(c) => c.id}
-              renderItem={({ item }) => (
-                <View style={styles.commentRow}>
-                  <Image source={{ uri: (item as any).user_profile?.avatar_url }} style={styles.commentAvatar} />
-                  <View style={styles.commentContent}>
-                    <Text style={styles.commentAuthor}>{(item as any).user_profile?.display_name}</Text>
-                    <Text style={styles.commentBody}>{item.comment_text}</Text>
-                  </View>
-                </View>
-              )}
-              ListEmptyComponent={
-                <Text style={styles.noCommentsText}>No comments yet. Be first!</Text>
-              }
+          {commentPostId && (
+            <CommentsDrawer
+              postId={commentPostId}
+              postCommentCount={posts.find(p => p.id === commentPostId)?.comments_count || 0}
+              comments={commentsMap[commentPostId] || []}
+              onClose={() => setCommentPostId(null)}
+              onSend={handleSendComment}
             />
-
-            <View style={styles.commentInputRow}>
-              <TextInput
-                style={styles.commentInput}
-                placeholder="Add a comment..."
-                placeholderTextColor={colors.textMuted}
-                value={commentText}
-                onChangeText={setCommentText}
-                multiline={false}
-                returnKeyType="send"
-                onSubmitEditing={handleSendComment}
-              />
-              <TouchableOpacity
-                style={[styles.sendBtn, !commentText.trim() && styles.sendBtnDisabled]}
-                onPress={handleSendComment}
-                disabled={!commentText.trim()}
-              >
-                <Send size={16} color={commentText.trim() ? colors.background : colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-          </View>
+          )}
         </View>
       </Modal>
 
@@ -602,4 +445,14 @@ const styles = StyleSheet.create({
   postBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
   postBtnDisabled: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.cardBorder },
   postBtnText: { color: colors.background, fontSize: 13, fontWeight: '900', letterSpacing: 1 },
+
+  // Stories Carousel
+  storiesContainer: { paddingVertical: 10, backgroundColor: 'rgba(8,9,12,0.9)', borderBottomWidth: 1, borderBottomColor: colors.cardBorder },
+  addStoryItem: { alignItems: 'center', width: 64 },
+  addStoryCircle: { width: 50, height: 50, borderRadius: 25, borderWidth: 1.5, borderColor: colors.primary, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,255,102,0.05)' },
+  storyItem: { alignItems: 'center', width: 64 },
+  storyRing: { width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: colors.cardBorder, padding: 2 },
+  storyRingLive: { borderColor: colors.primary },
+  storyAvatar: { width: '100%', height: '100%', borderRadius: 23 },
+  storyName: { color: colors.textMuted, fontSize: 9, fontWeight: '800', marginTop: 4, textAlign: 'center' },
 });

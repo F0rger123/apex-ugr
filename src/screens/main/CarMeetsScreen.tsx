@@ -75,7 +75,7 @@ export const CarMeetsScreen = ({ navigation }: any) => {
             const userRsvp = rsvpState[meet.id] || 'none';
 
           return (
-            <GlassCard key={meet.id} style={styles.meetCard}>
+            <GlassCard key={meet.id} onPress={() => navigation.navigate('CarMeetDetail', { meetId: meet.id })} style={styles.meetCard}>
               <View style={styles.imageBox}>
                 <Image source={{ uri: meet.cover_image_url }} style={styles.meetImage} resizeMode="cover" />
                 <View style={styles.badgeTop}>

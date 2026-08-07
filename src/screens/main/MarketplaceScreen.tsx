@@ -75,14 +75,20 @@ export const MarketplaceScreen = ({ navigation }: any) => {
             <Text style={styles.subTitle}>PARTS • VENDORS • FITMENT ENGINE</Text>
           </View>
 
-          <TouchableOpacity style={styles.cartBtn} onPress={() => navigation.navigate('Cart')}>
-            <ShoppingCart size={18} color={colors.background} />
-            {cart.length > 0 && (
-              <View style={styles.cartBadge}>
-                <Text style={styles.cartBadgeText}>{cart.length}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity style={[styles.cartBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.cardBorder }]} onPress={() => navigation.navigate('PartsMarketplaceSearch')}>
+              <Search size={18} color={colors.primary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cartBtn} onPress={() => navigation.navigate('Cart')}>
+              <ShoppingCart size={18} color={colors.background} />
+              {cart.length > 0 && (
+                <View style={styles.cartBadge}>
+                  <Text style={styles.cartBadgeText}>{cart.length}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Tab Selector: Catalog vs Orders */}
@@ -198,7 +204,7 @@ export const MarketplaceScreen = ({ navigation }: any) => {
                       activeVehicleName={activeVehicle ? `${activeVehicle.make} ${activeVehicle.model}` : undefined}
                       isWishlisted={wishlistIds.includes(p.id)}
                       onToggleWishlist={() => toggleWishlist(p.id)}
-                      onPress={() => setSelectedCompareProduct(p)}
+                      onPress={() => navigation.navigate('ProductDetail', { productId: p.id })}
                       onAddToCart={() => addToCart(p)}
                     />
                     <TouchableOpacity

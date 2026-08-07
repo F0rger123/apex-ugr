@@ -102,8 +102,17 @@ export const DashboardScreen = ({ navigation }: any) => {
               <Text style={styles.telemetryMetaTitle}>LIVE SENSOR FEED</Text>
               <Text style={styles.telemetryMetaSub}>Device Motion & GPS Active</Text>
               <View style={styles.telemetryPills}>
-                <MatrixBadge label="0-60: 2.05s" variant="green" size="sm" style={{ marginBottom: 4 }} />
-                <MatrixBadge label="1/4 Mi: 8.85s" variant="gold" size="sm" />
+                <MatrixBadge
+                  label={`0-60: ${activeVehicle?.zero_to_sixty_sec ? activeVehicle.zero_to_sixty_sec + 's' : 'READY'}`}
+                  variant="green"
+                  size="sm"
+                  style={{ marginBottom: 4 }}
+                />
+                <MatrixBadge
+                  label={`1/4 Mi: ${activeVehicle?.quarter_mile_sec ? activeVehicle.quarter_mile_sec + 's' : 'READY'}`}
+                  variant="gold"
+                  size="sm"
+                />
               </View>
               <TouchableOpacity
                 style={styles.telemetryBtn}

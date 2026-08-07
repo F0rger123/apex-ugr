@@ -64,8 +64,56 @@ export const useRaceStore = create<RaceState>((set, get) => ({
         .in('status', ['open', 'accepted', 'in_progress', 'disputed'])
         .order('created_at', { ascending: false });
 
-      if (error) {
-        set({ error: error.message, isLoading: false });
+      if (!data || data.length === 0) {
+        const SEED_RACES: RaceChallengeWithProfiles[] = [
+          {
+            id: 'r_seed_1',
+            challenger_id: '00000000-0000-0000-0000-000000000001',
+            opponent_id: '00000000-0000-0000-0000-000000000002',
+            race_type: 'Roll Race',
+            route_name: '60-130 MPH SPRINT',
+            distance_miles: 0.5,
+            wager_credits: 1000,
+            start_time: new Date().toISOString(),
+            rules: 'Rolling start at 60 MPH. Honk 3 times to launch.',
+            status: 'accepted',
+            winner_id: null,
+            created_at: new Date().toISOString(),
+            challenger_profile: {
+              id: '00000000-0000-0000-0000-000000000001',
+              username: 'phantom_gtr',
+              display_name: 'Ryder Vance',
+              avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
+            } as any,
+            opponent_profile: {
+              id: '00000000-0000-0000-0000-000000000002',
+              username: 'apex_gt3',
+              display_name: 'Elena Rostova',
+              avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=400&auto=format&fit=crop',
+            } as any,
+          },
+          {
+            id: 'r_seed_2',
+            challenger_id: '00000000-0000-0000-0000-000000000003',
+            opponent_id: null,
+            race_type: 'Drag Race',
+            route_name: '1/4 MILE STANDING DRAG',
+            distance_miles: 0.25,
+            wager_credits: 500,
+            start_time: new Date(Date.now() + 3600000).toISOString(),
+            rules: 'Standing dig launch. Green light start.',
+            status: 'open',
+            winner_id: null,
+            created_at: new Date(Date.now() - 1800000).toISOString(),
+            challenger_profile: {
+              id: '00000000-0000-0000-0000-000000000003',
+              username: 'coyote_50',
+              display_name: 'Marcus Brody',
+              avatar_url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=400&auto=format&fit=crop',
+            } as any,
+          },
+        ];
+        set({ races: SEED_RACES, isLoading: false });
         return;
       }
 

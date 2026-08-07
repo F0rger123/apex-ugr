@@ -88,14 +88,17 @@ export const MessagesScreen = ({ navigation }: any) => {
         {/* Active Chat Thread */}
         <View style={styles.chatArea}>
           {/* Chat Header */}
-          <View style={styles.chatHeader}>
+          <TouchableOpacity
+            style={styles.chatHeader}
+            onPress={() => navigation.navigate('DirectMessagingChat', { conversationId: activeConversation?.id, targetUsername: activeConversation?.other_profile?.username || 'pilot' })}
+          >
             <Text style={styles.chatHeaderTitle}>
               {activeConversation?.is_group ? activeConversation.group_name : activeConversation?.other_profile?.display_name}
             </Text>
             {activeConversation?.is_group && (
               <MatrixBadge label="GROUP CHAT" variant="green" size="sm" />
             )}
-          </View>
+          </TouchableOpacity>
 
           {/* Messages Feed */}
           <ScrollView ref={scrollRef} style={styles.messagesScroll} showsVerticalScrollIndicator={false}>

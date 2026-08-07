@@ -123,7 +123,7 @@ export const LoginScreen = ({ navigation }: any) => {
               onPress={() => setShowOtpModal(true)}
             >
               <Smartphone size={16} color={colors.primary} />
-              <Text style={styles.socialText}>PHONE SMS</Text>
+              <Text style={styles.socialText}>PHONE SMS AUTHENTICATION</Text>
             </TouchableOpacity>
           </View>
         </GlassCard>

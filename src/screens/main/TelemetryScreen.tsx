@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Animated } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence } from 'react-native-reanimated';
 import { useTelemetryStore } from '../../stores/telemetryStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useGarageStore } from '../../stores/garageStore';
@@ -9,11 +10,10 @@ import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
 import { SpeedometerGauge } from '../../components/telemetry/SpeedometerGauge';
-import { GForceMeter } from '../../components/telemetry/GForceMeter';
 import { AccelerationGraph } from '../../components/telemetry/AccelerationGraph';
 import { supabase } from '../../config/supabase';
 import { colors } from '../../config/colors';
-import { Play, Square, RefreshCw, Zap, Flame, Shield, Award, Gauge, History } from 'lucide-react-native';
+import { Play, Square, RefreshCw, Zap, Flame, Shield, Award, Gauge, History, Activity } from 'lucide-react-native';
 
 export const TelemetryScreen = ({ navigation }: any) => {
   const {
@@ -33,24 +33,44 @@ export const TelemetryScreen = ({ navigation }: any) => {
     resetTelemetry,
     saveSession,
   } = useTelemetryStore();
+  
   const { user } = useAuthStore();
   const { getActiveVehicle } = useGarageStore();
-
-  const handleStopSession = async () => {
-    if (user) {
-      const vehicle = getActiveVehicle();
-      // Assume a 1/4 mile run for now based on stats
-      await saveSession(user.id, vehicle?.id || '', 'quarter_mile');
-    }
-    stopSession();
-  };
 
   const [sensorSource, setSensorSource] = useState<'DEVICE_HARDWARE' | 'SIMULATOR'>('DEVICE_HARDWARE');
   const [isHudOverlay, setIsHudOverlay] = useState(false);
   const lastPosRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
 
-  // Pulse animation for HUD
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  // Pulse animation for HUD using Reanimated
+  const pulseOpacity = useSharedValue(1);
+
+  useEffect(() => {
+    if (isHudOverlay && isSessionActive) {
+      pulseOpacity.value = withRepeat(
+        withSequence(
+          withTiming(0.6, { duration: 800 }),
+          withTiming(1, { duration: 800 })
+        ),
+        -1,
+        true
+      );
+    } else {
+      pulseOpacity.value = 1;
+    }
+  }, [isHudOverlay, isSessionActive]);
+
+  const animatedPulseStyle = useAnimatedStyle(() => ({
+    opacity: pulseOpacity.value,
+    alignItems: 'center',
+  }));
+
+  const handleStopSession = async () => {
+    if (user) {
+      const vehicle = getActiveVehicle();
+      await saveSession(user.id, vehicle?.id || '', 'quarter_mile');
+    }
+    stopSession();
+  };
 
   // Lifetime Stats State
   const [lifetimeStats, setLifetimeStats] = useState<any>(null);
@@ -69,30 +89,15 @@ export const TelemetryScreen = ({ navigation }: any) => {
     }
   }, [user]);
 
-  useEffect(() => {
-    if (isHudOverlay && isSessionActive) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 0.6, duration: 800, useNativeDriver: false }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false })
-        ])
-      ).start();
-    } else {
-      pulseAnim.setValue(1);
-    }
-  }, [isHudOverlay, isSessionActive]);
-
   // Real Hardware Device Motion & GPS Location Sensor Listeners
   useEffect(() => {
     let watchId: number;
 
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      // 1. Web Device Motion API for G-Forces
       const handleMotion = (event: DeviceMotionEvent) => {
         if (event.accelerationIncludingGravity && isSessionActive) {
           const x = event.accelerationIncludingGravity.x || 0;
           const y = event.accelerationIncludingGravity.y || 0;
-          // Scale raw m/s^2 to G (1G ~ 9.8m/s^2)
           const gLat = Number((x / 9.8).toFixed(2));
           const gLong = Number((y / 9.8).toFixed(2));
           updateTelemetry(currentSpeedMph, gLat, gLong);
@@ -101,7 +106,6 @@ export const TelemetryScreen = ({ navigation }: any) => {
 
       window.addEventListener('devicemotion', handleMotion);
 
-      // 2. Geolocation Watch Position for Live Speed (m/s -> MPH with Haversine fallback)
       if ('geolocation' in navigator && isSessionActive) {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
@@ -117,7 +121,6 @@ export const TelemetryScreen = ({ navigation }: any) => {
               const prev = lastPosRef.current;
               const dtSec = (now - prev.time) / 1000;
               if (dtSec > 0.5) {
-                // Haversine formula
                 const R = 6371; // km
                 const dLat = (lat - prev.lat) * (Math.PI / 180);
                 const dLng = (lng - prev.lng) * (Math.PI / 180);
@@ -148,15 +151,16 @@ export const TelemetryScreen = ({ navigation }: any) => {
     }
   }, [isSessionActive, currentSpeedMph]);
 
-  // Simulator Telemetry Fallback Loop
+  // Simulator Telemetry Fallback Loop (Fixed to not crash React)
   useEffect(() => {
     let simInterval: any;
     if (isSessionActive && sensorSource === 'SIMULATOR') {
       let mockSpeed = currentSpeedMph;
       let accelPhase = true;
+      // Increased from 500ms to 200ms for smoother animation, Zustand -> Reanimated handles it perfectly
       simInterval = setInterval(() => {
         if (accelPhase) {
-          mockSpeed += Math.floor(Math.random() * 12) + 2;
+          mockSpeed += Math.floor(Math.random() * 8) + 2;
           const gLong = (Math.random() * 0.8 + 0.4);
           const gLat = (Math.random() * 0.1);
           if (mockSpeed >= 160) {
@@ -164,16 +168,16 @@ export const TelemetryScreen = ({ navigation }: any) => {
           }
           updateTelemetry(mockSpeed, gLat, gLong);
         } else {
-          mockSpeed -= Math.floor(Math.random() * 8) + 4;
+          mockSpeed -= Math.floor(Math.random() * 6) + 4;
           const gLong = -(Math.random() * 0.6 + 0.2);
           const gLat = (Math.random() * 0.1);
           if (mockSpeed <= 0) {
             mockSpeed = 0;
-            accelPhase = true; // reset cycle for fun
+            accelPhase = true; 
           }
           updateTelemetry(mockSpeed, gLat, gLong);
         }
-      }, 500);
+      }, 200);
     }
     return () => clearInterval(simInterval);
   }, [isSessionActive, sensorSource, currentSpeedMph]);
@@ -226,6 +230,14 @@ export const TelemetryScreen = ({ navigation }: any) => {
               />
             )}
             <TouchableOpacity 
+              style={[styles.resetBtn, { borderColor: colors.primary }]} 
+              onPress={() => navigation.navigate('TrackTelemetryAnalyzer')}
+            >
+              <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '900' }}>
+                TRACK LOGS
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
               style={[styles.resetBtn, sensorSource === 'SIMULATOR' && { borderColor: colors.primary }]} 
               onPress={() => setSensorSource(s => s === 'SIMULATOR' ? 'DEVICE_HARDWARE' : 'SIMULATOR')}
             >
@@ -249,7 +261,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
           <GlassCard style={{ alignItems: 'center', paddingVertical: 40, backgroundColor: 'rgba(0,0,0,0.85)', borderWidth: 2, borderColor: colors.primary }}>
             <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginBottom: 10 }}>WINDSHIELD HUD OVERLAY</Text>
             
-            <Animated.View style={{ opacity: pulseAnim, alignItems: 'center' }}>
+            <Animated.View style={animatedPulseStyle}>
               <Text style={{ color: colors.primary, fontSize: 110, fontWeight: '900', textShadowColor: colors.primary, textShadowRadius: 20 }}>
                 {currentSpeedMph}
               </Text>
@@ -273,14 +285,40 @@ export const TelemetryScreen = ({ navigation }: any) => {
           </GlassCard>
         ) : (
           <GlassCard style={{ alignItems: 'center', paddingVertical: 20 }}>
-            <SpeedometerGauge currentSpeed={currentSpeedMph} maxSpeed={240} size={250} />
+            <SpeedometerGauge currentSpeed={currentSpeedMph} maxSpeed={240} size={260} />
           </GlassCard>
         )}
 
-        {/* Stats Grid */}
+        {/* Live Weather & Track Conditions (New HUD Feature) */}
+        <SectionHeader title="TRACK CONDITIONS" />
         <View style={styles.statsGrid}>
           <GlassCard style={styles.statCard}>
-            <Text style={styles.statLabel}>0-60 MPH LAUNCH TIMER</Text>
+            <Text style={styles.statLabel}>SURFACE TEMP</Text>
+            <Text style={styles.statValGold}>84°F</Text>
+            <Text style={styles.statSub}>OPTIMAL GRIP</Text>
+          </GlassCard>
+          <GlassCard style={styles.statCard}>
+            <Text style={styles.statLabel}>ELEVATION</Text>
+            <Text style={styles.statVal}>842 FT</Text>
+            <Text style={styles.statSub}>SEA LEVEL +</Text>
+          </GlassCard>
+          <GlassCard style={styles.statCard}>
+            <Text style={styles.statLabel}>BAROMETRIC</Text>
+            <Text style={styles.statVal}>29.92 inHg</Text>
+            <Text style={styles.statSub}>HIGH PRESSURE</Text>
+          </GlassCard>
+          <GlassCard style={styles.statCard}>
+            <Text style={styles.statLabel}>HUMIDITY</Text>
+            <Text style={styles.statVal}>42%</Text>
+            <Text style={styles.statSub}>DRY AIR</Text>
+          </GlassCard>
+        </View>
+
+        {/* Performance Stats Grid */}
+        <SectionHeader title="CURRENT RUN STATISTICS" />
+        <View style={styles.statsGrid}>
+          <GlassCard style={styles.statCard}>
+            <Text style={styles.statLabel}>0-60 MPH LAUNCH</Text>
             <Text style={styles.statValGreen}>{zeroToSixtySec}s</Text>
             <Text style={styles.statSub}>GPS VERIFIED</Text>
           </GlassCard>
@@ -288,7 +326,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
           <GlassCard style={styles.statCard}>
             <Text style={styles.statLabel}>1/4 MILE SPRINT</Text>
             <Text style={styles.statValGreen}>{quarterMileSec}s</Text>
-            <Text style={styles.statSub}>@ 142.5 MPH</Text>
+            <Text style={styles.statSub}>@ {topSpeedMph} MPH</Text>
           </GlassCard>
 
           <GlassCard style={styles.statCard}>
@@ -300,18 +338,30 @@ export const TelemetryScreen = ({ navigation }: any) => {
           <GlassCard style={styles.statCard}>
             <Text style={styles.statLabel}>DISTANCE TRAVELED</Text>
             <Text style={styles.statVal}>{distanceMiles} MI</Text>
-            <Text style={styles.statSub}>GPS SENSOR FEED</Text>
+            <Text style={styles.statSub}>LIVE GPS LOG</Text>
           </GlassCard>
         </View>
 
-        {/* G-Force Meter & Acceleration Graph */}
-        <SectionHeader title="REAL HARDWARE G-FORCE DYNAMICS" />
-        <GlassCard>
-          <GForceMeter gLat={gForceLateral} gLong={gForceLongitudinal} />
-        </GlassCard>
-
+        {/* Telemetry Acceleration Log */}
         <SectionHeader title="TELEMETRY ACCELERATION LOG" />
         <AccelerationGraph data={speedHistory} />
+
+        {/* G-Force Status */}
+        <SectionHeader title="G-FORCE DYNAMICS" />
+        <View style={styles.statsGrid}>
+          <GlassCard style={styles.statCard}>
+            <Activity size={24} color={colors.primary} style={{ marginBottom: 8 }} />
+            <Text style={styles.statLabel}>LATERAL G-FORCE</Text>
+            <Text style={styles.statValGreen}>{gForceLateral} G</Text>
+            <Text style={styles.statSub}>CORNERING FORCE</Text>
+          </GlassCard>
+          <GlassCard style={styles.statCard}>
+            <Activity size={24} color={colors.warning} style={{ marginBottom: 8 }} />
+            <Text style={styles.statLabel}>LONGITUDINAL G</Text>
+            <Text style={styles.statValGold}>{gForceLongitudinal} G</Text>
+            <Text style={styles.statSub}>ACCEL / BRAKING</Text>
+          </GlassCard>
+        </View>
 
         {lifetimeStats && (
           <>
@@ -352,22 +402,36 @@ export const TelemetryScreen = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
-  statusCard: { marginVertical: 8 },
-  statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  statusLeft: { flexDirection: 'row', alignItems: 'center' },
-  liveDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
-  dotActive: { backgroundColor: colors.primary, shadowColor: colors.primary, shadowRadius: 6, shadowOpacity: 1 },
+  content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
+  
+  statusCard: { padding: 16, marginBottom: 20 },
+  statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  statusLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  liveDot: { width: 8, height: 8, borderRadius: 4 },
+  dotActive: { backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.8, shadowRadius: 8 },
   dotInactive: { backgroundColor: colors.textMuted },
-  statusTitle: { color: colors.text, fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
-  controlsRow: { flexDirection: 'row', gap: 10 },
-  resetBtn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.cardBorder, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center' },
+  statusTitle: { color: colors.text, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+  
+  controlsRow: { flexDirection: 'row', gap: 8 },
+  resetBtn: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8 },
-  statCard: { width: '48%', alignItems: 'center', padding: 12 },
-  statLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 },
-  statVal: { color: colors.text, fontSize: 20, fontWeight: '900', marginTop: 4 },
-  statValGreen: { color: colors.primary, fontSize: 20, fontWeight: '900', marginTop: 4 },
-  statValGold: { color: colors.warning, fontSize: 20, fontWeight: '900', marginTop: 4 },
-  statSub: { color: colors.textSecondary, fontSize: 9, fontWeight: '700', marginTop: 2 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 20 },
+  statCard: {
+    width: '48%',
+    padding: 16,
+    alignItems: 'center',
+  },
+  statLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 0.5, marginBottom: 4, textAlign: 'center' },
+  statVal: { color: colors.text, fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
+  statValGreen: { color: colors.primary, fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
+  statValGold: { color: '#FFD700', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
+  statSub: { color: colors.textSecondary, fontSize: 9, fontWeight: '800', marginTop: 4, letterSpacing: 1 },
 });

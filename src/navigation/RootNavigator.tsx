@@ -19,6 +19,14 @@ import { CarMeetsScreen } from '../screens/main/CarMeetsScreen';
 import { TelemetryScreen } from '../screens/main/TelemetryScreen';
 import { RaceHubScreen } from '../screens/main/RaceHubScreen';
 import { AdminDashboardScreen } from '../screens/main/AdminDashboardScreen';
+import { ProductDetailScreen } from '../screens/main/ProductDetailScreen';
+import { RaceDetailScreen } from '../screens/main/RaceDetailScreen';
+import { DynoSimulatorScreen } from '../screens/main/DynoSimulatorScreen';
+import { TrackTelemetryAnalyzerScreen } from '../screens/main/TrackTelemetryAnalyzerScreen';
+import { CarMeetDetailScreen } from '../screens/main/CarMeetDetailScreen';
+import { PartsMarketplaceSearchScreen } from '../screens/main/PartsMarketplaceSearchScreen';
+import { GarageMaintenanceLogScreen } from '../screens/main/GarageMaintenanceLogScreen';
+import { DirectMessagingChatScreen } from '../screens/main/DirectMessagingChatScreen';
 import { colors } from '../config/colors';
 
 const Stack = createNativeStackNavigator();
@@ -145,6 +153,46 @@ export const RootNavigator = () => {
               name="AdminDashboard"
               component={AdminDashboardScreen}
               options={{ animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="ProductDetail"
+              component={ProductDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="RaceDetail"
+              component={RaceDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="DynoSimulator"
+              component={DynoSimulatorScreen}
+              options={{ animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="TrackTelemetryAnalyzer"
+              component={TrackTelemetryAnalyzerScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="CarMeetDetail"
+              component={CarMeetDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="PartsMarketplaceSearch"
+              component={PartsMarketplaceSearchScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="GarageMaintenanceLog"
+              component={GarageMaintenanceLogScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="DirectMessagingChat"
+              component={DirectMessagingChatScreen}
+              options={{ animation: 'slide_from_right' }}
             />
           </Stack.Group>
         )}

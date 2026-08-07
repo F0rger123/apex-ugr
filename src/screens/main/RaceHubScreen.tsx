@@ -81,6 +81,7 @@ export const RaceHubScreen = ({ navigation }: any) => {
           <RaceChallengeCard
             key={r.id}
             challenge={r}
+            onPress={() => navigation.navigate('RaceDetail', { raceId: r.id })}
             onAccept={() => acceptChallenge(r.id, user?.id || '00000000-0000-0000-0000-000000000001')}
             onDecline={() => declineChallenge(r.id)}
             onViewDispute={() => setSelectedDispute(activeDisputes[0])}

@@ -72,13 +72,27 @@ export const GarageScreen = ({ navigation }: any) => {
             <Text style={styles.subTitle}>VEHICLE FLEET • AFTERMARKET SPECS</Text>
           </View>
 
-          <ApexButton
-            title="ADD VEHICLE"
-            variant="primary"
-            size="sm"
-            icon={<Plus size={14} color={colors.background} />}
-            onPress={() => setModalVisible(true)}
-          />
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <ApexButton
+              title="DYNO LAB"
+              variant="secondary"
+              size="sm"
+              onPress={() => navigation.navigate('DynoSimulator')}
+            />
+            <ApexButton
+              title="SERVICE LOG"
+              variant="secondary"
+              size="sm"
+              onPress={() => navigation.navigate('GarageMaintenanceLog')}
+            />
+            <ApexButton
+              title="ADD VEHICLE"
+              variant="primary"
+              size="sm"
+              icon={<Plus size={14} color={colors.background} />}
+              onPress={() => setModalVisible(true)}
+            />
+          </View>
         </View>
 
         {/* Vehicles Shelf List */}

