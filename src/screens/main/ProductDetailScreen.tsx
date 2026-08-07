@@ -7,6 +7,8 @@ import {
   Image,
   TouchableOpacity,
   Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useMarketplaceStore } from '../../stores/marketplaceStore';
 import { useGarageStore } from '../../stores/garageStore';
@@ -29,12 +31,13 @@ import {
   ChevronRight,
   Plus,
   Minus,
+  Wrench,
 } from 'lucide-react-native';
 
 export const ProductDetailScreen = ({ route, navigation }: any) => {
   const { productId } = route.params || {};
   const { products, addToCart, cart } = useMarketplaceStore();
-  const { getActiveVehicle } = useGarageStore();
+  const { getActiveVehicle, addModification } = useGarageStore();
 
   const activeVehicle = getActiveVehicle();
   const product = products.find((p) => p.id === productId) || products[0];
@@ -73,9 +76,39 @@ export const ProductDetailScreen = ({ route, navigation }: any) => {
     );
   };
 
-  const handleBuyNow = () => {
-    addToCart(product);
-    navigation.navigate('Cart');
+  const handleOpenVendorUrl = () => {
+    const url = (product as any).purchase_url || (product as any).vendor_url || 'https://www.americanmuscle.com';
+    if (Platform.OS === 'web') {
+      window.open(url, '_blank');
+    } else {
+      Linking.openURL(url);
+    }
+  };
+
+  const handleInstallOnVehicle = async () => {
+    if (!activeVehicle) {
+      Alert.alert('No Ride Found', 'Please register a vehicle in your Garage first.');
+      return;
+    }
+
+    await addModification({
+      vehicle_id: activeVehicle.id,
+      category: product.category,
+      brand: product.brand,
+      part_name: product.title,
+      price: product.price,
+      installation_date: new Date().toISOString().split('T')[0],
+      notes: `Installed via Apex Marketplace. Expected HP Gain: +${product.hp_gain || 0} WHP`,
+      hp_gain: product.hp_gain || 0,
+      torque_gain: Math.round((product.hp_gain || 0) * 0.85),
+      purchase_source: product.vendor_name || 'Apex Vendor',
+    });
+
+    Alert.alert(
+      'Installed on Vehicle!',
+      `${product.title} has been added to your ${activeVehicle.make} ${activeVehicle.model}. Performance gains applied!`,
+      [{ text: 'View Garage', onPress: () => navigation.navigate('Garage') }]
+    );
   };
 
   return (
@@ -244,21 +277,22 @@ export const ProductDetailScreen = ({ route, navigation }: any) => {
           </TouchableOpacity>
         </View>
 
-        <View style={{ flex: 1, flexDirection: 'row', gap: 10 }}>
+        <View style={{ flex: 1, flexDirection: 'row', gap: 6 }}>
           <ApexButton
-            title="ADD TO CART"
-            variant="secondary"
-            size="md"
-            style={{ flex: 1 }}
-            icon={<ShoppingCart size={16} color={colors.primary} />}
-            onPress={handleAddToCart}
-          />
-          <ApexButton
-            title="BUY NOW"
+            title="BUY ON VENDOR SITE"
             variant="primary"
             size="md"
             style={{ flex: 1 }}
-            onPress={handleBuyNow}
+            icon={<ExternalLink size={14} color={colors.background} />}
+            onPress={handleOpenVendorUrl}
+          />
+          <ApexButton
+            title="INSTALL ON RIDE"
+            variant="secondary"
+            size="md"
+            style={{ flex: 1 }}
+            icon={<Wrench size={14} color={colors.primary} />}
+            onPress={handleInstallOnVehicle}
           />
         </View>
       </View>
