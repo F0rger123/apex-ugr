@@ -42,16 +42,44 @@ interface GarageState {
   getTotalHpGain: (vehicleId: string) => number;
 }
 
+const DEFAULT_VEHICLE: UserVehicle = {
+  id: '11111111-1111-1111-1111-111111111111',
+  user_id: '00000000-0000-0000-0000-000000000001',
+  make: 'Nissan',
+  model: 'GT-R Nismo',
+  year: 2024,
+  trim: 'Nismo Track Edition',
+  color: 'Jet Black Pearl',
+  nickname: 'Black Stealth',
+  vin: null,
+  horsepower: 750,
+  torque: 680,
+  weight_lbs: 3880,
+  top_speed_mph: 205,
+  quarter_mile_sec: 10.2,
+  zero_to_sixty_sec: 2.5,
+  engine: '3.8L VR38DETT Twin-Turbo',
+  drivetrain: 'AWD',
+  transmission: '6-Speed Dual-Clutch',
+  fuel_type: 'E85 FlexFuel',
+  photos: ['https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop'],
+  video_url: null,
+  sound_clip_url: null,
+  dyno_chart_url: null,
+  is_primary: true,
+  created_at: new Date().toISOString(),
+};
+
 export const useGarageStore = create<GarageState>((set, get) => ({
-  vehicles: [],
+  vehicles: [DEFAULT_VEHICLE],
   modifications: [],
-  activeVehicleId: null,
+  activeVehicleId: DEFAULT_VEHICLE.id,
   isLoading: false,
   error: null,
 
   // ─── Fetch user's vehicles ────────────────────────────────────────────────
   fetchVehicles: async (userId) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: get().vehicles.length === 0, error: null });
     try {
       const { data, error } = await supabase
         .from('vehicles')

@@ -222,35 +222,26 @@ export const FeedScreen = ({ navigation }: any) => {
         </ScrollView>
       </View>
 
-      {/* Loading state */}
-      {isLoading && (
-        <View style={styles.loadingCenter}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>LOADING FEED...</Text>
-        </View>
-      )}
-
       {/* Full-screen paginated feed */}
-      {!isLoading && (
-        <View 
-          style={{ flex: 1 }} 
-          onLayout={(e) => setPostHeight(e.nativeEvent.layout.height)}
-        >
-          {postHeight > 0 && (
-            <FlatList
-              data={posts}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item }) => (
-                <View style={{ height: postHeight }}>
-                  <FeedPostCard
-                    post={item}
-                    isActive={item.id === activePostId}
-                    onLike={() => user && toggleLike(item.id, user.id)}
-                    onComment={() => handleOpenComments(item.id)}
-                    onFollow={() => {}}
-                  />
-                </View>
-              )}
+      <View 
+        style={{ flex: 1 }} 
+        onLayout={(e) => setPostHeight(e.nativeEvent.layout.height)}
+      >
+        {postHeight > 0 && (
+          <FlatList
+            data={posts}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <View style={{ height: postHeight }}>
+                <FeedPostCard
+                  post={item}
+                  isActive={item.id === activePostId}
+                  onLike={() => user && toggleLike(item.id, user.id)}
+                  onComment={() => handleOpenComments(item.id)}
+                  onFollow={() => {}}
+                />
+              </View>
+            )}
               showsVerticalScrollIndicator={false}
               onViewableItemsChanged={onViewableItemsChanged}
               viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 200 }}
@@ -276,7 +267,6 @@ export const FeedScreen = ({ navigation }: any) => {
             />
           )}
         </View>
-      )}
 
       {/* Comment Drawer */}
       <Modal visible={!!commentPostId} animationType="slide" transparent>

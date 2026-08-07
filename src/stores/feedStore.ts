@@ -56,8 +56,77 @@ interface FeedState {
 
 const PAGE_SIZE = 10;
 
+const SEED_POSTS: PostWithProfile[] = [
+  {
+    id: 'p_seed_1',
+    user_id: '00000000-0000-0000-0000-000000000001',
+    post_type: 'video',
+    media_url: 'https://assets.mixkit.co/videos/preview/mixkit-sports-car-driving-on-a-road-at-night-41584-large.mp4',
+    video_url: 'https://assets.mixkit.co/videos/preview/mixkit-sports-car-driving-on-a-road-at-night-41584-large.mp4',
+    thumbnail_url: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=800&auto=format&fit=crop',
+    caption: '1,150WHP R35 GT-R highway roll sprint against 1000HP Twin Turbo Audi R8 V10! Pure telemetry mayhem.',
+    tags: ['#gtr', '#rollrace', '#boosted', '#1000hp'],
+    vehicle_id: 'v1',
+    likes_count: 342,
+    comments_count: 48,
+    reposts_count: 14,
+    created_at: new Date().toISOString(),
+    user_has_liked: true,
+    user_profile: {
+      id: '00000000-0000-0000-0000-000000000001',
+      username: 'phantom_gtr',
+      display_name: 'Ryder Vance',
+      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
+      bio: '1,150WHP R35 GT-R. Drag & Roll race pilot.',
+      home_city: 'Los Angeles, CA',
+      reputation_points: 1850,
+      reputation_level: 'master',
+      credits_balance: 25000,
+      privacy_mode: 'all',
+      visibility_radius_km: 25,
+      is_verified: true,
+      push_token: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as any,
+  },
+  {
+    id: 'p_seed_2',
+    user_id: '00000000-0000-0000-0000-000000000002',
+    post_type: 'video',
+    media_url: 'https://assets.mixkit.co/videos/preview/mixkit-red-sports-car-driving-fast-on-a-road-41582-large.mp4',
+    video_url: 'https://assets.mixkit.co/videos/preview/mixkit-red-sports-car-driving-fast-on-a-road-41582-large.mp4',
+    thumbnail_url: 'https://images.unsplash.com/photo-1544829099-b9a0c07fad1a?q=80&w=800&auto=format&fit=crop',
+    caption: 'Angeles Crest Highway downhill attack in the 992 GT3 RS. 1.35 G cornering load locked in.',
+    tags: ['#gt3rs', '#canyoncarving', '#porsche', '#telemetry'],
+    vehicle_id: 'v2',
+    likes_count: 512,
+    comments_count: 64,
+    reposts_count: 28,
+    created_at: new Date(Date.now() - 3600000).toISOString(),
+    user_has_liked: false,
+    user_profile: {
+      id: '00000000-0000-0000-0000-000000000002',
+      username: 'apex_gt3',
+      display_name: 'Elena Rostova',
+      avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=400&auto=format&fit=crop',
+      bio: '992 GT3 RS Canyon Carver. Track telemetry addict.',
+      home_city: 'Malibu, CA',
+      reputation_points: 2100,
+      reputation_level: 'legend',
+      credits_balance: 45000,
+      privacy_mode: 'all',
+      visibility_radius_km: 50,
+      is_verified: true,
+      push_token: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as any,
+  },
+];
+
 export const useFeedStore = create<FeedState>((set, get) => ({
-  posts: [],
+  posts: SEED_POSTS,
   commentsMap: {},
   isLoading: false,
   isLoadingMore: false,
@@ -72,7 +141,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    set(reset ? { isLoading: true, error: null } : { isLoadingMore: true });
+    set(reset ? { isLoading: get().posts.length === 0, error: null } : { isLoadingMore: true });
 
     try {
       let query = supabase
