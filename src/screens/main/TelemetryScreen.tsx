@@ -30,6 +30,10 @@ export const TelemetryScreen = ({ navigation }: any) => {
     startSession,
     stopSession,
     updateTelemetry,
+    updateGPS,
+    setGPSLocked,
+    gpsAccuracy,
+    gpsLocked,
     resetTelemetry,
     saveSession,
   } = useTelemetryStore();
@@ -37,7 +41,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
   const { user } = useAuthStore();
   const { getActiveVehicle } = useGarageStore();
 
-  const [sensorSource, setSensorSource] = useState<'DEVICE_HARDWARE' | 'SIMULATOR'>('DEVICE_HARDWARE');
+
   const [isHudOverlay, setIsHudOverlay] = useState(false);
   const lastPosRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
 
@@ -89,98 +93,49 @@ export const TelemetryScreen = ({ navigation }: any) => {
     }
   }, [user]);
 
-  // Real Hardware Device Motion & GPS Location Sensor Listeners
+  // Real GPS Speed Tracking
   useEffect(() => {
     let watchId: number;
 
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // DeviceMotion for G-force
       const handleMotion = (event: DeviceMotionEvent) => {
         if (event.accelerationIncludingGravity && isSessionActive) {
           const x = event.accelerationIncludingGravity.x || 0;
           const y = event.accelerationIncludingGravity.y || 0;
           const gLat = Number((x / 9.8).toFixed(2));
           const gLong = Number((y / 9.8).toFixed(2));
-          updateTelemetry(currentSpeedMph, gLat, gLong);
+          // Update only G-forces without changing speed
+          const state = useTelemetryStore.getState();
+          useTelemetryStore.setState({
+            gForceLateral: Math.abs(gLat),
+            gForceLongitudinal: Math.abs(gLong),
+          });
         }
       };
-
       window.addEventListener('devicemotion', handleMotion);
 
-      if ('geolocation' in navigator && isSessionActive) {
+      // GPS Speed, Distance, 0-60, 1/4 Mile
+      if ('geolocation' in navigator) {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
-            let speedMph = 0;
-            const rawSpeedMs = position.coords.speed;
-            const now = Date.now();
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-
-            if (rawSpeedMs !== null && rawSpeedMs > 0) {
-              speedMph = Math.round(rawSpeedMs * 2.23694);
-            } else if (lastPosRef.current) {
-              const prev = lastPosRef.current;
-              const dtSec = (now - prev.time) / 1000;
-              if (dtSec > 0.5) {
-                const R = 6371; // km
-                const dLat = (lat - prev.lat) * (Math.PI / 180);
-                const dLng = (lng - prev.lng) * (Math.PI / 180);
-                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                          Math.cos(prev.lat * (Math.PI / 180)) * Math.cos(lat * (Math.PI / 180)) *
-                          Math.sin(dLng / 2) * Math.sin(dLng / 2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                const distKm = R * c;
-                const speedKmh = (distKm / dtSec) * 3600;
-                speedMph = Math.round(speedKmh * 0.621371);
-              }
-            }
-
-            lastPosRef.current = { lat, lng, time: now };
-            if (speedMph >= 0 && speedMph < 350) {
-              updateTelemetry(speedMph);
-            }
+            const { latitude, longitude, speed: speedMs, accuracy } = position.coords;
+            updateGPS(latitude, longitude, speedMs, accuracy || 50);
           },
-          (err) => console.log('GPS Error:', err),
-          { enableHighAccuracy: true, maximumAge: 500, timeout: 5000 }
+          (err) => {
+            console.log('GPS:', err.message);
+            setGPSLocked(false);
+          },
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
         );
       }
 
       return () => {
         window.removeEventListener('devicemotion', handleMotion);
-        if (watchId) navigator.geolocation.clearWatch(watchId);
+        if (watchId !== undefined) navigator.geolocation.clearWatch(watchId);
       };
     }
-  }, [isSessionActive, currentSpeedMph]);
-
-  // Simulator Telemetry Fallback Loop (Fixed to not crash React)
-  useEffect(() => {
-    let simInterval: any;
-    if (isSessionActive && sensorSource === 'SIMULATOR') {
-      let mockSpeed = currentSpeedMph;
-      let accelPhase = true;
-      // Increased from 500ms to 200ms for smoother animation, Zustand -> Reanimated handles it perfectly
-      simInterval = setInterval(() => {
-        if (accelPhase) {
-          mockSpeed += Math.floor(Math.random() * 8) + 2;
-          const gLong = (Math.random() * 0.8 + 0.4);
-          const gLat = (Math.random() * 0.1);
-          if (mockSpeed >= 160) {
-            accelPhase = false;
-          }
-          updateTelemetry(mockSpeed, gLat, gLong);
-        } else {
-          mockSpeed -= Math.floor(Math.random() * 6) + 4;
-          const gLong = -(Math.random() * 0.6 + 0.2);
-          const gLat = (Math.random() * 0.1);
-          if (mockSpeed <= 0) {
-            mockSpeed = 0;
-            accelPhase = true; 
-          }
-          updateTelemetry(mockSpeed, gLat, gLong);
-        }
-      }, 200);
-    }
-    return () => clearInterval(simInterval);
-  }, [isSessionActive, sensorSource, currentSpeedMph]);
+  }, [isSessionActive]);
 
   return (
     <View style={styles.container}>
@@ -203,8 +158,8 @@ export const TelemetryScreen = ({ navigation }: any) => {
             </View>
 
             <MatrixBadge
-              label={isSessionActive ? 'HARDWARE GPS LOCKED' : 'STANDBY'}
-              variant={isSessionActive ? 'green' : 'silver'}
+              label={isSessionActive ? (gpsLocked ? 'GPS LOCKED ✓' : `GPS SEARCHING... ${gpsAccuracy}m`) : 'STANDBY'}
+              variant={isSessionActive && gpsLocked ? 'green' : 'silver'}
             />
           </View>
 
@@ -225,7 +180,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
                 variant="primary"
                 size="md"
                 style={{ flex: 1 }}
-                icon={<Play size={16} color={colors.background} />}
+                icon={<Play size={16} color="#000000" />}
                 onPress={startSession}
               />
             )}
@@ -237,14 +192,7 @@ export const TelemetryScreen = ({ navigation }: any) => {
                 TRACK LOGS
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.resetBtn, sensorSource === 'SIMULATOR' && { borderColor: colors.primary }]} 
-              onPress={() => setSensorSource(s => s === 'SIMULATOR' ? 'DEVICE_HARDWARE' : 'SIMULATOR')}
-            >
-              <Text style={{ color: sensorSource === 'SIMULATOR' ? colors.primary : colors.text, fontSize: 10, fontWeight: '900' }}>
-                {sensorSource === 'SIMULATOR' ? 'SIM MODE' : 'LIVE GPS'}
-              </Text>
-            </TouchableOpacity>
+
             <TouchableOpacity style={styles.resetBtn} onPress={() => setIsHudOverlay(!isHudOverlay)}>
               <Text style={{ color: isHudOverlay ? colors.primary : colors.text, fontSize: 10, fontWeight: '900' }}>
                 {isHudOverlay ? 'EXIT HUD' : 'HUD MODE'}

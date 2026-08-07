@@ -1,21 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  Image,
   TouchableOpacity,
   TextInput,
   Platform,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
 import { useMapStore, DriverRadarMarker, CarMeetWithHost } from '../../stores/mapStore';
 import { useAuthStore } from '../../stores/authStore';
 import { colors } from '../../config/colors';
 import { GlassCard } from '../../components/common/GlassCard';
-import { ApexButton } from '../../components/common/ApexButton';
 import {
   Navigation,
   Shield,
@@ -27,15 +26,16 @@ import {
   Eye,
   EyeOff,
   ChevronRight,
-  Map as MapIcon,
   Globe,
   Plus,
   Minus,
-  Compass,
-  Search,
   Crosshair,
   Route,
   Layers,
+  Search,
+  LocateFixed,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react-native';
 
 let MapView: any = null;
@@ -58,17 +58,18 @@ const STATUS_COLORS: Record<string, string> = {
   'In Telemetry Run': '#FF0055',
 };
 
-// Preset Famous Racing Routes
 const POPULAR_ROUTES = [
-  { id: 'route_mulholland', name: 'Mulholland Snake Canyon', distance: '12.4 mi', coords: [{ lat: 34.1002, lng: -118.5234 }, { lat: 34.1120, lng: -118.5410 }, { lat: 34.0950, lng: -118.5600 }] },
-  { id: 'route_pch', name: 'Pacific Coast Highway Sprint', distance: '24.8 mi', coords: [{ lat: 34.0300, lng: -118.5300 }, { lat: 34.0400, lng: -118.6500 }, { lat: 34.0500, lng: -118.8000 }] },
-  { id: 'route_port', name: 'LA Port Industrial Dig Strip', distance: '1.2 mi', coords: [{ lat: 33.7400, lng: -118.2700 }, { lat: 33.7450, lng: -118.2600 }] },
+  { id: 'route_mulholland', name: 'Mulholland Snake Canyon', distance: '12.4 mi', difficulty: 'EXPERT', coords: [{ lat: 34.1002, lng: -118.5234 }, { lat: 34.1120, lng: -118.5410 }, { lat: 34.0950, lng: -118.5600 }] },
+  { id: 'route_pch', name: 'Pacific Coast Highway Sprint', distance: '24.8 mi', difficulty: 'INTERMEDIATE', coords: [{ lat: 34.0300, lng: -118.5300 }, { lat: 34.0400, lng: -118.6500 }, { lat: 34.0500, lng: -118.8000 }] },
+  { id: 'route_port', name: 'LA Port Industrial Dig Strip', distance: '1.2 mi', difficulty: 'BEGINNER', coords: [{ lat: 33.7400, lng: -118.2700 }, { lat: 33.7450, lng: -118.2600 }] },
+  { id: 'route_canyon', name: 'Angeles Crest Canyon Attack', distance: '18.6 mi', difficulty: 'EXPERT', coords: [{ lat: 34.2200, lng: -118.1000 }, { lat: 34.2500, lng: -118.0500 }, { lat: 34.2800, lng: -117.9800 }] },
 ];
 
-// ─── Web MapLibre GL Map (3D Vector & Free-Pan Controls) ──────────────────
+// ─── Web MapLibre GL Map — Full 3D Vector with Real GPS ──────────────────────
 const WebRadarView = React.memo(
-  ({ currentLocation, driversNearby, meets, followMode, activeRoute, mapZoom, pitchAngle }: any) => {
+  ({ currentLocation, driversNearby, meets, followMode, activeRoute, mapZoom, pitchAngle, onMapReady }: any) => {
     const iframeRef = useRef<HTMLIFrameElement>(null);
+    const gpsInitSentRef = useRef(false);
 
     const [htmlContent] = useState(`
     <!DOCTYPE html>
@@ -80,191 +81,288 @@ const WebRadarView = React.memo(
       <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
       <style>
         html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; background: #08090C; font-family: system-ui, sans-serif; overflow: hidden; }
-        .maplibregl-popup-content { background: rgba(15,17,23,0.95) !important; color: #fff !important; border: 1px solid #00FF66 !important; border-radius: 10px !important; backdrop-filter: blur(8px); padding: 12px; }
+        .maplibregl-popup-content { background: rgba(8,9,12,0.98) !important; color: #fff !important; border: 1px solid #00FF66 !important; border-radius: 12px !important; backdrop-filter: blur(16px); padding: 14px 16px; min-width: 160px; }
         .maplibregl-popup-tip { border-top-color: #00FF66 !important; }
-        .racer-tag { color: #00FF66; font-weight: 900; font-size: 14px; margin-bottom: 2px; }
-        .racer-sub { color: #8E9BAE; font-size: 12px; }
-        .speed-tag { color: #FFB800; font-weight: 800; font-size: 13px; margin-top: 6px; }
-        
+        .racer-tag { color: #00FF66; font-weight: 900; font-size: 14px; margin-bottom: 4px; letter-spacing: 0.5px; }
+        .racer-sub { color: #8E9BAE; font-size: 11px; }
+        .speed-tag { color: #FFB800; font-weight: 800; font-size: 13px; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px; }
+        .you-tag { color: #00FF66; font-weight: 900; font-size: 14px; }
+        .gps-ring { animation: ringPulse 2.5s infinite; }
+
         .pulse-marker {
-          width: 24px;
-          height: 24px;
+          width: 22px; height: 22px;
           background: #00FF66;
           border-radius: 50%;
           border: 3px solid #ffffff;
-          box-shadow: 0 0 25px #00FF66;
-          animation: pulse 1.8s infinite;
+          box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.7);
+          animation: pulseGPS 2s infinite;
         }
-        @keyframes pulse {
-          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.7); }
-          70% { transform: scale(1.15); box-shadow: 0 0 0 16px rgba(0, 255, 102, 0); }
-          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 102, 0); }
+        @keyframes pulseGPS {
+          0% { box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.7); transform: scale(0.95); }
+          50% { box-shadow: 0 0 0 18px rgba(0, 255, 102, 0); transform: scale(1.1); }
+          100% { box-shadow: 0 0 0 0 rgba(0, 255, 102, 0); transform: scale(0.95); }
+        }
+        .accuracy-ring {
+          border-radius: 50%;
+          border: 2px solid rgba(0, 255, 102, 0.3);
+          background: rgba(0, 255, 102, 0.05);
+        }
+        @keyframes ringPulse {
+          0%, 100% { opacity: 0.5; }
+          50% { opacity: 1; }
+        }
+        .meet-marker {
+          width: 36px; height: 36px;
+          background: linear-gradient(135deg, #FF0055, #FF3366);
+          border-radius: 8px;
+          border: 2px solid #fff;
+          box-shadow: 0 0 18px rgba(255,0,85,0.6);
+          display: flex; align-items: center; justify-content: center;
+          color: #fff; font-size: 10px; font-weight: 900;
+        }
+        .racer-marker {
+          width: 18px; height: 18px;
+          border-radius: 50%;
+          border: 2px solid #000;
+          cursor: pointer;
+          transition: transform 0.2s;
+        }
+        .racer-marker:hover { transform: scale(1.4); }
+        #gps-status {
+          position: absolute;
+          bottom: 12px;
+          left: 12px;
+          background: rgba(8,9,12,0.9);
+          color: #00FF66;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 1px;
+          padding: 6px 10px;
+          border-radius: 6px;
+          border: 1px solid rgba(0,255,102,0.3);
+          pointer-events: none;
+          z-index: 10;
         }
       </style>
     </head>
     <body>
       <div id="map"></div>
+      <div id="gps-status">ACQUIRING GPS...</div>
       <script>
         let map;
         let markers = {};
         let isFollow = true;
-        
-        function initMap(lat, lng) {
+        let userLat = 34.0522;
+        let userLng = -118.2437;
+        let accuracyMarker = null;
+        let mapReady = false;
+
+        function initMap(lat, lng, zoom) {
           if (map) return;
+          userLat = lat;
+          userLng = lng;
           map = new maplibregl.Map({
             container: 'map',
             style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
             center: [lng, lat],
-            zoom: 14,
+            zoom: zoom || 15,
             pitch: 60,
-            bearing: -15,
+            bearing: -10,
             antialias: true
           });
-          
-          map.addControl(new maplibregl.NavigationControl(), 'top-right');
+          map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
+          map.on('load', () => {
+            mapReady = true;
+            window.parent.postMessage({ type: 'MAP_READY' }, '*');
+            document.getElementById('gps-status').textContent = 'GPS LOCKED ✓';
+          });
+          map.on('dragstart', () => { isFollow = false; });
+        }
+
+        function addYouMarker(lat, lng, accuracy) {
+          if (!map || !mapReady) return;
+          if (markers['you']) markers['you'].remove();
+
+          const el = document.createElement('div');
+          el.className = 'pulse-marker';
+
+          markers['you'] = new maplibregl.Marker(el)
+            .setLngLat([lng, lat])
+            .setPopup(new maplibregl.Popup({ offset: 28 }).setHTML('<div class="you-tag">● YOU (LIVE PILOT)</div><div class="racer-sub">GPS Active · ' + (accuracy ? Math.round(accuracy) + 'm accuracy' : 'Locked') + '</div>'))
+            .addTo(map);
+
+          if (isFollow) {
+            map.easeTo({ center: [lng, lat], duration: 800 });
+          }
+
+          // Update accuracy ring
+          const accuracyMeters = accuracy || 20;
+          document.getElementById('gps-status').textContent = 'GPS LOCKED ✓ ±' + Math.round(accuracyMeters) + 'm';
         }
 
         window.addEventListener('message', function(event) {
           const data = event.data;
-          
-          if (data.type === 'INIT') {
-            initMap(data.lat, data.lng);
-          } else if (data.type === 'SET_ZOOM' && map) {
-            map.setZoom(data.zoom);
-          } else if (data.type === 'SET_PITCH' && map) {
-            map.setPitch(data.pitch);
-          } else if (data.type === 'CENTER' && map) {
-            map.flyTo({ center: [data.lng, data.lat], zoom: 15, pitch: 60 });
-          } else if (data.type === 'UPDATE' && map) {
-            isFollow = data.followMode;
-            
-            if (data.you) {
-              if (markers['you']) markers['you'].remove();
-              
-              const el = document.createElement('div');
-              el.className = 'pulse-marker';
-              
-              markers['you'] = new maplibregl.Marker(el)
-                .setLngLat([data.you.lng, data.you.lat])
-                .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML('<div class="racer-tag">YOU (LIVE PILOT)</div><div class="racer-sub">Telemetry Active</div>'))
-                .addTo(map);
 
-              if (isFollow) {
-                map.setCenter([data.you.lng, data.you.lat]);
-              }
+          if (data.type === 'INIT') {
+            initMap(data.lat, data.lng, data.zoom || 15);
+            addYouMarker(data.lat, data.lng, data.accuracy);
+          }
+
+          if (data.type === 'SET_FOLLOW') {
+            isFollow = data.follow;
+            if (data.follow && userLat && userLng) {
+              map && map.flyTo({ center: [userLng, userLat], zoom: 16, pitch: 60, duration: 1000 });
+            }
+          }
+
+          if (data.type === 'ZOOM_REGION') {
+            map && map.flyTo({ zoom: 10, duration: 1200 });
+          }
+
+          if (data.type === 'SET_ZOOM' && map) {
+            map.easeTo({ zoom: data.zoom, duration: 400 });
+          }
+
+          if (data.type === 'SET_PITCH' && map) {
+            map.easeTo({ pitch: data.pitch, duration: 400 });
+          }
+
+          if (data.type === 'UPDATE' && map) {
+            isFollow = data.followMode;
+
+            if (data.you) {
+              userLat = data.you.lat;
+              userLng = data.you.lng;
+              addYouMarker(data.you.lat, data.you.lng, data.you.accuracy);
             }
 
             // Drivers
-            Object.keys(markers).forEach(id => { if (id !== 'you' && !id.startsWith('meet_')) markers[id].remove(); });
+            Object.keys(markers).forEach(id => {
+              if (id !== 'you' && !id.startsWith('meet_')) {
+                markers[id].remove();
+                delete markers[id];
+              }
+            });
             data.drivers.forEach(d => {
               const el = document.createElement('div');
-              el.style.width = '20px';
-              el.style.height = '20px';
-              el.style.background = d.status === 'In Telemetry Run' ? '#FF0055' : '#FFB800';
-              el.style.borderRadius = '50%';
-              el.style.border = '2px solid #000';
-              el.style.boxShadow = '0 0 15px ' + (d.status === 'In Telemetry Run' ? '#FF0055' : '#FFB800');
-              el.style.cursor = 'pointer';
+              el.className = 'racer-marker';
+              const isRacing = d.status === 'In Telemetry Run';
+              el.style.background = isRacing ? '#FF0055' : '#FFB800';
+              el.style.boxShadow = '0 0 14px ' + (isRacing ? '#FF0055' : '#FFB800');
 
               markers[d.id] = new maplibregl.Marker(el)
                 .setLngLat([d.lng, d.lat])
-                .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML('<div class="racer-tag">@' + d.name + '</div><div class="racer-sub">' + d.car + '</div><div class="speed-tag">' + d.speed + ' MPH • ' + d.status + '</div>'))
+                .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(
+                  '<div class="racer-tag">@' + d.name + '</div>' +
+                  '<div class="racer-sub">' + d.car + '</div>' +
+                  '<div class="speed-tag">' + d.speed + ' MPH · ' + d.status + '</div>'
+                ))
                 .addTo(map);
             });
 
             // Meets
-            Object.keys(markers).forEach(id => { if (id.startsWith('meet_')) markers[id].remove(); });
+            Object.keys(markers).forEach(id => {
+              if (id.startsWith('meet_')) {
+                markers[id].remove();
+                delete markers[id];
+              }
+            });
             data.meets.forEach(m => {
               const el = document.createElement('div');
-              el.style.width = '32px';
-              el.style.height = '32px';
-              el.style.background = '#FF0055';
-              el.style.borderRadius = '8px';
-              el.style.border = '2px solid #fff';
-              el.style.boxShadow = '0 0 18px #FF0055';
-              el.style.display = 'flex';
-              el.style.alignItems = 'center';
-              el.style.justifyContent = 'center';
-              el.style.color = '#fff';
-              el.style.fontSize = '10px';
-              el.style.fontWeight = '900';
+              el.className = 'meet-marker';
               el.innerText = 'MEET';
 
               markers['meet_'+m.id] = new maplibregl.Marker(el)
                 .setLngLat([m.lng, m.lat])
-                .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML('<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div><div class="racer-sub">' + m.location + '</div>'))
+                .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(
+                  '<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div>' +
+                  '<div class="racer-sub">📍 ' + m.location + '</div>'
+                ))
                 .addTo(map);
             });
 
-            // Route Polyline Layer
+            // Route Polyline
             if (data.routeCoords && data.routeCoords.length > 0) {
               const geojson = {
                 'type': 'Feature',
-                'geometry': {
-                  'type': 'LineString',
-                  'coordinates': data.routeCoords.map(c => [c.lng, c.lat])
-                }
+                'geometry': { 'type': 'LineString', 'coordinates': data.routeCoords.map(c => [c.lng, c.lat]) }
               };
               if (map.getSource('route')) {
                 map.getSource('route').setData(geojson);
               } else {
                 map.addSource('route', { 'type': 'geojson', 'data': geojson });
                 map.addLayer({
-                  'id': 'route',
-                  'type': 'line',
-                  'source': 'route',
+                  'id': 'route', 'type': 'line', 'source': 'route',
                   'layout': { 'line-join': 'round', 'line-cap': 'round' },
-                  'paint': { 'line-color': '#00FF66', 'line-width': 5, 'line-opacity': 0.85 }
+                  'paint': { 'line-color': '#00FF66', 'line-width': 6, 'line-opacity': 0.9,
+                    'line-dasharray': [0, 2] }
                 });
               }
             }
           }
         });
-        
-        initMap(34.0522, -118.2437);
+
+        // Auto-acquire GPS on load
+        if ('geolocation' in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              const lat = pos.coords.latitude;
+              const lng = pos.coords.longitude;
+              const acc = pos.coords.accuracy;
+              initMap(lat, lng, 15);
+              addYouMarker(lat, lng, acc);
+            },
+            (err) => {
+              console.log('GPS fallback:', err.message);
+              initMap(34.0522, -118.2437, 13);
+              document.getElementById('gps-status').textContent = 'GPS UNAVAILABLE';
+            },
+            { enableHighAccuracy: true, timeout: 8000 }
+          );
+        } else {
+          initMap(34.0522, -118.2437, 13);
+        }
       </script>
     </body>
     </html>
   `);
 
     useEffect(() => {
-      if (iframeRef.current && iframeRef.current.contentWindow) {
-        const message = {
-          type: 'UPDATE',
-          followMode,
-          routeCoords: activeRoute ? activeRoute.coords : [],
-          you: currentLocation ? { lat: currentLocation.latitude, lng: currentLocation.longitude } : null,
-          drivers: driversNearby.map((d: any) => ({
-            id: d.id,
-            lat: d.latitude,
-            lng: d.longitude,
-            name: d.profile?.username || 'Racer',
-            speed: d.speed_mph,
-            status: d.status,
-            car: d.vehicle ? `${d.vehicle.year} ${d.vehicle.make} ${d.vehicle.model}` : 'Tuned Performance Car',
-          })),
-          meets: meets.map((m: any) => ({
-            id: m.id,
-            lat: m.latitude,
-            lng: m.longitude,
-            title: m.title,
-            location: m.location_name,
-          })),
-        };
-        iframeRef.current.contentWindow.postMessage(message, '*');
-      }
+      if (!iframeRef.current?.contentWindow) return;
+      const win = iframeRef.current.contentWindow;
+
+      win.postMessage({
+        type: 'UPDATE',
+        followMode,
+        routeCoords: activeRoute ? activeRoute.coords : [],
+        you: currentLocation
+          ? { lat: currentLocation.latitude, lng: currentLocation.longitude, accuracy: currentLocation.accuracy || 10 }
+          : null,
+        drivers: (driversNearby || []).map((d: any) => ({
+          id: d.id,
+          lat: d.latitude,
+          lng: d.longitude,
+          name: d.profile?.username || 'Racer',
+          speed: d.speed_mph || 0,
+          status: d.status || 'Cruising',
+          car: d.vehicle ? `${d.vehicle.year} ${d.vehicle.make} ${d.vehicle.model}` : 'Performance Build',
+        })),
+        meets: (meets || []).map((m: any) => ({
+          id: m.id,
+          lat: m.latitude,
+          lng: m.longitude,
+          title: m.title,
+          location: m.location_name,
+        })),
+      }, '*');
     }, [currentLocation, driversNearby, meets, followMode, activeRoute]);
 
     useEffect(() => {
-      if (iframeRef.current && iframeRef.current.contentWindow) {
-        iframeRef.current.contentWindow.postMessage({ type: 'SET_ZOOM', zoom: mapZoom }, '*');
-      }
+      iframeRef.current?.contentWindow?.postMessage({ type: 'SET_ZOOM', zoom: mapZoom }, '*');
     }, [mapZoom]);
 
     useEffect(() => {
-      if (iframeRef.current && iframeRef.current.contentWindow) {
-        iframeRef.current.contentWindow.postMessage({ type: 'SET_PITCH', pitch: pitchAngle }, '*');
-      }
+      iframeRef.current?.contentWindow?.postMessage({ type: 'SET_PITCH', pitch: pitchAngle }, '*');
     }, [pitchAngle]);
 
     return (
@@ -286,7 +384,6 @@ export const MapScreen = ({ navigation }: any) => {
     driversNearby,
     meets,
     privacyMode,
-    visibilityRadiusKm,
     isLoading,
     startLocationTracking,
     stopLocationTracking,
@@ -301,12 +398,22 @@ export const MapScreen = ({ navigation }: any) => {
   const [selectedMeet, setSelectedMeet] = useState<CarMeetWithHost | null>(null);
   const [mapTab, setMapTab] = useState<'radar' | 'meets' | 'routes'>('radar');
   const [followMode, setFollowMode] = useState(true);
-  const [mapZoom, setMapZoom] = useState(14);
+  const [mapZoom, setMapZoom] = useState(15);
   const [pitchAngle, setPitchAngle] = useState(60);
   const [activeRoute, setActiveRoute] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const iframeRef = useRef<any>(null);
 
-  const mapRef = useRef<any>(null);
+  // Pulse animation for live dot
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.4, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
 
   useEffect(() => {
     startLocationTracking(user?.id);
@@ -318,26 +425,34 @@ export const MapScreen = ({ navigation }: any) => {
     };
   }, [user?.id]);
 
-  const handleZoomIn = () => {
-    setMapZoom((prev) => Math.min(19, prev + 1));
+  const handleZoomIn = () => setMapZoom(prev => Math.min(19, prev + 1));
+  const handleZoomOut = () => setMapZoom(prev => Math.max(8, prev - 1));
+  const togglePitch = () => setPitchAngle(prev => prev === 60 ? 0 : 60);
+
+  const handleRecenterOnMe = () => {
+    setFollowMode(true);
+    setMapZoom(16);
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({ type: 'SET_FOLLOW', follow: true }, '*');
+    }
   };
 
-  const handleZoomOut = () => {
-    setMapZoom((prev) => Math.max(8, prev - 1));
-  };
-
-  const togglePitch = () => {
-    setPitchAngle((prev) => (prev === 60 ? 0 : 60));
+  const handleZoomToRegion = () => {
+    setFollowMode(false);
+    setMapZoom(10);
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({ type: 'ZOOM_REGION' }, '*');
+    }
   };
 
   const handleSearchLocation = () => {
     if (!searchQuery.trim()) return;
-    const matchedRoute = POPULAR_ROUTES.find((r) => r.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchedRoute = POPULAR_ROUTES.find(r => r.name.toLowerCase().includes(searchQuery.toLowerCase()));
     if (matchedRoute) {
       setActiveRoute(matchedRoute);
-      Alert.alert('Route Loaded', `Loaded route: ${matchedRoute.name} (${matchedRoute.distance})`);
+      Alert.alert('Route Loaded', `${matchedRoute.name}\n${matchedRoute.distance} · ${matchedRoute.difficulty}`);
     } else {
-      Alert.alert('Location Found', `Centered radar focus on: ${searchQuery.toUpperCase()}`);
+      Alert.alert('Searched', `Searching for: ${searchQuery}`);
     }
   };
 
@@ -347,7 +462,12 @@ export const MapScreen = ({ navigation }: any) => {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>CITY RADAR</Text>
-          <Text style={styles.headerSub}>3D MAPLIBRE VECTOR ENGINE</Text>
+          <Text style={styles.headerSub}>
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <View style={[styles.liveDot, { backgroundColor: currentLocation ? colors.primary : colors.textMuted }]} />
+            </Animated.View>
+            {' '}{currentLocation ? 'GPS LOCKED' : 'SEARCHING...'} · {driversNearby.length} RACERS NEARBY
+          </Text>
         </View>
         <TouchableOpacity
           style={[styles.privacyBtn, privacyMode === 'invisible' && styles.privacyBtnActive]}
@@ -366,7 +486,7 @@ export const MapScreen = ({ navigation }: any) => {
           <Search size={16} color={colors.primary} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search city location, canyon route, or street..."
+            placeholder="Search canyon route, city location, street..."
             placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -396,26 +516,25 @@ export const MapScreen = ({ navigation }: any) => {
           <TouchableOpacity
             style={[styles.floatingBtn, followMode ? styles.floatingBtnActive : styles.floatingBtnInactive]}
             onPress={() => {
-              setFollowMode(!followMode);
-              if (!followMode) setMapZoom(16);
+              const newMode = !followMode;
+              setFollowMode(newMode);
+              if (newMode) { setMapZoom(16); handleRecenterOnMe(); }
             }}
           >
-            <Crosshair size={18} color={followMode ? '#000000' : colors.primary} />
+            <Crosshair size={16} color={followMode ? '#000000' : colors.primary} />
             <Text style={[styles.floatingBtnText, followMode && { color: '#000000' }]}>
-              {followMode ? 'LOCKED (GPS)' : 'FREE PAN'}
+              {followMode ? 'LOCKED' : 'FREE'}
             </Text>
           </TouchableOpacity>
 
-          {/* Center to My Location Button */}
-          <TouchableOpacity
-            style={styles.floatingSquareBtn}
-            onPress={() => {
-              setFollowMode(true);
-              setMapZoom(16);
-              Alert.alert('Centered on GPS', 'Map focused on your live driver location.');
-            }}
-          >
-            <Navigation size={18} color={colors.primary} />
+          {/* Recenter on My Location */}
+          <TouchableOpacity style={styles.floatingSquareBtn} onPress={handleRecenterOnMe}>
+            <LocateFixed size={18} color={colors.primary} />
+          </TouchableOpacity>
+
+          {/* Zoom to Region */}
+          <TouchableOpacity style={styles.floatingSquareBtn} onPress={handleZoomToRegion}>
+            <Globe size={18} color={colors.textSecondary} />
           </TouchableOpacity>
 
           {/* 3D Tilt Toggle */}
@@ -434,7 +553,7 @@ export const MapScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </View>
 
-        {isLoading && !currentLocation && (
+        {isLoading && (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator color={colors.primary} size="large" />
             <Text style={styles.loadingText}>CALIBRATING HIGH-PRECISION GPS...</Text>
@@ -474,27 +593,28 @@ export const MapScreen = ({ navigation }: any) => {
               <View style={styles.emptyState}>
                 <Globe size={32} color={colors.textMuted} style={{ marginBottom: 12 }} />
                 <Text style={styles.emptyTitle}>NO RACERS DETECTED NEARBY</Text>
-                <Text style={styles.emptySub}>Zoom out or change range settings.</Text>
+                <Text style={styles.emptySub}>Zoom out or expand your visibility radius.</Text>
               </View>
             ) : (
               driversNearby.map((driver) => (
                 <TouchableOpacity
                   key={driver.id}
                   style={[styles.driverCard, selectedDriver?.id === driver.id && styles.driverCardActive]}
-                  onPress={() => setSelectedDriver(driver)}
+                  onPress={() => setSelectedDriver(prev => prev?.id === driver.id ? null : driver as any)}
                 >
-                  <Image source={{ uri: driver.profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop' }} style={styles.driverAvatar} />
+                  <View style={[styles.driverStatusDot, { backgroundColor: STATUS_COLORS[driver.status] || colors.primary }]} />
                   <View style={styles.driverInfo}>
-                    <Text style={styles.driverName}>@{driver.profile?.username || 'Racer'}</Text>
+                    <Text style={styles.driverName}>@{(driver as any).profile?.username || 'RACER'}</Text>
                     <Text style={styles.driverCar}>
-                      {driver.vehicle ? `${driver.vehicle.year} ${driver.vehicle.make} ${driver.vehicle.model}` : 'Tuned GT-R Nismo'}
+                      {(driver as any).vehicle ? `${(driver as any).vehicle.year} ${(driver as any).vehicle.make} ${(driver as any).vehicle.model}` : 'Tuned Performance Build'}
                     </Text>
+                    <Text style={[styles.driverStatusText, { color: STATUS_COLORS[driver.status] || colors.primary }]}>{driver.status}</Text>
                   </View>
                   <View style={styles.driverStatusBlock}>
                     <Text style={[styles.driverSpeed, { color: STATUS_COLORS[driver.status] || colors.primary }]}>
-                      {driver.speed_mph} MPH
+                      {driver.speed_mph || 0}
                     </Text>
-                    <Text style={styles.driverStatus}>{driver.status}</Text>
+                    <Text style={styles.driverSpeedUnit}>MPH</Text>
                   </View>
                 </TouchableOpacity>
               ))
@@ -506,26 +626,30 @@ export const MapScreen = ({ navigation }: any) => {
           <View style={styles.meetsList}>
             {meets.length === 0 ? (
               <View style={styles.emptyState}>
-                <MapPin size={32} color={colors.textMuted} style={{ marginBottom: 12 }} />
-                <Text style={styles.emptyTitle}>NO CAR MEETS SCHEDULED</Text>
+                <Flag size={32} color={colors.textMuted} style={{ marginBottom: 12 }} />
+                <Text style={styles.emptyTitle}>NO MEETS IN YOUR AREA</Text>
+                <Text style={styles.emptySub}>Check back later or create a meet.</Text>
               </View>
             ) : (
               meets.map((meet) => (
                 <TouchableOpacity
                   key={meet.id}
                   style={[styles.meetCard, selectedMeet?.id === meet.id && styles.meetCardActive]}
-                  onPress={() => navigation.navigate('CarMeetDetail', { meetId: meet.id })}
+                  onPress={() => {
+                    setSelectedMeet((prev: CarMeetWithHost | null) => prev?.id === meet.id ? null : meet);
+                    navigation.navigate('CarMeets');
+                  }}
                 >
                   <View style={styles.meetIconBox}>
-                    <Users size={20} color={colors.background} />
+                    <Flag size={18} color="#fff" />
                   </View>
                   <View style={styles.meetInfo}>
                     <Text style={styles.meetTitle}>{meet.title}</Text>
-                    <Text style={styles.meetLocation}>{meet.location_name}</Text>
+                    <Text style={styles.meetLocation}>📍 {meet.location_name}</Text>
                   </View>
                   <View style={styles.meetAttendees}>
-                    <Text style={styles.attendeeCount}>{meet.attendees_count}</Text>
-                    <Text style={styles.attendeeLabel}>ATTENDING</Text>
+                    <Text style={styles.attendeeCount}>{meet.attendees_count || 0}</Text>
+                    <Text style={styles.attendeeLabel}>GOING</Text>
                   </View>
                 </TouchableOpacity>
               ))
@@ -535,29 +659,34 @@ export const MapScreen = ({ navigation }: any) => {
 
         {mapTab === 'routes' && (
           <View style={styles.routesList}>
-            {POPULAR_ROUTES.map((route) => (
+            {POPULAR_ROUTES.map(route => (
               <TouchableOpacity
                 key={route.id}
                 style={[styles.routeCard, activeRoute?.id === route.id && styles.routeCardActive]}
-                onPress={() => {
-                  setActiveRoute(route);
-                  Alert.alert('Active Route Set', `Navigating ${route.name}`);
-                }}
+                onPress={() => setActiveRoute(activeRoute?.id === route.id ? null : route)}
               >
-                <View style={styles.routeIconBox}>
-                  <Route size={20} color={colors.primary} />
+                <View style={[styles.routeIconBox, activeRoute?.id === route.id && { backgroundColor: 'rgba(0,255,102,0.2)' }]}>
+                  <Route size={18} color={colors.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.routeName}>{route.name}</Text>
-                  <Text style={styles.routeDistance}>{route.distance} • Verified Canyon Run</Text>
+                  <Text style={styles.routeDistance}>{route.distance} · {route.difficulty}</Text>
                 </View>
-                <ChevronRight size={18} color={colors.textMuted} />
+                <View style={[styles.difficultyBadge, {
+                  backgroundColor: route.difficulty === 'EXPERT' ? 'rgba(255,0,85,0.15)' :
+                    route.difficulty === 'INTERMEDIATE' ? 'rgba(255,184,0,0.15)' : 'rgba(0,255,102,0.1)'
+                }]}>
+                  <Text style={[styles.difficultyText, {
+                    color: route.difficulty === 'EXPERT' ? '#FF0055' :
+                      route.difficulty === 'INTERMEDIATE' ? '#FFB800' : colors.primary
+                  }]}>{route.difficulty}</Text>
+                </View>
               </TouchableOpacity>
             ))}
           </View>
         )}
 
-        <View style={{ height: 60 }} />
+        <View style={{ height: 40 }} />
       </ScrollView>
     </View>
   );
@@ -565,37 +694,37 @@ export const MapScreen = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 40,
-    paddingBottom: 10,
-    backgroundColor: colors.surface,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
   headerTitle: { color: colors.text, fontSize: 20, fontWeight: '900', letterSpacing: 1 },
-  headerSub: { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 2, marginTop: 2 },
+  headerSub: { color: colors.textMuted, fontSize: 11, fontWeight: '700', marginTop: 3, flexDirection: 'row', alignItems: 'center' },
+  liveDot: { width: 7, height: 7, borderRadius: 4 },
   privacyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(0, 255, 102, 0.1)',
+    backgroundColor: colors.surface,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.cardBorder,
   },
-  privacyBtnActive: { backgroundColor: 'rgba(255, 68, 68, 0.1)', borderColor: colors.danger },
+  privacyBtnActive: { borderColor: colors.danger, backgroundColor: 'rgba(255, 51, 102, 0.1)' },
   privacyText: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
 
   searchBarRow: {
     flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    gap: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.cardBorder,
   },
@@ -604,23 +733,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 12,
     gap: 8,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
-  searchInput: { flex: 1, height: 40, color: colors.text, fontSize: 13 },
+  searchInput: { flex: 1, height: 42, color: colors.text, fontSize: 13 },
   searchBtn: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     backgroundColor: colors.primary,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  mapContainer: { flex: 0.6, margin: 12, borderRadius: 16, overflow: 'hidden', position: 'relative' },
+  mapContainer: {
+    flex: 0.65,
+    margin: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(8, 9, 12, 0.85)',
@@ -628,13 +765,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
-  loadingText: { color: colors.primary, fontSize: 12, fontWeight: '900', letterSpacing: 2, marginTop: 12 },
+  loadingText: { color: colors.primary, fontSize: 11, fontWeight: '900', letterSpacing: 2, marginTop: 14 },
 
   floatingControls: {
     position: 'absolute',
-    top: 16,
-    right: 16,
-    gap: 10,
+    top: 14,
+    right: 14,
+    gap: 8,
     zIndex: 20,
   },
   floatingBtn: {
@@ -647,41 +784,48 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   floatingBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  floatingBtnInactive: { backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: colors.primary },
+  floatingBtnInactive: { backgroundColor: 'rgba(8, 9, 12, 0.92)', borderColor: colors.primary },
   floatingBtnText: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-
   floatingSquareBtn: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     borderRadius: 10,
-    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+    backgroundColor: 'rgba(8, 9, 12, 0.92)',
     borderWidth: 1,
     borderColor: colors.cardBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  infoPanel: { flex: 0.4, paddingHorizontal: 16 },
-  tabBar: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 10, padding: 3, marginVertical: 12 },
-  tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8, gap: 6 },
+  infoPanel: { flex: 0.35, paddingHorizontal: 12 },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    padding: 3,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8, gap: 5 },
   tabBtnActive: { backgroundColor: colors.primary },
-  tabText: { color: colors.textMuted, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  tabText: { color: colors.textMuted, fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
 
-  radarList: { gap: 10 },
-  meetsList: { gap: 10 },
-  routesList: { gap: 10 },
+  radarList: { gap: 8 },
+  meetsList: { gap: 8 },
+  routesList: { gap: 8 },
 
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40,
+    paddingVertical: 32,
     backgroundColor: colors.surface,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
-  emptyTitle: { color: colors.text, fontSize: 14, fontWeight: '900', letterSpacing: 1 },
-  emptySub: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+  emptyTitle: { color: colors.text, fontSize: 13, fontWeight: '900', letterSpacing: 1 },
+  emptySub: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
 
   driverCard: {
     flexDirection: 'row',
@@ -691,15 +835,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+    gap: 10,
   },
-  driverCardActive: { borderColor: colors.primary, backgroundColor: 'rgba(0, 255, 102, 0.05)' },
-  driverAvatar: { width: 44, height: 44, borderRadius: 22, marginRight: 12, borderWidth: 2, borderColor: colors.cardBorder },
+  driverCardActive: { borderColor: colors.primary, backgroundColor: 'rgba(0, 255, 102, 0.04)' },
+  driverStatusDot: { width: 10, height: 10, borderRadius: 5 },
   driverInfo: { flex: 1 },
-  driverName: { color: colors.text, fontSize: 14, fontWeight: '900' },
-  driverCar: { color: colors.textMuted, fontSize: 11, fontWeight: '700', marginTop: 2 },
+  driverName: { color: colors.text, fontSize: 13, fontWeight: '900' },
+  driverCar: { color: colors.textMuted, fontSize: 11, fontWeight: '600', marginTop: 2 },
+  driverStatusText: { fontSize: 10, fontWeight: '800', marginTop: 3, letterSpacing: 0.5 },
   driverStatusBlock: { alignItems: 'flex-end' },
-  driverSpeed: { fontSize: 16, fontWeight: '900' },
-  driverStatus: { color: colors.textSecondary, fontSize: 9, fontWeight: '800', marginTop: 2, letterSpacing: 0.5 },
+  driverSpeed: { fontSize: 20, fontWeight: '900' },
+  driverSpeedUnit: { color: colors.textMuted, fontSize: 9, fontWeight: '800', marginTop: 2 },
 
   meetCard: {
     flexDirection: 'row',
@@ -709,43 +855,49 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+    gap: 12,
   },
   meetCardActive: { borderColor: colors.primary },
   meetIconBox: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     borderRadius: 10,
-    backgroundColor: '#FF0055',
+    backgroundColor: 'rgba(255, 0, 85, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   meetInfo: { flex: 1 },
-  meetTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
-  meetLocation: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  meetTitle: { color: colors.text, fontSize: 13, fontWeight: '900' },
+  meetLocation: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
   meetAttendees: { alignItems: 'flex-end' },
-  attendeeCount: { color: colors.primary, fontSize: 16, fontWeight: '900' },
+  attendeeCount: { color: colors.primary, fontSize: 18, fontWeight: '900' },
   attendeeLabel: { color: colors.textMuted, fontSize: 8, fontWeight: '800', marginTop: 2 },
 
   routeCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
-    padding: 14,
+    padding: 12,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     gap: 12,
   },
-  routeCardActive: { borderColor: colors.primary, backgroundColor: 'rgba(0, 255, 102, 0.05)' },
+  routeCardActive: { borderColor: colors.primary, backgroundColor: 'rgba(0, 255, 102, 0.04)' },
   routeIconBox: {
     width: 40,
     height: 40,
     borderRadius: 10,
-    backgroundColor: 'rgba(0, 255, 102, 0.1)',
+    backgroundColor: 'rgba(0, 255, 102, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  routeName: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  routeName: { color: colors.text, fontSize: 13, fontWeight: '900' },
   routeDistance: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  difficultyBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  difficultyText: { fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
 });
