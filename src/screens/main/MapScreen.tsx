@@ -166,6 +166,8 @@ const WebRadarView = React.memo(
             style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
             center: [lng, lat],
             zoom: zoom || 15,
+            minZoom: 4,
+            maxZoom: 19,
             pitch: 60,
             bearing: -10,
             antialias: true

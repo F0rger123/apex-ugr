@@ -1,21 +1,178 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Image } from 'react-native';
-import { useRaceStore } from '../../stores/raceStore';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Modal,
+  Image,
+  Animated,
+  Alert,
+} from 'react-native';
+import { useRaceStore, RaceChallengeWithProfiles } from '../../stores/raceStore';
 import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
-import { RaceChallengeCard } from '../../components/race/RaceChallengeCard';
-import { RaceReplayViewer } from '../../components/race/RaceReplayViewer';
 import { colors } from '../../config/colors';
-import { Flag, Plus, ShieldAlert, Check, X, Trophy, Video } from 'lucide-react-native';
+import {
+  Flag,
+  Plus,
+  ShieldAlert,
+  X,
+  Trophy,
+  Video,
+  Coins,
+  Clock,
+  ChevronRight,
+  Flame,
+  CheckCircle2,
+} from 'lucide-react-native';
+
+const STATUS_COLOR: Record<string, string> = {
+  open: '#FFB800',
+  accepted: colors.primary,
+  in_progress: '#00E5FF',
+  finished: colors.textMuted,
+  disputed: colors.danger,
+  cancelled: colors.textMuted,
+};
+
+const RaceCard = ({
+  race,
+  userId,
+  onPress,
+  onAccept,
+  onDecline,
+}: {
+  race: RaceChallengeWithProfiles;
+  userId: string;
+  onPress: () => void;
+  onAccept: () => void;
+  onDecline: () => void;
+}) => {
+  const isChallenger = race.challenger_id === userId;
+  const isOpponent = race.opponent_id === userId;
+  const canAccept = race.status === 'open' && !isChallenger && race.opponent_id === null;
+  const isWinner = race.winner_id === userId;
+
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.85}>
+      <GlassCard style={styles.raceCard} activeGlow={race.status === 'accepted'}>
+        {/* Status & Type */}
+        <View style={styles.cardTop}>
+          <View style={styles.cardTopLeft}>
+            <View style={[styles.statusDot, { backgroundColor: STATUS_COLOR[race.status] || colors.textMuted }]} />
+            <Text style={styles.raceType}>{race.race_type?.toUpperCase() || 'RACE'}</Text>
+          </View>
+          <MatrixBadge
+            label={race.status.toUpperCase()}
+            variant={race.status === 'accepted' ? 'gold' : race.status === 'finished' ? 'silver' : 'green'}
+            size="sm"
+          />
+        </View>
+
+        {/* Racers */}
+        <View style={styles.racersRow}>
+          <View style={styles.racerSide}>
+            <Image
+              source={{ uri: race.challenger_profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200' }}
+              style={[styles.racerAvatar, isChallenger && styles.myAvatar]}
+            />
+            <Text style={styles.racerName} numberOfLines={1}>
+              {race.challenger_profile?.display_name || 'CHALLENGER'}
+              {isChallenger ? ' (YOU)' : ''}
+            </Text>
+          </View>
+
+          <View style={styles.vsBox}>
+            <Coins size={16} color="#FFD700" />
+            <Text style={styles.wagerText}>{(race.wager_credits || 0).toLocaleString()}</Text>
+            <Text style={styles.vsText}>VS</Text>
+          </View>
+
+          <View style={styles.racerSide}>
+            {race.opponent_id ? (
+              <>
+                <Image
+                  source={{ uri: race.opponent_profile?.avatar_url || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=200' }}
+                  style={[styles.racerAvatar, isOpponent && styles.myAvatar]}
+                />
+                <Text style={styles.racerName} numberOfLines={1}>
+                  {race.opponent_profile?.display_name || 'OPPONENT'}
+                  {isOpponent ? ' (YOU)' : ''}
+                </Text>
+              </>
+            ) : (
+              <View style={[styles.racerAvatar, styles.openSlot]}>
+                <Text style={styles.openSlotText}>?</Text>
+              </View>
+            )}
+            <Text style={[styles.racerName, !race.opponent_id && { color: colors.primary }]} numberOfLines={1}>
+              {race.opponent_id ? '' : 'OPEN SLOT'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Route */}
+        <Text style={styles.routeName}>{race.route_name} · {race.distance_miles || 0.25} mi</Text>
+
+        {/* Winner Banner */}
+        {race.winner_id && (
+          <View style={[styles.winnerBanner, { backgroundColor: isWinner ? 'rgba(255,215,0,0.1)' : 'rgba(255,255,255,0.04)' }]}>
+            <Trophy size={14} color={isWinner ? '#FFD700' : colors.textMuted} />
+            <Text style={[styles.winnerText, { color: isWinner ? '#FFD700' : colors.textMuted }]}>
+              {isWinner ? 'YOU WON · +' + (race.wager_credits || 0) + ' CR' : 'YOU LOST · WAGER SETTLED'}
+            </Text>
+          </View>
+        )}
+
+        {/* Action Buttons */}
+        <View style={styles.cardActions}>
+          {canAccept && (
+            <ApexButton
+              title="ACCEPT & ESCROW"
+              variant="primary"
+              size="sm"
+              style={{ flex: 1, marginRight: 8 }}
+              icon={<CheckCircle2 size={14} color="#000000" />}
+              onPress={onAccept}
+            />
+          )}
+          {canAccept && (
+            <ApexButton
+              title="DECLINE"
+              variant="danger"
+              size="sm"
+              onPress={onDecline}
+            />
+          )}
+          {!canAccept && (
+            <TouchableOpacity style={styles.viewBtn} onPress={onPress}>
+              <Text style={styles.viewBtnText}>VIEW DETAILS</Text>
+              <ChevronRight size={14} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </GlassCard>
+    </TouchableOpacity>
+  );
+};
 
 export const RaceHubScreen = ({ navigation }: any) => {
   const { races, disputes, acceptChallenge, declineChallenge, voteOnDispute, fetchRaces, fetchDisputes, subscribeToRaces, unsubscribeFromRaces } = useRaceStore();
   const { user } = useAuthStore();
+
+  const [hubTab, setHubTab] = useState<'open' | 'my' | 'history'>('open');
   const [selectedDispute, setSelectedDispute] = useState<any | null>(null);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -26,8 +183,31 @@ export const RaceHubScreen = ({ navigation }: any) => {
     return () => unsubscribeFromRaces();
   }, [user?.id]);
 
-  const openChallenges = races.filter((r) => r.status === 'open' || r.status === 'accepted');
-  const activeDisputes = disputes.filter((d) => d.status === 'under_review');
+  const handleAccept = async (raceId: string) => {
+    if (!user) return;
+    const { error } = await acceptChallenge(raceId, user.id);
+    if (error) {
+      Alert.alert('Error', error);
+    } else {
+      Alert.alert('🏁 Race Accepted!', 'Wager locked in escrow. Navigate to the race detail to start your telemetry run.');
+    }
+  };
+
+  const handleDecline = async (raceId: string) => {
+    await declineChallenge(raceId);
+  };
+
+  const openChallenges = races.filter(r => r.status === 'open');
+  const myActiveRaces = races.filter(r =>
+    ['accepted', 'in_progress', 'disputed'].includes(r.status) &&
+    (r.challenger_id === user?.id || r.opponent_id === user?.id)
+  );
+  const pastRaces = races.filter(r =>
+    ['finished', 'cancelled'].includes(r.status)
+  );
+  const activeDisputes = disputes.filter(d => d.status === 'under_review');
+
+  const displayRaces = hubTab === 'open' ? openChallenges : hubTab === 'my' ? myActiveRaces : pastRaces;
 
   return (
     <View style={styles.container}>
@@ -38,33 +218,43 @@ export const RaceHubScreen = ({ navigation }: any) => {
         onProfilePress={() => navigation.navigate('Profile')}
       />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Race Hub Title Bar */}
-        <View style={styles.topBar}>
-          <View>
-            <Text style={styles.title}>RACE HUB & WAGERS</Text>
-            <Text style={styles.subTitle}>WAGER CREDITS • VERIFIED TELEMETRY</Text>
+      <Animated.ScrollView style={[styles.content, { opacity: fadeAnim }]} showsVerticalScrollIndicator={false}>
+        {/* Hero Stats Bar */}
+        <View style={styles.heroBanner}>
+          <View style={styles.heroStat}>
+            <Text style={styles.heroStatVal}>{races.filter(r => r.winner_id === user?.id).length}</Text>
+            <Text style={styles.heroStatLabel}>WINS</Text>
           </View>
-
-          <ApexButton
-            title="CREATE CHALLENGE"
-            variant="primary"
-            size="sm"
-            icon={<Plus size={14} color={colors.background} />}
-            onPress={() => navigation.navigate('CreateChallenge')}
-          />
+          <View style={[styles.heroStat, styles.heroStatMid]}>
+            <Text style={[styles.heroStatVal, { color: '#FFB800' }]}>
+              {races.reduce((sum, r) => r.status === 'open' || r.status === 'accepted' ? sum + (r.wager_credits || 0) : sum, 0).toLocaleString()}
+            </Text>
+            <Text style={styles.heroStatLabel}>CR IN ESCROW</Text>
+          </View>
+          <View style={styles.heroStat}>
+            <Text style={[styles.heroStatVal, { color: colors.danger }]}>{activeDisputes.length}</Text>
+            <Text style={styles.heroStatLabel}>DISPUTES</Text>
+          </View>
         </View>
 
-        {/* Referee Disputes Alert Banner */}
+        {/* Create Challenge */}
+        <ApexButton
+          title="+ CREATE RACE CHALLENGE"
+          variant="primary"
+          size="lg"
+          style={{ marginBottom: 16 }}
+          icon={<Flame size={18} color="#000000" />}
+          onPress={() => navigation.navigate('CreateChallenge')}
+        />
+
+        {/* Dispute Alert */}
         {activeDisputes.length > 0 && (
           <GlassCard style={styles.disputeBanner}>
             <View style={styles.disputeHeader}>
-              <ShieldAlert size={18} color={colors.warning} />
-              <Text style={styles.disputeTitle}>ACTIVE RACE DISPUTE REQUIRING REFEREE VOTE</Text>
+              <ShieldAlert size={16} color={colors.warning} />
+              <Text style={styles.disputeTitle}>{activeDisputes.length} ACTIVE REFEREE DISPUTE{activeDisputes.length > 1 ? 'S' : ''}</Text>
             </View>
-            <Text style={styles.disputeSub}>
-              Community referees receive +150 Apex Credits for verifying finish order logs.
-            </Text>
+            <Text style={styles.disputeSub}>Community referees earn +150 credits per verified review.</Text>
             <ApexButton
               title="INSPECT PROOF & VOTE"
               variant="outline"
@@ -75,26 +265,67 @@ export const RaceHubScreen = ({ navigation }: any) => {
           </GlassCard>
         )}
 
-        {/* Race Challenge Categories Feed */}
-        <SectionHeader title="OPEN CHALLENGES & STAGED WAGERS" />
-        {openChallenges.map((r) => (
-          <RaceChallengeCard
-            key={r.id}
-            challenge={r}
-            onPress={() => navigation.navigate('RaceDetail', { raceId: r.id })}
-            onAccept={() => acceptChallenge(r.id, user?.id || '00000000-0000-0000-0000-000000000001')}
-            onDecline={() => declineChallenge(r.id)}
-            onViewDispute={() => setSelectedDispute(activeDisputes[0])}
-          />
-        ))}
+        {/* Tab Bar */}
+        <View style={styles.tabBar}>
+          <TouchableOpacity
+            style={[styles.tabBtn, hubTab === 'open' && styles.tabBtnActive]}
+            onPress={() => setHubTab('open')}
+          >
+            <Text style={[styles.tabText, hubTab === 'open' && { color: '#000000' }]}>
+              OPEN ({openChallenges.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, hubTab === 'my' && styles.tabBtnActive]}
+            onPress={() => setHubTab('my')}
+          >
+            <Text style={[styles.tabText, hubTab === 'my' && { color: '#000000' }]}>
+              STAGED ({myActiveRaces.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, hubTab === 'history' && styles.tabBtnActive]}
+            onPress={() => setHubTab('history')}
+          >
+            <Text style={[styles.tabText, hubTab === 'history' && { color: '#000000' }]}>
+              HISTORY ({pastRaces.length})
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-        <View style={{ height: 40 }} />
-      </ScrollView>
+        {/* Race List */}
+        {displayRaces.length === 0 ? (
+          <GlassCard>
+            <View style={styles.emptyState}>
+              <Flag size={36} color={colors.textMuted} />
+              <Text style={styles.emptyTitle}>
+                {hubTab === 'open' ? 'NO OPEN CHALLENGES' : hubTab === 'my' ? 'NO STAGED RACES' : 'NO RACE HISTORY'}
+              </Text>
+              <Text style={styles.emptySub}>
+                {hubTab === 'open' ? 'Be the first to post a wager challenge.' : hubTab === 'my' ? 'Accept a challenge to get staged.' : 'Your completed races will appear here.'}
+              </Text>
+            </View>
+          </GlassCard>
+        ) : (
+          displayRaces.map((race) => (
+            <RaceCard
+              key={race.id}
+              race={race}
+              userId={user?.id || ''}
+              onPress={() => navigation.navigate('RaceDetail', { raceId: race.id })}
+              onAccept={() => handleAccept(race.id)}
+              onDecline={() => handleDecline(race.id)}
+            />
+          ))
+        )}
 
-      {/* Dispute Verification Modal */}
+        <View style={{ height: 60 }} />
+      </Animated.ScrollView>
+
+      {/* Dispute Inspector Modal */}
       <Modal visible={!!selectedDispute} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <GlassCard style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>REFEREE DISPUTE INSPECTOR</Text>
               <TouchableOpacity onPress={() => setSelectedDispute(null)}>
@@ -103,26 +334,44 @@ export const RaceHubScreen = ({ navigation }: any) => {
             </View>
 
             {selectedDispute && (
-              <ScrollView style={{ maxHeight: 440 }}>
-                <Text style={styles.disputeReasonLabel}>REASON FOR APPEAL:</Text>
-                <Text style={styles.disputeReasonText}>{selectedDispute.reason}</Text>
+              <ScrollView style={{ maxHeight: 400 }}>
+                <Text style={styles.logLabel}>DISPUTE REASON:</Text>
+                <Text style={styles.logText}>{selectedDispute.reason}</Text>
 
-                {/* Race Telemetry Replay Component */}
-                <RaceReplayViewer
-                  challengerName="Ryder Vance (GT-R)"
-                  opponentName="Kenji Sato (Supra 2JZ)"
-                  challengerFinishMs={selectedDispute.gps_log_data.finish_time_ms || 8850}
-                  opponentFinishMs={10420}
-                />
+                {selectedDispute.video_proof_url && (
+                  <>
+                    <Text style={styles.logLabel}>VIDEO PROOF:</Text>
+                    <Text style={[styles.logText, { color: colors.primary }]}>
+                      {selectedDispute.video_proof_url.length > 60
+                        ? selectedDispute.video_proof_url.substring(0, 60) + '...'
+                        : selectedDispute.video_proof_url}
+                    </Text>
+                  </>
+                )}
 
                 <View style={styles.logBox}>
-                  <Text style={styles.logTitle}>GPS SENSOR LOGS</Text>
-                  <Text style={styles.logText}>Finish Time: {selectedDispute.gps_log_data.finish_time_ms} ms</Text>
-                  <Text style={styles.logText}>Max GPS Speed: {selectedDispute.gps_log_data.max_gps_speed} MPH</Text>
-                  <Text style={styles.logText}>Anti-Cheat Signal: VERIFIED CLEAN</Text>
+                  <Text style={styles.logLabel}>GPS SENSOR DATA</Text>
+                  <Text style={styles.logLine}>Anti-Cheat Signal: VERIFIED CLEAN</Text>
+                  <Text style={styles.logLine}>Submission Time: {new Date().toLocaleTimeString()}</Text>
                 </View>
 
-                <View style={styles.voteBtnRow}>
+                <View style={styles.voteRow}>
+                  <View style={styles.voteCount}>
+                    <Text style={[styles.voteNum, { color: colors.primary }]}>
+                      {(selectedDispute.referee_votes?.valid_votes || 0)}
+                    </Text>
+                    <Text style={styles.voteLabel}>VALID</Text>
+                  </View>
+                  <Text style={styles.voteSlash}>/</Text>
+                  <View style={styles.voteCount}>
+                    <Text style={[styles.voteNum, { color: colors.danger }]}>
+                      {(selectedDispute.referee_votes?.invalid_votes || 0)}
+                    </Text>
+                    <Text style={styles.voteLabel}>INVALID</Text>
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
                   <ApexButton
                     title="VOTE INVALID"
                     variant="danger"
@@ -137,7 +386,7 @@ export const RaceHubScreen = ({ navigation }: any) => {
                     title="VOTE VALID WIN"
                     variant="primary"
                     size="sm"
-                    style={{ flex: 1, marginLeft: 8 }}
+                    style={{ flex: 1 }}
                     onPress={() => {
                       voteOnDispute(selectedDispute.id, user?.id || '', true);
                       setSelectedDispute(null);
@@ -146,7 +395,7 @@ export const RaceHubScreen = ({ navigation }: any) => {
                 </View>
               </ScrollView>
             )}
-          </View>
+          </GlassCard>
         </View>
       </Modal>
     </View>
@@ -156,22 +405,110 @@ export const RaceHubScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 12 },
-  title: { color: colors.text, fontSize: 18, fontWeight: '900', letterSpacing: 1 },
-  subTitle: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
-  disputeBanner: { borderColor: colors.warning, borderWidth: 1, marginBottom: 12 },
-  disputeHeader: { flexDirection: 'row', alignItems: 'center' },
-  disputeTitle: { color: colors.warning, fontSize: 11, fontWeight: '900', marginLeft: 6 },
-  disputeSub: { color: colors.textSecondary, fontSize: 10, marginTop: 4 },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 20 },
-  modalCard: { backgroundColor: colors.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.primary },
+  heroBanner: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  heroStat: { flex: 1, alignItems: 'center' },
+  heroStatMid: {
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  heroStatVal: { color: colors.primary, fontSize: 22, fontWeight: '900' },
+  heroStatLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1, marginTop: 3 },
+
+  disputeBanner: { borderColor: colors.warning, borderWidth: 1, marginBottom: 12 },
+  disputeHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  disputeTitle: { color: colors.warning, fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  disputeSub: { color: colors.textSecondary, fontSize: 10 },
+
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  tabBtn: { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 8 },
+  tabBtnActive: { backgroundColor: colors.primary },
+  tabText: { color: colors.textMuted, fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+
+  // Race Card
+  raceCard: { padding: 14, marginBottom: 10 },
+  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  cardTopLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  raceType: { color: colors.text, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+
+  racersRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  racerSide: { flex: 1, alignItems: 'center', gap: 4 },
+  racerAvatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: colors.cardBorder },
+  myAvatar: { borderColor: colors.primary },
+  openSlot: {
+    backgroundColor: 'rgba(0, 255, 102, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderStyle: 'dashed',
+    borderColor: colors.primary,
+  },
+  openSlotText: { color: colors.primary, fontSize: 20, fontWeight: '900' },
+  racerName: { color: colors.textSecondary, fontSize: 10, fontWeight: '800', textAlign: 'center' },
+
+  vsBox: { alignItems: 'center', paddingHorizontal: 10 },
+  wagerText: { color: '#FFD700', fontSize: 13, fontWeight: '900', marginTop: 2 },
+  vsText: { color: colors.text, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginTop: 4 },
+
+  routeName: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
+
+  winnerBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  winnerText: { fontSize: 11, fontWeight: '900' },
+
+  cardActions: { flexDirection: 'row', alignItems: 'center' },
+  viewBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+    paddingVertical: 8,
+  },
+  viewBtnText: { color: colors.primary, fontSize: 11, fontWeight: '900' },
+
+  emptyState: { alignItems: 'center', paddingVertical: 32, gap: 8 },
+  emptyTitle: { color: colors.text, fontSize: 14, fontWeight: '900', letterSpacing: 1 },
+  emptySub: { color: colors.textMuted, fontSize: 11, textAlign: 'center' },
+
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', justifyContent: 'center', padding: 16 },
+  modalCard: { padding: 16 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  modalTitle: { color: colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
-  disputeReasonLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
-  disputeReasonText: { color: colors.text, fontSize: 13, fontWeight: '700', marginVertical: 4 },
-  logBox: { backgroundColor: colors.surface, padding: 10, borderRadius: 8, marginVertical: 6 },
-  logTitle: { color: colors.textMuted, fontSize: 9, fontWeight: '800' },
-  logText: { color: colors.text, fontSize: 11, fontWeight: '800', marginTop: 2 },
-  voteBtnRow: { flexDirection: 'row', marginTop: 12 },
+  modalTitle: { color: colors.text, fontSize: 15, fontWeight: '900', letterSpacing: 1 },
+
+  logBox: { backgroundColor: colors.surface, padding: 12, borderRadius: 8, marginVertical: 10, borderWidth: 1, borderColor: colors.cardBorder },
+  logLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '900', letterSpacing: 1, marginBottom: 4, marginTop: 8 },
+  logText: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  logLine: { color: colors.textSecondary, fontSize: 11, fontWeight: '700', marginTop: 3 },
+
+  voteRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20, paddingVertical: 12 },
+  voteCount: { alignItems: 'center' },
+  voteNum: { fontSize: 28, fontWeight: '900' },
+  voteLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', marginTop: 2 },
+  voteSlash: { color: colors.textMuted, fontSize: 24, fontWeight: '300' },
 });

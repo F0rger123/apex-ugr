@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
 import { useLeaderboardStore, LeaderboardUser } from '../../stores/leaderboardStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
 import { SectionHeader } from '../../components/common/SectionHeader';
@@ -72,15 +72,10 @@ export const LeaderboardsScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </ScrollView>
 
-        {isLoading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} size="large" />
-        ) : globalLeaderboard.length === 0 ? (
+        {globalLeaderboard.length === 0 ? (
           <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: 60 }}>
             <Award size={48} color={colors.textMuted} style={{ marginBottom: 16 }} />
             <Text style={{ color: colors.text, fontSize: 16, fontWeight: '900' }}>NO RANKINGS YET</Text>
-            <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 8, textAlign: 'center' }}>
-              The leaderboards are currently empty. Get out there and set some records!
-            </Text>
           </View>
         ) : (
           globalLeaderboard.map((user, idx) => (
