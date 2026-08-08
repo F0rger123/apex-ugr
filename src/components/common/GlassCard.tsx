@@ -1,6 +1,5 @@
-import React, { useRef } from 'react';
-import { View, StyleSheet, ViewStyle, TouchableWithoutFeedback, Animated, Platform } from 'react-native';
-import { BlurView } from 'expo-blur';
+import React from 'react';
+import { View, StyleSheet, ViewStyle, Pressable, Platform } from 'react-native';
 import { colors } from '../../config/colors';
 
 interface GlassCardProps {
@@ -16,47 +15,21 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   activeGlow = false,
   onPress,
 }) => {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-
-  const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.98,
-      useNativeDriver: true,
-      speed: 20,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      useNativeDriver: true,
-      speed: 20,
-    }).start();
-  };
-
-  const containerStyle: any[] = [
+  const containerStyle = [
     styles.container,
     activeGlow ? styles.activeGlowBorder : styles.standardBorder,
     style || {},
   ];
 
-  const content = (
-    <BlurView intensity={40} tint="dark" style={styles.blurContainer}>
-      {children}
-    </BlurView>
-  );
-
   if (onPress) {
     return (
-      <TouchableWithoutFeedback onPressIn={handlePressIn} onPressOut={handlePressOut} onPress={onPress}>
-        <Animated.View style={[containerStyle, { transform: [{ scale: scaleAnim }] }]}>
-          {content}
-        </Animated.View>
-      </TouchableWithoutFeedback>
+      <Pressable onPress={onPress} style={({ pressed }) => [containerStyle, pressed && styles.pressed]}>
+        <View style={styles.blurContainer}>{children}</View>
+      </Pressable>
     );
   }
 
-  return <View style={containerStyle}>{content}</View>;
+  return <View style={containerStyle}><View style={styles.blurContainer}>{children}</View></View>;
 };
 
 const styles = StyleSheet.create({
@@ -64,7 +37,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginVertical: 6,
     overflow: 'hidden',
-    backgroundColor: 'rgba(15, 17, 23, 0.4)', // Base fallback translucent
+    backgroundColor: colors.surfaceVariant,
     ...Platform.select({
       web: {
         backdropFilter: 'blur(20px)',
@@ -89,6 +62,9 @@ const styles = StyleSheet.create({
   },
   blurContainer: {
     padding: 16,
+  },
+  pressed: {
+    opacity: 0.88,
   },
   activeGlowBorder: {
     borderWidth: 1.5,

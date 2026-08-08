@@ -7,8 +7,6 @@ import {
   Image,
   TouchableOpacity,
   Alert,
-  Linking,
-  Platform,
 } from 'react-native';
 import { useMarketplaceStore } from '../../stores/marketplaceStore';
 import { useGarageStore } from '../../stores/garageStore';
@@ -17,6 +15,7 @@ import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
 import { PriceComparisonModal } from '../../components/marketplace/PriceComparisonModal';
+import { openVendorUrl } from '../../utils/vendorLinks';
 import { colors } from '../../config/colors';
 import {
   ShoppingCart,
@@ -76,12 +75,13 @@ export const ProductDetailScreen = ({ route, navigation }: any) => {
     );
   };
 
-  const handleOpenVendorUrl = () => {
-    const url = (product as any).purchase_url || (product as any).vendor_url || 'https://www.americanmuscle.com';
-    if (Platform.OS === 'web') {
-      window.open(url, '_blank');
-    } else {
-      Linking.openURL(url);
+  const handleOpenVendorUrl = async () => {
+    try {
+      if (!(await openVendorUrl(product))) {
+        Alert.alert('Vendor link unavailable', 'This vendor link could not be opened on your device.');
+      }
+    } catch {
+      Alert.alert('Vendor link unavailable', 'Please try again in a moment.');
     }
   };
 

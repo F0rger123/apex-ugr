@@ -1,10 +1,11 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Linking, Platform } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Alert } from 'react-native';
 import { MarketplaceProduct } from '../../types/database.types';
 import { GlassCard } from '../common/GlassCard';
 import { MatrixBadge } from '../common/MatrixBadge';
 import { colors } from '../../config/colors';
 import { Star, ShoppingCart, ExternalLink, ShieldCheck, Heart } from 'lucide-react-native';
+import { openVendorUrl } from '../../utils/vendorLinks';
 
 interface ProductCardProps {
   product: MarketplaceProduct;
@@ -23,20 +24,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onToggleWishlist,
   activeVehicleName,
 }) => {
-  const openExternalLink = () => {
-    if (product.purchase_url) {
-      if (Platform.OS === 'web') {
-        window.open(product.purchase_url, '_blank');
-      } else {
-        Linking.openURL(product.purchase_url);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  const handleOpenExternalLink = async () => {
+    try {
+      if (!(await openVendorUrl(product))) {
+        Alert.alert('Vendor link unavailable', 'This vendor link could not be opened on your device.');
       }
+    } catch {
+      Alert.alert('Vendor link unavailable', 'Please try again in a moment.');
     }
   };
 
   return (
-    <GlassCard onPress={onPress} style={styles.card}>
+    <GlassCard style={styles.card}>
       <View style={styles.imageContainer}>
-        <Image source={{ uri: product.image_url }} style={styles.image} resizeMode="cover" />
+        {imageFailed ? (
+          <View style={[styles.image, styles.imageFallback]}><Text style={styles.imageFallbackText}>APEX PARTS</Text></View>
+        ) : (
+          <Image source={{ uri: product.image_url }} onError={() => setImageFailed(true)} style={styles.image} resizeMode="cover" />
+        )}
         <View style={styles.badgeTopRow}>
           <MatrixBadge label={product.vendor_name} variant="silver" size="sm" />
           {onToggleWishlist && (
@@ -56,7 +63,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
       <View style={styles.content}>
         <Text style={styles.brand}>{product.brand}</Text>
-        <Text style={styles.title} numberOfLines={2}>{product.title}</Text>
+        <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
+          <Text style={styles.title} numberOfLines={2}>{product.title}</Text>
+        </TouchableOpacity>
 
         {/* Compatibility Match Tag */}
         {activeVehicleName && (
@@ -76,7 +85,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <Text style={styles.price}>${product.price.toLocaleString()}</Text>
 
           <View style={styles.actionGroup}>
-            <TouchableOpacity style={styles.linkBtn} onPress={openExternalLink}>
+            <TouchableOpacity style={styles.linkBtn} onPress={handleOpenExternalLink}>
               <ExternalLink size={12} color={colors.textSecondary} />
             </TouchableOpacity>
 
@@ -86,6 +95,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </TouchableOpacity>
           </View>
         </View>
+        <TouchableOpacity style={styles.detailsBtn} onPress={onPress} activeOpacity={0.8}>
+          <Text style={styles.detailsBtnText}>VIEW PART DETAILS</Text>
+        </TouchableOpacity>
       </View>
     </GlassCard>
   );
@@ -106,6 +118,8 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  imageFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceContainerHigh },
+  imageFallbackText: { color: colors.primary, fontSize: 11, fontWeight: '900', letterSpacing: 1.2 },
   badgeTopRow: {
     position: 'absolute',
     top: 8,
@@ -187,6 +201,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
   },
+  detailsBtn: { borderTopWidth: 1, borderTopColor: colors.cardBorder, marginTop: 10, paddingTop: 10 },
+  detailsBtnText: { color: colors.textSecondary, fontSize: 10, fontWeight: '900', letterSpacing: 1, textAlign: 'center' },
   actionGroup: {
     flexDirection: 'row',
     alignItems: 'center',

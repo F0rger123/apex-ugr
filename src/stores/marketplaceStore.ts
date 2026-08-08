@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '../config/supabase';
 import { Database } from '../types/database.types';
+import { partsApiService } from '../services/partsApiService';
 
 type MarketplaceProduct = Database['public']['Tables']['marketplace_products']['Row'];
 type MarketplaceOrder = Database['public']['Tables']['marketplace_orders']['Row'];
@@ -242,29 +243,28 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   isLoadingOrders: false,
   error: null,
 
-  fetchProducts: async (vehicleMake, vehicleModel) => {
-    set({ isLoading: true });
+  fetchProducts: async () => {
+    set({ isLoading: true, error: null });
 
-    try {
-      // Fire live API fetch in background
-      const { partsApiService } = require('../services/partsApiService');
-      const liveParts = await partsApiService.fetchLiveParts({ make: vehicleMake, model: vehicleModel });
-
-      // Also pull from Supabase
-      const { data: dbParts } = await supabase
+    const [liveResult, dbResult] = await Promise.allSettled([
+      partsApiService.fetchLiveParts(),
+      supabase
         .from('marketplace_products')
         .select('*')
         .eq('in_stock', true)
         .order('rating', { ascending: false })
-        .limit(100);
+        .limit(100),
+    ]);
 
-      const combined = [...(dbParts || []), ...liveParts, ...INSTANT_PARTS];
-      const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
-      set({ products: unique as MarketplaceProduct[], isLoading: false });
-    } catch {
-      // On any error, keep the instant parts showing
-      set({ isLoading: false });
-    }
+    const liveParts = liveResult.status === 'fulfilled' ? liveResult.value : [];
+    const dbParts = dbResult.status === 'fulfilled' ? dbResult.value.data || [] : [];
+    const combined = [...INSTANT_PARTS, ...liveParts, ...dbParts];
+    const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+    set({
+      products: unique as MarketplaceProduct[],
+      isLoading: false,
+      error: dbResult.status === 'rejected' ? 'Live catalog unavailable; showing cached parts.' : null,
+    });
   },
 
   fetchFromEbayAPI: async () => {

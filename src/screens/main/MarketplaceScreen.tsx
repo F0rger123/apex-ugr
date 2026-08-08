@@ -45,15 +45,12 @@ export const MarketplaceScreen = ({ navigation }: any) => {
   const [selectedCompareProduct, setSelectedCompareProduct] = useState<MarketplaceProduct | null>(null);
 
   useEffect(() => {
-    // Fetch products filtered to user's active vehicle make
-    fetchProducts(
-      filterByGarage && activeVehicle ? activeVehicle.make : undefined,
-      filterByGarage && activeVehicle ? activeVehicle.model : undefined,
-    );
+    // The local catalog is instant; refresh the remote catalog once per session.
+    fetchProducts();
     if (user) {
       fetchOrders(user.id);
     }
-  }, [filterByGarage, activeVehicle?.id, user?.id]);
+  }, [user?.id]);
 
   const products = getFilteredProducts(
     filterByGarage ? activeVehicle?.make : undefined,

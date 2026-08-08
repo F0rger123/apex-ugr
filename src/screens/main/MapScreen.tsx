@@ -67,8 +67,9 @@ const POPULAR_ROUTES = [
 
 // ─── Web MapLibre GL Map — Full 3D Vector with Real GPS ──────────────────────
 const WebRadarView = React.memo(
-  ({ currentLocation, driversNearby, meets, followMode, activeRoute, mapZoom, pitchAngle, onMapReady }: any) => {
-    const iframeRef = useRef<HTMLIFrameElement>(null);
+  ({ currentLocation, driversNearby, meets, followMode, activeRoute, mapZoom, pitchAngle, mapReady, onMapReady, iframeRef: controlledIframeRef }: any) => {
+    const internalIframeRef = useRef<HTMLIFrameElement>(null);
+    const iframeRef = controlledIframeRef || internalIframeRef;
     const gpsInitSentRef = useRef(false);
 
     const [htmlContent] = useState(`
@@ -168,7 +169,7 @@ const WebRadarView = React.memo(
             zoom: zoom || 15,
             minZoom: 4,
             maxZoom: 19,
-            pitch: 60,
+            pitch: 0,
             bearing: -10,
             antialias: true
           });
@@ -330,6 +331,15 @@ const WebRadarView = React.memo(
   `);
 
     useEffect(() => {
+      if (Platform.OS !== 'web') return;
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data?.type === 'MAP_READY') onMapReady?.();
+      };
+      window.addEventListener('message', handleMessage);
+      return () => window.removeEventListener('message', handleMessage);
+    }, [onMapReady]);
+
+    useEffect(() => {
       if (!iframeRef.current?.contentWindow) return;
       const win = iframeRef.current.contentWindow;
 
@@ -357,7 +367,7 @@ const WebRadarView = React.memo(
           location: m.location_name,
         })),
       }, '*');
-    }, [currentLocation, driversNearby, meets, followMode, activeRoute]);
+    }, [currentLocation, driversNearby, meets, followMode, activeRoute, mapReady]);
 
     useEffect(() => {
       iframeRef.current?.contentWindow?.postMessage({ type: 'SET_ZOOM', zoom: mapZoom }, '*');
@@ -401,7 +411,8 @@ export const MapScreen = ({ navigation }: any) => {
   const [mapTab, setMapTab] = useState<'radar' | 'meets' | 'routes'>('radar');
   const [followMode, setFollowMode] = useState(true);
   const [mapZoom, setMapZoom] = useState(15);
-  const [pitchAngle, setPitchAngle] = useState(60);
+  const [pitchAngle, setPitchAngle] = useState(0);
+  const [mapReady, setMapReady] = useState(false);
   const [activeRoute, setActiveRoute] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const iframeRef = useRef<any>(null);
@@ -429,7 +440,7 @@ export const MapScreen = ({ navigation }: any) => {
 
   const handleZoomIn = () => setMapZoom(prev => Math.min(19, prev + 1));
   const handleZoomOut = () => setMapZoom(prev => Math.max(8, prev - 1));
-  const togglePitch = () => setPitchAngle(prev => prev === 60 ? 0 : 60);
+  const togglePitch = () => setPitchAngle(prev => prev === 55 ? 0 : 55);
 
   const handleRecenterOnMe = () => {
     setFollowMode(true);
@@ -510,6 +521,9 @@ export const MapScreen = ({ navigation }: any) => {
           activeRoute={activeRoute}
           mapZoom={mapZoom}
           pitchAngle={pitchAngle}
+          mapReady={mapReady}
+          iframeRef={iframeRef}
+          onMapReady={() => setMapReady(true)}
         />
 
         {/* Floating Map Controls Overlay */}
@@ -541,7 +555,7 @@ export const MapScreen = ({ navigation }: any) => {
 
           {/* 3D Tilt Toggle */}
           <TouchableOpacity style={styles.floatingSquareBtn} onPress={togglePitch}>
-            <Layers size={18} color={pitchAngle === 60 ? colors.primary : colors.textMuted} />
+            <Layers size={18} color={pitchAngle === 55 ? colors.primary : colors.textMuted} />
           </TouchableOpacity>
 
           {/* Zoom In */}
@@ -555,9 +569,9 @@ export const MapScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </View>
 
-        {isLoading && (
+        {isLoading && !mapReady && (
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator color={colors.primary} size="large" />
+            <ActivityIndicator color={colors.primary} size="small" />
             <Text style={styles.loadingText}>CALIBRATING HIGH-PRECISION GPS...</Text>
           </View>
         )}
@@ -761,13 +775,20 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(8, 9, 12, 0.85)',
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: 'rgba(8, 9, 12, 0.9)',
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     zIndex: 10,
   },
-  loadingText: { color: colors.primary, fontSize: 11, fontWeight: '900', letterSpacing: 2, marginTop: 14 },
+  loadingText: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 1, marginLeft: 8 },
 
   floatingControls: {
     position: 'absolute',

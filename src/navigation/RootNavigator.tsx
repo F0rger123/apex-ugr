@@ -60,7 +60,9 @@ export const RootNavigator = () => {
         if (finalStatus !== 'granted') {
           return;
         }
-        token = (await Notifications.getExpoPushTokenAsync({ projectId: 'YOUR_PROJECT_ID' })).data;
+        const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+        if (!projectId) return;
+        token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
       }
       
       if (token && user?.id) {
