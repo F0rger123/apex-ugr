@@ -145,12 +145,12 @@ const WebRadarView = React.memo(
         }
         .meet-marker {
           width: 36px; height: 36px;
-          background: linear-gradient(135deg, #FF0055, #FF3366);
+          background: #B7FF4A;
           border-radius: 8px;
           border: 2px solid #fff;
-          box-shadow: 0 0 18px rgba(255,0,85,0.6);
+          box-shadow: 0 0 18px rgba(183,255,74,0.52);
           display: flex; align-items: center; justify-content: center;
-          color: #fff; font-size: 10px; font-weight: 900;
+          color: #08090C; font-size: 10px; font-weight: 900;
         }
         .racer-marker {
           width: 18px; height: 18px;

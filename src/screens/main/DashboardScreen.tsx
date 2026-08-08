@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, ImageBackground } from 'react-native';
 import { useAuthStore } from '../../stores/authStore';
 import { useGarageStore } from '../../stores/garageStore';
 import { useRaceStore } from '../../stores/raceStore';
@@ -67,16 +67,18 @@ export const DashboardScreen = ({ navigation }: any) => {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* ── Hero Welcome Banner with Gradient ─────────────────────────────── */}
         <Animated.View style={[{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-          <View style={styles.heroBanner}>
-            {/* Gradient overlay via nested views */}
-            <View style={styles.heroGradientLayer1} />
-            <View style={styles.heroGradientLayer2} />
-
+          <ImageBackground
+            source={{ uri: activeVehicle?.photos?.[0] || 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1400&q=88' }}
+            style={styles.heroBanner}
+            imageStyle={styles.heroImage}
+          >
+            <View style={styles.heroScrim} />
             <View style={styles.heroContent}>
               <View style={styles.heroTop}>
                 <View>
                   <Text style={styles.heroLabel}>PILOT RECORD · APEX OS</Text>
                   <Text style={styles.heroName}>{user?.display_name || 'PILOT'}</Text>
+                  {activeVehicle && <Text style={styles.heroVehicle}>{activeVehicle.year} {activeVehicle.make} {activeVehicle.model} · {activeVehicle.color}</Text>}
                 </View>
                 <MatrixBadge label={user?.reputation_level?.toUpperCase() || 'ROOKIE'} variant="green" />
               </View>
@@ -111,7 +113,7 @@ export const DashboardScreen = ({ navigation }: any) => {
                 </View>
               </View>
             </View>
-          </View>
+          </ImageBackground>
         </Animated.View>
 
         {/* ── Quick Nav Cards ──────────────────────────────────────────────── */}
@@ -262,31 +264,25 @@ const styles = StyleSheet.create({
 
   // Hero Banner
   heroBanner: {
-    borderRadius: 20,
+    minHeight: 224,
+    borderRadius: 12,
     overflow: 'hidden',
     marginVertical: 8,
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 102, 0.15)',
+    borderColor: 'rgba(183, 255, 74, 0.28)',
     position: 'relative',
-  },
-  heroGradientLayer1: {
-    ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.surface,
   },
-  heroGradientLayer2: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: '60%',
-    height: '100%',
-    backgroundColor: 'rgba(0, 255, 102, 0.04)',
-    borderTopLeftRadius: 100,
-    borderBottomLeftRadius: 100,
+  heroImage: { opacity: 0.68 },
+  heroScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(3, 5, 3, 0.58)',
   },
   heroContent: { padding: 20, zIndex: 1 },
   heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
   heroLabel: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 2, opacity: 0.8 },
   heroName: { color: colors.text, fontSize: 26, fontWeight: '900', marginTop: 4, letterSpacing: -0.5 },
+  heroVehicle: { color: colors.textSecondary, fontSize: 11, fontWeight: '800', marginTop: 4 },
 
   liveStrip: {
     flexDirection: 'row',
@@ -325,7 +321,7 @@ const styles = StyleSheet.create({
   quickNavCard: {
     flex: 1,
     backgroundColor: colors.surface,
-    borderRadius: 14,
+    borderRadius: 8,
     padding: 12,
     alignItems: 'center',
     borderWidth: 1,
@@ -334,7 +330,7 @@ const styles = StyleSheet.create({
   quickNavIcon: {
     width: 42,
     height: 42,
-    borderRadius: 12,
+    borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.04)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -343,7 +339,7 @@ const styles = StyleSheet.create({
   quickNavLabel: { color: colors.text, fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
   quickNavSub: { color: colors.textMuted, fontSize: 8, fontWeight: '700', marginTop: 2, letterSpacing: 0.5 },
   toolGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  toolCard: { width: '48%', minHeight: 74, padding: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.cardBorder, borderRadius: 12 },
+  toolCard: { width: '48%', minHeight: 74, padding: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.cardBorder, borderRadius: 8 },
   toolLabel: { color: colors.text, fontSize: 10, fontWeight: '900', marginTop: 9, letterSpacing: 0.6 },
   toolSub: { color: colors.textMuted, fontSize: 8, fontWeight: '800', marginTop: 3, letterSpacing: 0.5 },
 

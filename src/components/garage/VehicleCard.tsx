@@ -32,6 +32,10 @@ export const VehicleCard: React.FC<VehicleCardProps> = ({
           )}
           <MatrixBadge label={vehicle.drivetrain} variant="silver" style={styles.badgeTopRight} />
         </View>
+        <View style={styles.colorPill}>
+          <View style={[styles.colorDot, { backgroundColor: vehicle.color?.toLowerCase().includes('white') ? '#F4FFF5' : vehicle.color?.toLowerCase().includes('red') ? '#FF6B6B' : vehicle.color?.toLowerCase().includes('blue') ? '#7EC8FF' : '#252B26' }]} />
+          <Text style={styles.colorText}>{vehicle.color || 'COLOR NOT SET'}</Text>
+        </View>
       </View>
 
       {/* Vehicle Title & Trim */}
@@ -106,6 +110,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+  colorPill: { position: 'absolute', left: 10, bottom: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(3,5,3,0.74)', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
+  colorDot: { width: 8, height: 8, borderRadius: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)', marginRight: 5 },
+  colorText: { color: colors.text, fontSize: 9, fontWeight: '800' },
   badgeTopLeft: {},
   badgeTopRight: {},
   detailsHeader: {
@@ -156,7 +163,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     padding: 12,
     marginHorizontal: 16,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },

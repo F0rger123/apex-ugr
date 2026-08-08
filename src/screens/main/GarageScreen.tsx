@@ -31,6 +31,9 @@ export const GarageScreen = ({ navigation }: any) => {
   const [model, setModel] = useState('');
   const [year, setYear] = useState('2024');
   const [engine, setEngine] = useState('');
+  const [trim, setTrim] = useState('');
+  const [color, setColor] = useState('');
+  const [nickname, setNickname] = useState('');
   const [hp, setHp] = useState('');
   const [topSpeed, setTopSpeed] = useState('');
 
@@ -41,8 +44,9 @@ export const GarageScreen = ({ navigation }: any) => {
       year: parseInt(year) || 2024,
       make,
       model,
-      trim: null,
-      color: 'Carbon Obsidian',
+      trim: trim || null,
+      color: color || 'Unspecified',
+      nickname: nickname || null,
       engine: engine || 'N/A',
       transmission: '6-Speed Manual',
       horsepower: parseInt(hp) || 0,
@@ -56,7 +60,7 @@ export const GarageScreen = ({ navigation }: any) => {
     } as any);
     if (!error) {
       setModalVisible(false);
-      setMake(''); setModel(''); setEngine(''); setHp('');
+      setMake(''); setModel(''); setEngine(''); setHp(''); setTrim(''); setColor(''); setNickname('');
     }
   };
 
@@ -151,6 +155,15 @@ export const GarageScreen = ({ navigation }: any) => {
 
               <Text style={styles.label}>YEAR</Text>
               <TextInput style={styles.input} value={year} onChangeText={setYear} keyboardType="numeric" placeholder="2024" placeholderTextColor={colors.textMuted} />
+
+              <Text style={styles.label}>TRIM / PACKAGE</Text>
+              <TextInput style={styles.input} value={trim} onChangeText={setTrim} placeholder="e.g. Competition, Nismo, Z51" placeholderTextColor={colors.textMuted} />
+
+              <Text style={styles.label}>EXTERIOR COLOR</Text>
+              <TextInput style={styles.input} value={color} onChangeText={setColor} placeholder="e.g. Midnight Purple III" placeholderTextColor={colors.textMuted} />
+
+              <Text style={styles.label}>BUILD NAME</Text>
+              <TextInput style={styles.input} value={nickname} onChangeText={setNickname} placeholder="e.g. Night Shift" placeholderTextColor={colors.textMuted} />
 
               <Text style={styles.label}>ENGINE</Text>
               <TextInput style={styles.input} value={engine} onChangeText={setEngine} placeholder="e.g. 4.0L High-RPM Flat-6" placeholderTextColor={colors.textMuted} />

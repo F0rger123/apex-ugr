@@ -164,7 +164,7 @@ export const CarMeetsScreen = ({ navigation }: any) => {
 
                   <TouchableOpacity
                     style={styles.navBtn}
-                    onPress={() => navigation.navigate('Map')}
+                    onPress={() => navigation.navigate('MainTabs', { screen: 'Map', params: { focusMeetId: meet.id } })}
                   >
                     <Navigation size={12} color={colors.text} />
                     <Text style={styles.navBtnText}>GPS NAV</Text>
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
   navBtnText: { color: colors.text, fontSize: 10, fontWeight: '800', marginLeft: 4 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 20 },
-  modalCard: { backgroundColor: colors.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.primary },
+  modalCard: { backgroundColor: colors.card, borderRadius: 10, padding: 16, borderWidth: 1, borderColor: colors.primary },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   modalTitle: { color: colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 1 },
   label: { color: colors.textMuted, fontSize: 10, fontWeight: '800', marginTop: 10, marginBottom: 4 },

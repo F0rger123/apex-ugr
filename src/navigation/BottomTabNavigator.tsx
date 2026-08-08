@@ -98,7 +98,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glassHeader,
     borderTopWidth: 1,
     borderTopColor: colors.cardBorder,
-    height: 60,
+    height: 64,
     paddingBottom: 6,
     paddingTop: 6,
   },

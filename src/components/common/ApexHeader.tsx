@@ -90,14 +90,14 @@ export const ApexHeader: React.FC<ApexHeaderProps> = ({
 
 const styles = StyleSheet.create({
   headerContainer: {
-    height: 60,
+    height: 56,
     backgroundColor: colors.glassHeader,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
+    borderBottomColor: 'rgba(183, 255, 74, 0.12)',
   },
   backBtn: {
     flexDirection: 'row',
@@ -116,9 +116,9 @@ const styles = StyleSheet.create({
   },
   logoBadge: {
     backgroundColor: colors.primary,
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-    borderRadius: 4,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    borderRadius: 6,
   },
   logoText: {
     color: colors.background,
@@ -138,8 +138,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   creditsPill: {
-    backgroundColor: 'rgba(255, 184, 0, 0.12)',
-    borderColor: 'rgba(255, 184, 0, 0.4)',
+    backgroundColor: 'rgba(183, 255, 74, 0.08)',
+    borderColor: 'rgba(183, 255, 74, 0.22)',
     borderWidth: 1,
     paddingVertical: 4,
     paddingHorizontal: 10,
@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   creditsText: {
-    color: colors.warning,
+    color: colors.text,
     fontSize: 12,
     fontWeight: '900',
     marginLeft: 4,

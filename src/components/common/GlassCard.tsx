@@ -34,7 +34,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 16,
+    borderRadius: 10,
     marginVertical: 6,
     overflow: 'hidden',
     backgroundColor: colors.surfaceVariant,
@@ -42,7 +42,7 @@ const styles = StyleSheet.create({
       web: {
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.45)',
+        boxShadow: '0 12px 28px rgba(0, 0, 0, 0.28)',
       },
       default: {
         shadowColor: '#000',
@@ -54,17 +54,15 @@ const styles = StyleSheet.create({
     }),
   },
   standardBorder: {
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
+    borderWidth: 1,
     borderColor: colors.cardBorder,
   },
   blurContainer: {
-    padding: 16,
+    padding: 14,
   },
   pressed: {
-    opacity: 0.88,
+    opacity: 0.9,
+    transform: [{ scale: 0.99 }],
   },
   activeGlowBorder: {
     borderWidth: 1.5,

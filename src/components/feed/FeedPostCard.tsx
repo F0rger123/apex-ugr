@@ -31,6 +31,7 @@ interface FeedPostCardProps {
   onLike: () => void;
   onComment: () => void;
   onFollow: () => void;
+  isFollowing?: boolean;
   onSave: () => void;
   isSaved?: boolean;
   onRepost: () => void;
@@ -43,6 +44,7 @@ export const FeedPostCard: React.FC<FeedPostCardProps> = ({
   onLike,
   onComment,
   onFollow,
+  isFollowing = false,
   onSave,
   isSaved = false,
   onRepost,
@@ -168,8 +170,8 @@ export const FeedPostCard: React.FC<FeedPostCardProps> = ({
             source={{ uri: author?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop' }}
             style={styles.authorAvatar}
           />
-          <View style={styles.followPlusBadge}>
-            <UserPlus size={9} color={colors.background} />
+          <View style={[styles.followPlusBadge, isFollowing && styles.followingBadge]}>
+            <UserPlus size={9} color={isFollowing ? colors.primary : colors.background} />
           </View>
         </TouchableOpacity>
 
@@ -288,6 +290,7 @@ const styles = StyleSheet.create({
   avatarContainer: { alignItems: 'center' },
   authorAvatar: { width: 46, height: 46, borderRadius: 23, borderWidth: 2, borderColor: colors.primary },
   followPlusBadge: { position: 'absolute', bottom: -6, backgroundColor: colors.primary, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  followingBadge: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.primary },
 
   actionItem: { alignItems: 'center', gap: 4 },
   actionCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },

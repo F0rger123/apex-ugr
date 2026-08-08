@@ -179,6 +179,13 @@ export const MarketplaceScreen = ({ navigation }: any) => {
               </TouchableOpacity>
             )}
 
+            <View style={styles.catalogStatusRow}>
+              <Text style={styles.catalogStatusText}>
+                {filterByGarage && activeVehicle ? `${products.length} VERIFIED OPTIONS FOR YOUR BUILD` : `${products.length} CATALOG OPTIONS`}
+              </Text>
+              {isLoading && <ActivityIndicator size="small" color={colors.primary} />}
+            </View>
+
             {/* Expandable Filter Drawer (Vendor & Budget) */}
             {showFilterDrawer && (
               <GlassCard style={styles.filterDrawer}>
@@ -226,10 +233,13 @@ export const MarketplaceScreen = ({ navigation }: any) => {
             {/* Product List Grid */}
             <View style={styles.productList}>
               {products.length === 0 ? (
-                <GlassCard style={{ alignItems: 'center', padding: 24, marginVertical: 12 }}>
+                <GlassCard style={styles.emptyCatalogCard}>
                   <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '800' }}>
-                    NO PARTS FOUND MATCHING CURRENT FILTER CRITERIA
+                    NO VERIFIED PARTS FOUND FOR THIS FILTER
                   </Text>
+                  <TouchableOpacity style={styles.clearFiltersBtn} onPress={() => { setCategory('All'); setVendor('All'); setSearchQuery(''); setMaxBudget(25000); }}>
+                    <Text style={styles.clearFiltersText}>CLEAR CATALOG FILTERS</Text>
+                  </TouchableOpacity>
                 </GlassCard>
               ) : (
                 products.map((p) => (
@@ -280,7 +290,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 10 },
-  vehicleContextCard: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.primary, overflow: 'hidden', marginBottom: 10 },
+  vehicleContextCard: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.primary, overflow: 'hidden', marginBottom: 10 },
   vehicleContextImage: { width: 112, height: 82, backgroundColor: colors.surfaceContainerHigh },
   vehicleContextPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   vehicleContextPlaceholderText: { color: colors.textMuted, fontSize: 9, fontWeight: '900' },
@@ -296,7 +306,7 @@ const styles = StyleSheet.create({
   rideChipTextActive: { color: colors.background },
   title: { color: colors.text, fontSize: 18, fontWeight: '900', letterSpacing: 1 },
   subTitle: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
-  cartBtn: { backgroundColor: colors.primary, padding: 10, borderRadius: 12 },
+  cartBtn: { backgroundColor: colors.primary, padding: 10, borderRadius: 8 },
   cartBadge: { position: 'absolute', top: -4, right: -4, backgroundColor: colors.danger, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   cartBadgeText: { color: colors.text, fontSize: 10, fontWeight: '900' },
 
@@ -313,6 +323,8 @@ const styles = StyleSheet.create({
   garageFitPill: { backgroundColor: 'rgba(0, 255, 102, 0.1)', borderColor: 'rgba(0, 255, 102, 0.3)', borderWidth: 1, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   garageFitPillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   garageFitText: { color: colors.primary, fontSize: 10, fontWeight: '900', marginLeft: 6 },
+  catalogStatusRow: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
+  catalogStatusText: { color: colors.textMuted, fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
 
   filterDrawer: { marginBottom: 10, padding: 12 },
   filterGroupTitle: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginTop: 4 },
@@ -329,6 +341,9 @@ const styles = StyleSheet.create({
   catPillText: { color: colors.text, fontSize: 11, fontWeight: '800' },
 
   productList: { marginTop: 8 },
+  emptyCatalogCard: { alignItems: 'center', padding: 24, marginVertical: 12 },
+  clearFiltersBtn: { borderWidth: 1, borderColor: colors.primary, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 7, marginTop: 12 },
+  clearFiltersText: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
   compareLinkBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,255,102,0.06)', paddingVertical: 4, borderRadius: 6, marginBottom: 12, marginTop: -4, borderWidth: 1, borderColor: 'rgba(0,255,102,0.2)' },
   compareLinkText: { color: colors.primary, fontSize: 9, fontWeight: '900', marginLeft: 4, letterSpacing: 0.5 },
 });

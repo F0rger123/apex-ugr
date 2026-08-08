@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Modal, Alert } from 'react-native';
 import { useMarketplaceStore } from '../../stores/marketplaceStore';
 import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
@@ -8,11 +8,11 @@ import { GlassCard } from '../../components/common/GlassCard';
 import { MatrixBadge } from '../../components/common/MatrixBadge';
 import { ApexButton } from '../../components/common/ApexButton';
 import { colors } from '../../config/colors';
-import { ShoppingCart, Trash2, Plus, Minus, Tag, CreditCard, Coins, CheckCircle2, ShieldCheck, X } from 'lucide-react-native';
+import { ShoppingCart, Trash2, Plus, Minus, CreditCard, Coins, CheckCircle2 } from 'lucide-react-native';
 
 export const CartScreen = ({ navigation }: any) => {
   const { cart, removeFromCart, updateCartQuantity, checkoutCart } = useMarketplaceStore();
-  const { user } = useAuthStore();
+  const { user, deductCredits } = useAuthStore();
 
   const [promoCode, setPromoCode] = useState('');
   const [discountPercent, setDiscountPercent] = useState(0);
@@ -20,6 +20,7 @@ export const CartScreen = ({ navigation }: any) => {
   const [shippingAddress, setShippingAddress] = useState('1042 Apex Speedway Blvd, Los Angeles, CA 90015');
   const [paymentMethod, setPaymentMethod] = useState<'credits' | 'card'>('credits');
   const [orderConfirmedOrder, setOrderConfirmedOrder] = useState<any | null>(null);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const discountAmount = subtotal * (discountPercent / 100);
@@ -34,10 +35,35 @@ export const CartScreen = ({ navigation }: any) => {
     }
   };
 
-  const handleCheckout = () => {
-    if (cart.length === 0 || !user) return;
-    const order = checkoutCart(user.id, shippingAddress);
-    setOrderConfirmedOrder(order);
+  const handleCheckout = async () => {
+    if (cart.length === 0 || !user || isCheckingOut) return;
+    if (shippingAddress.trim().length < 12) {
+      Alert.alert('Shipping address needed', 'Enter a complete delivery address before placing the order.');
+      return;
+    }
+    if (paymentMethod === 'credits' && user.credits_balance < total) {
+      Alert.alert('Not enough APEX credits', 'Choose card / Apple Pay or add credits to complete this order.');
+      return;
+    }
+
+    setIsCheckingOut(true);
+    try {
+      const result = await checkoutCart(user.id, shippingAddress.trim(), total);
+      if (result.error || !result.order) {
+        Alert.alert('Checkout unavailable', result.error || 'Please try again in a moment.');
+        return;
+      }
+
+      if (paymentMethod === 'credits') {
+        const creditResult = await deductCredits(total);
+        if (creditResult.error) {
+          Alert.alert('Order placed', 'Your order is recorded. Credit balance will reconcile when your connection returns.');
+        }
+      }
+      setOrderConfirmedOrder(result.order);
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   return (
@@ -185,6 +211,7 @@ export const CartScreen = ({ navigation }: any) => {
                 size="lg"
                 style={{ marginTop: 12 }}
                 onPress={handleCheckout}
+                isLoading={isCheckingOut}
               />
             </GlassCard>
           </>
@@ -199,7 +226,7 @@ export const CartScreen = ({ navigation }: any) => {
           <View style={styles.modalCard}>
             <View style={{ alignItems: 'center', paddingVertical: 12 }}>
               <CheckCircle2 size={48} color={colors.primary} />
-              <Text style={styles.confirmTitle}>ORDER CONFIRMED & SHIPPED!</Text>
+              <Text style={styles.confirmTitle}>ORDER CONFIRMED</Text>
               <Text style={styles.confirmSub}>TRACKING #: {orderConfirmedOrder?.tracking_number}</Text>
             </View>
 
@@ -263,7 +290,7 @@ const styles = StyleSheet.create({
   totalVal: { color: colors.primary, fontSize: 18, fontWeight: '900' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 20 },
-  modalCard: { backgroundColor: colors.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.primary },
+  modalCard: { backgroundColor: colors.card, borderRadius: 10, padding: 16, borderWidth: 1, borderColor: colors.primary },
   confirmTitle: { color: colors.text, fontSize: 16, fontWeight: '900', marginTop: 8 },
   confirmSub: { color: colors.primary, fontSize: 11, fontWeight: '800', marginTop: 2 },
   confirmHeader: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },

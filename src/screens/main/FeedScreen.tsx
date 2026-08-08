@@ -60,6 +60,12 @@ export const FeedScreen = ({ navigation }: any) => {
   const [newMediaType, setNewMediaType] = useState<'photo' | 'video'>('photo');
   const [isPosting, setIsPosting] = useState(false);
   const [postHeight, setPostHeight] = useState(0);
+  const [followedUserIds, setFollowedUserIds] = useState<string[]>([]);
+
+  const toggleFollow = (userId: string) => {
+    if (!userId || userId === user?.id) return;
+    setFollowedUserIds(current => current.includes(userId) ? current.filter(id => id !== userId) : [...current, userId]);
+  };
 
   useEffect(() => {
     if (user) {
@@ -168,7 +174,8 @@ export const FeedScreen = ({ navigation }: any) => {
       isActive={item.id === activePostId}
       onLike={() => user && toggleLike(item.id, user.id)}
       onComment={() => handleOpenComments(item.id)}
-      onFollow={() => {}}
+      onFollow={() => toggleFollow(item.user_id)}
+      isFollowing={followedUserIds.includes(item.user_id)}
       onSave={() => toggleSave(item.id)}
       isSaved={savedPostIds.includes(item.id)}
       onRepost={() => repostPost(item.id)}
@@ -246,7 +253,8 @@ export const FeedScreen = ({ navigation }: any) => {
                   isActive={item.id === activePostId}
                   onLike={() => user && toggleLike(item.id, user.id)}
                   onComment={() => handleOpenComments(item.id)}
-                  onFollow={() => {}}
+                  onFollow={() => toggleFollow(item.user_id)}
+                  isFollowing={followedUserIds.includes(item.user_id)}
                   onSave={() => toggleSave(item.id)}
                   isSaved={savedPostIds.includes(item.id)}
                   onRepost={() => repostPost(item.id)}

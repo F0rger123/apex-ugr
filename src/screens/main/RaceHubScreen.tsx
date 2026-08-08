@@ -189,7 +189,15 @@ export const RaceHubScreen = ({ navigation }: any) => {
     if (error) {
       Alert.alert('Error', error);
     } else {
-      Alert.alert('🏁 Race Accepted!', 'Wager locked in escrow. Navigate to the race detail to start your telemetry run.');
+      Alert.alert(
+        'Race accepted',
+        'Your race is staged. Start a telemetry session when you are ready to record the run.',
+        [
+          { text: 'VIEW RACE', onPress: () => navigation.navigate('RaceDetail', { raceId }) },
+          { text: 'START HUD', onPress: () => navigation.navigate('Telemetry') },
+          { text: 'LATER', style: 'cancel' },
+        ]
+      );
     }
   };
 

@@ -21,7 +21,7 @@
     "expo-av": "~14.0.6",
     "expo-blur": "~13.0.3",
     "expo-device": "~6.0.2",
-    "expo-image-picker": "~15.0.7",
+    "expo-image-picker": "~15.1.0",
     "expo-linear-gradient": "~13.0.2",
     "expo-location": "~17.0.1",
     "expo-notifications": "~0.28.19",
@@ -43,8 +43,7 @@
     "@babel/core": "^7.20.0",
     "@types/node": "^20.11.0",
     "@types/react": "~18.2.45",
-    "@types/react-native": "^0.73.0",
-    "typescript": "^5.3.3"
+    "typescript": "~5.3.3"
   },
   "private": true
 }

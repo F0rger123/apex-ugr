@@ -81,7 +81,7 @@ export const ApexButton: React.FC<ApexButtonProps> = ({
 
 const styles = StyleSheet.create({
   button: {
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1.5,
     flexDirection: 'row',
     alignItems: 'center',
