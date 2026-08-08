@@ -98,6 +98,37 @@ const WebRadarView = React.memo(
           box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.7);
           animation: pulseGPS 2s infinite;
         }
+        .you-pin {
+          width: 30px;
+          height: 38px;
+          position: relative;
+          cursor: pointer;
+          filter: drop-shadow(0 0 8px rgba(183,255,74,0.9));
+        }
+        .you-pin::before {
+          content: '';
+          position: absolute;
+          top: 1px;
+          left: 3px;
+          width: 24px;
+          height: 24px;
+          background: #B7FF4A;
+          border: 3px solid #FFFFFF;
+          border-radius: 50% 50% 50% 0;
+          transform: rotate(-45deg);
+        }
+        .you-pin::after {
+          content: 'YOU';
+          position: absolute;
+          top: 8px;
+          left: 4px;
+          width: 22px;
+          color: #08090C;
+          font-size: 7px;
+          font-weight: 950;
+          text-align: center;
+          letter-spacing: 0.2px;
+        }
         @keyframes pulseGPS {
           0% { box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.7); transform: scale(0.95); }
           50% { box-shadow: 0 0 0 18px rgba(0, 255, 102, 0); transform: scale(1.1); }
@@ -178,6 +209,7 @@ const WebRadarView = React.memo(
           map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
           map.on('load', () => {
             mapReady = true;
+            addYouMarker(userLat, userLng, 10);
             window.parent.postMessage({ type: 'MAP_READY' }, '*');
             document.getElementById('gps-status').textContent = 'GPS LOCKED ✓';
           });
@@ -189,10 +221,11 @@ const WebRadarView = React.memo(
           if (markers['you']) markers['you'].remove();
 
           const el = document.createElement('div');
-          el.className = 'pulse-marker';
+          el.className = 'you-pin';
 
           markers['you'] = new maplibregl.Marker(el)
             .setLngLat([lng, lat])
+            .setOffset([0, -10])
             .setPopup(new maplibregl.Popup({ offset: 28 }).setHTML('<div class="you-tag">● YOU (LIVE PILOT)</div><div class="racer-sub">GPS Active · ' + (accuracy ? Math.round(accuracy) + 'm accuracy' : 'Locked') + '</div>'))
             .addTo(map);
 
@@ -496,7 +529,11 @@ export const MapScreen = ({ navigation, route }: any) => {
     setFollowMode(true);
     setMapZoom(16);
     if (iframeRef.current?.contentWindow) {
-      iframeRef.current.contentWindow.postMessage({ type: 'SET_FOLLOW', follow: true }, '*');
+      iframeRef.current.contentWindow.postMessage({
+        type: 'SET_FOLLOW',
+        follow: true,
+        you: currentLocation ? { lat: currentLocation.latitude, lng: currentLocation.longitude, accuracy: 10 } : null,
+      }, '*');
     }
   };
 

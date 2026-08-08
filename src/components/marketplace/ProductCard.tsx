@@ -26,6 +26,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 }) => {
   const [imageFailed, setImageFailed] = useState(false);
 
+  const fallbackImage = {
+    Exhaust: 'https://images.unsplash.com/photo-1619767886558-efdc259cde1a?auto=format&fit=crop&w=900&q=85',
+    Turbo: 'https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&w=900&q=85',
+    Brakes: 'https://images.unsplash.com/photo-1503736334956-4c8f8e92946d?auto=format&fit=crop&w=900&q=85',
+    Suspension: 'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=900&q=85',
+  }[product.category] || 'https://images.unsplash.com/photo-1493238792000-8113da705763?auto=format&fit=crop&w=900&q=85';
+
   const handleOpenExternalLink = async () => {
     try {
       if (!(await openVendorUrl(product))) {
@@ -40,9 +47,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     <GlassCard style={styles.card}>
       <View style={styles.imageContainer}>
         {imageFailed ? (
-          <Image source={{ uri: 'https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&w=900&q=85' }} style={styles.image} resizeMode="cover" />
+          <Image source={{ uri: fallbackImage }} style={styles.image} resizeMode="cover" />
         ) : (
-          <Image source={{ uri: product.image_url }} onError={() => setImageFailed(true)} style={styles.image} resizeMode="cover" />
+          <Image source={{ uri: product.image_url || fallbackImage }} onError={() => setImageFailed(true)} style={styles.image} resizeMode="cover" />
         )}
         <View style={styles.badgeTopRow}>
           <MatrixBadge label={product.vendor_name} variant="silver" size="sm" />

@@ -371,7 +371,7 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       const make = vehicleMake.toLowerCase();
       filtered = filtered.filter(p => {
         const makes = (p.compatible_makes || []).map(value => value.toLowerCase());
-        return makes.length === 0 || makes.includes('all') || makes.some(value => value === make || make.includes(value) || value.includes(make));
+        return makes.includes('all') || makes.some(value => value === make || make.includes(value) || value.includes(make));
       });
     }
     if (vehicleModel && vehicleModel !== 'All') {

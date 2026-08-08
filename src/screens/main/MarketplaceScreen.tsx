@@ -35,7 +35,7 @@ export const MarketplaceScreen = ({ navigation }: any) => {
     isLoading,
   } = useMarketplaceStore();
 
-  const { getActiveVehicle } = useGarageStore();
+  const { vehicles, activeVehicleId, getActiveVehicle, setActiveVehicle, setPrimaryVehicle } = useGarageStore();
   const { user } = useAuthStore();
   const activeVehicle = getActiveVehicle();
 
@@ -100,6 +100,29 @@ export const MarketplaceScreen = ({ navigation }: any) => {
               <Text style={styles.vehicleContextTitle}>{activeVehicle.year} {activeVehicle.make} {activeVehicle.model}</Text>
               <Text style={styles.vehicleContextMeta}>{activeVehicle.trim || 'Custom build'} · {activeVehicle.color}</Text>
             </View>
+          </View>
+        )}
+
+        {vehicles.length > 1 && (
+          <View style={styles.rideSwitcher}>
+            <Text style={styles.rideSwitcherLabel}>SHOP FOR</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {vehicles.map(vehicle => {
+                const active = vehicle.id === activeVehicleId;
+                return (
+                  <TouchableOpacity
+                    key={vehicle.id}
+                    style={[styles.rideChip, active && styles.rideChipActive]}
+                    onPress={() => {
+                      setActiveVehicle(vehicle.id);
+                      if (user?.id) setPrimaryVehicle(vehicle.id, user.id);
+                    }}
+                  >
+                    <Text style={[styles.rideChipText, active && styles.rideChipTextActive]}>{vehicle.year} {vehicle.make} {vehicle.model}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
         )}
 
@@ -265,6 +288,12 @@ const styles = StyleSheet.create({
   vehicleContextEyebrow: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
   vehicleContextTitle: { color: colors.text, fontSize: 15, fontWeight: '900', marginTop: 4 },
   vehicleContextMeta: { color: colors.textMuted, fontSize: 10, marginTop: 3 },
+  rideSwitcher: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.cardBorder, borderRadius: 12, padding: 10, marginBottom: 10 },
+  rideSwitcherLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '900', letterSpacing: 1, marginBottom: 7 },
+  rideChip: { paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.cardBorder, marginRight: 7 },
+  rideChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  rideChipText: { color: colors.textSecondary, fontSize: 10, fontWeight: '800' },
+  rideChipTextActive: { color: colors.background },
   title: { color: colors.text, fontSize: 18, fontWeight: '900', letterSpacing: 1 },
   subTitle: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
   cartBtn: { backgroundColor: colors.primary, padding: 10, borderRadius: 12 },
