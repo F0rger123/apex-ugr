@@ -40,7 +40,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     <GlassCard style={styles.card}>
       <View style={styles.imageContainer}>
         {imageFailed ? (
-          <View style={[styles.image, styles.imageFallback]}><Text style={styles.imageFallbackText}>APEX PARTS</Text></View>
+          <Image source={{ uri: 'https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&w=900&q=85' }} style={styles.image} resizeMode="cover" />
         ) : (
           <Image source={{ uri: product.image_url }} onError={() => setImageFailed(true)} style={styles.image} resizeMode="cover" />
         )}

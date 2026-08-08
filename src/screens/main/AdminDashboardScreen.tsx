@@ -11,16 +11,22 @@ import { ShieldAlert, CheckCircle, Ban, AlertTriangle } from 'lucide-react-nativ
 export const AdminDashboardScreen = ({ navigation }: any) => {
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchReports = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    setError(null);
+    const request = supabase
       .from('moderation_reports')
       .select('*, profiles!moderation_reports_reporter_id_fkey(username), reported_profile:profiles!moderation_reports_reported_id_fkey(username)')
       .order('created_at', { ascending: false })
       .limit(20);
-      
-    if (data) setReports(data);
+    const result: any = await Promise.race([
+      request,
+      new Promise(resolve => setTimeout(() => resolve({ data: null, error: { message: 'Admin services timed out.' } }), 5000)),
+    ]);
+    if (result.data) setReports(result.data);
+    if (result.error) setError(result.error.message);
     setLoading(false);
   };
 
@@ -42,6 +48,13 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
         
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+        ) : error ? (
+          <GlassCard style={styles.emptyCard}>
+            <AlertTriangle size={32} color={colors.warning} />
+            <Text style={styles.emptyText}>ADMIN SERVICES OFFLINE</Text>
+            <Text style={styles.userText}>{error}</Text>
+            <ApexButton title="RETRY" variant="outline" size="sm" onPress={fetchReports} />
+          </GlassCard>
         ) : reports.length === 0 ? (
           <GlassCard style={styles.emptyCard}>
             <CheckCircle size={32} color={colors.primary} />

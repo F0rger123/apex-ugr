@@ -118,8 +118,8 @@ export const DashboardScreen = ({ navigation }: any) => {
         <View style={styles.quickNavRow}>
           {[
             { label: 'MAP', icon: <MapPin size={20} color={colors.primary} />, screen: 'Map', sub: `${0} NEARBY` },
-            { label: 'SHOP', icon: <Zap size={20} color='#FFB800' />, screen: 'Marketplace', sub: 'LIVE PARTS' },
-            { label: 'RACE', icon: <Flame size={20} color='#FF0055' />, screen: 'RaceHub', sub: 'WAGER NOW' },
+            { label: 'SHOP', icon: <Zap size={20} color={colors.warning} />, screen: 'Marketplace', sub: 'LIVE PARTS' },
+            { label: 'RACE', icon: <Flame size={20} color={colors.primary} />, screen: 'RaceHub', sub: 'WAGER NOW' },
             { label: 'RANKS', icon: <Trophy size={20} color={colors.primary} />, screen: 'Leaderboards', sub: 'GLOBAL' },
           ].map(item => (
             <TouchableOpacity
@@ -221,7 +221,7 @@ export const DashboardScreen = ({ navigation }: any) => {
             <GlassCard onPress={() => navigation.navigate('CarMeets')}>
               <View style={styles.meetRow}>
                 <View style={styles.meetIconBox}>
-                  <MapPin size={18} color="#FF0055" />
+                  <MapPin size={18} color={colors.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <MatrixBadge label={upcomingMeet.meet_type} variant="silver" size="sm" />
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
   },
   heroGradientLayer1: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#091328',
+    backgroundColor: colors.surface,
   },
   heroGradientLayer2: {
     position: 'absolute',
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
   statVal: { color: colors.text, fontSize: 18, fontWeight: '900' },
   statSep: { color: colors.textMuted, fontSize: 16 },
   statValGreen: { color: colors.primary, fontSize: 18, fontWeight: '900' },
-  statValGold: { color: '#FFD700', fontSize: 18, fontWeight: '900' },
+  statValGold: { color: colors.warning, fontSize: 18, fontWeight: '900' },
   statLab: { color: colors.textMuted, fontSize: 8, fontWeight: '800', letterSpacing: 1, marginTop: 4 },
 
   // Quick nav

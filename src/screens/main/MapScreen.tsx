@@ -67,7 +67,7 @@ const POPULAR_ROUTES = [
 
 // ─── Web MapLibre GL Map — Full 3D Vector with Real GPS ──────────────────────
 const WebRadarView = React.memo(
-  ({ currentLocation, driversNearby, meets, followMode, activeRoute, mapZoom, pitchAngle, mapReady, onMapReady, onDriverClick, onMeetClick, iframeRef: controlledIframeRef }: any) => {
+  ({ currentLocation, driversNearby, meets, followMode, activeRoutes, satelliteMode, mapZoom, pitchAngle, mapReady, onMapReady, onDriverClick, onMeetClick, iframeRef: controlledIframeRef }: any) => {
     const internalIframeRef = useRef<HTMLIFrameElement>(null);
     const iframeRef = controlledIframeRef || internalIframeRef;
     const gpsInitSentRef = useRef(false);
@@ -157,6 +157,8 @@ const WebRadarView = React.memo(
         let userLng = -118.2437;
         let accuracyMarker = null;
         let mapReady = false;
+        const DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+        const SATELLITE_STYLE = { version: 8, sources: { satellite: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: 'Esri' } }, layers: [{ id: 'satellite', type: 'raster', source: 'satellite' }] };
 
         function initMap(lat, lng, zoom) {
           if (map) return;
@@ -164,7 +166,7 @@ const WebRadarView = React.memo(
           userLng = lng;
           map = new maplibregl.Map({
             container: 'map',
-            style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+            style: DARK_STYLE,
             center: [lng, lat],
             zoom: zoom || 15,
             minZoom: 4,
@@ -213,8 +215,30 @@ const WebRadarView = React.memo(
 
           if (data.type === 'SET_FOLLOW') {
             isFollow = data.follow;
+            if (data.you) { userLat = data.you.lat; userLng = data.you.lng; addYouMarker(userLat, userLng, data.you.accuracy); }
             if (data.follow && userLat && userLng) {
               map && map.flyTo({ center: [userLng, userLat], zoom: 16, pitch: 60, duration: 1000 });
+            }
+          }
+
+          if (data.type === 'SET_STYLE' && map) {
+            map.setStyle(data.satellite ? SATELLITE_STYLE : DARK_STYLE);
+            document.getElementById('gps-status').textContent = data.satellite ? 'SATELLITE MODE' : 'GPS LOCKED';
+          }
+
+          if (data.type === 'FOCUS_DRIVER' && map) {
+            isFollow = true;
+            map.flyTo({ center: [data.lng, data.lat], zoom: 16, pitch: 45, duration: 700 });
+            if (markers[data.id]) markers[data.id].togglePopup();
+          }
+
+          if (data.type === 'FOCUS_MEET' && map) {
+            map.flyTo({ center: [data.lng, data.lat], zoom: 15, duration: 700 });
+            const point = { type: 'Feature', geometry: { type: 'Point', coordinates: [data.lng, data.lat] } };
+            if (map.getSource('meet-focus')) map.getSource('meet-focus').setData(point);
+            else {
+              map.addSource('meet-focus', { type: 'geojson', data: point });
+              map.addLayer({ id: 'meet-focus', type: 'circle', source: 'meet-focus', paint: { 'circle-radius': 18, 'circle-color': '#B7FF4A', 'circle-opacity': 0.18, 'circle-stroke-color': '#B7FF4A', 'circle-stroke-width': 3 } });
             }
           }
 
@@ -294,7 +318,7 @@ const WebRadarView = React.memo(
             if (data.routeCoords && data.routeCoords.length > 0) {
               const geojson = {
                 'type': 'Feature',
-                'geometry': { 'type': 'LineString', 'coordinates': data.routeCoords.map(c => [c.lng, c.lat]) }
+                'geometry': { 'type': 'MultiLineString', 'coordinates': data.routeCoords.map(route => route.map(c => [c.lng, c.lat])) }
               };
               if (map.getSource('route')) {
                 map.getSource('route').setData(geojson);
@@ -307,6 +331,9 @@ const WebRadarView = React.memo(
                     'line-dasharray': [0, 2] }
                 });
               }
+            } else if (map.getLayer('route')) {
+              map.removeLayer('route');
+              map.removeSource('route');
             }
           }
         });
@@ -354,7 +381,7 @@ const WebRadarView = React.memo(
       win.postMessage({
         type: 'UPDATE',
         followMode,
-        routeCoords: activeRoute ? activeRoute.coords : [],
+        routeCoords: (activeRoutes || []).map((route: any) => route.coords),
         you: currentLocation
           ? { lat: currentLocation.latitude, lng: currentLocation.longitude, accuracy: currentLocation.accuracy || 10 }
           : null,
@@ -375,7 +402,11 @@ const WebRadarView = React.memo(
           location: m.location_name,
         })),
       }, '*');
-    }, [currentLocation, driversNearby, meets, followMode, activeRoute, mapReady]);
+    }, [currentLocation, driversNearby, meets, followMode, activeRoutes, satelliteMode, mapReady]);
+
+    useEffect(() => {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'SET_STYLE', satellite: satelliteMode }, '*');
+    }, [satelliteMode, mapReady]);
 
     useEffect(() => {
       iframeRef.current?.contentWindow?.postMessage({ type: 'SET_ZOOM', zoom: mapZoom }, '*');
@@ -421,7 +452,8 @@ export const MapScreen = ({ navigation }: any) => {
   const [mapZoom, setMapZoom] = useState(15);
   const [pitchAngle, setPitchAngle] = useState(0);
   const [mapReady, setMapReady] = useState(false);
-  const [activeRoute, setActiveRoute] = useState<any>(null);
+  const [activeRoutes, setActiveRoutes] = useState<any[]>([]);
+  const [satelliteMode, setSatelliteMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const iframeRef = useRef<any>(null);
 
@@ -470,7 +502,7 @@ export const MapScreen = ({ navigation }: any) => {
     if (!searchQuery.trim()) return;
     const matchedRoute = POPULAR_ROUTES.find(r => r.name.toLowerCase().includes(searchQuery.toLowerCase()));
     if (matchedRoute) {
-      setActiveRoute(matchedRoute);
+      setActiveRoutes(prev => prev.some(route => route.id === matchedRoute.id) ? prev : [...prev, matchedRoute]);
       Alert.alert('Route Loaded', `${matchedRoute.name}\n${matchedRoute.distance} · ${matchedRoute.difficulty}`);
     } else {
       Alert.alert('Searched', `Searching for: ${searchQuery}`);
@@ -526,7 +558,8 @@ export const MapScreen = ({ navigation }: any) => {
           driversNearby={driversNearby}
           meets={meets}
           followMode={followMode}
-          activeRoute={activeRoute}
+          activeRoutes={activeRoutes}
+          satelliteMode={satelliteMode}
           mapZoom={mapZoom}
           pitchAngle={pitchAngle}
           mapReady={mapReady}
@@ -534,13 +567,18 @@ export const MapScreen = ({ navigation }: any) => {
           onMapReady={() => setMapReady(true)}
           onDriverClick={(id: string) => {
             const driver = driversNearby.find((item) => item.id === id);
-            if (driver) setSelectedDriver(driver);
+            if (driver) {
+              setSelectedDriver(driver);
+              setFollowMode(true);
+              iframeRef.current?.contentWindow?.postMessage({ type: 'FOCUS_DRIVER', id: driver.id, lat: driver.latitude, lng: driver.longitude }, '*');
+            }
           }}
           onMeetClick={(id: string) => {
             const meet = meets.find((item) => item.id === id);
             if (meet) {
               setSelectedMeet(meet);
               setMapTab('meets');
+              iframeRef.current?.contentWindow?.postMessage({ type: 'FOCUS_MEET', lat: meet.latitude, lng: meet.longitude }, '*');
             }
           }}
         />
@@ -575,6 +613,10 @@ export const MapScreen = ({ navigation }: any) => {
           {/* 3D Tilt Toggle */}
           <TouchableOpacity style={styles.floatingSquareBtn} onPress={togglePitch}>
             <Layers size={18} color={pitchAngle === 55 ? colors.primary : colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.floatingSquareBtn} onPress={() => setSatelliteMode(prev => !prev)}>
+            <Globe size={18} color={satelliteMode ? colors.primary : colors.textMuted} />
           </TouchableOpacity>
 
           {/* Zoom In */}
@@ -635,7 +677,11 @@ export const MapScreen = ({ navigation }: any) => {
                 <TouchableOpacity
                   key={driver.id}
                   style={[styles.driverCard, selectedDriver?.id === driver.id && styles.driverCardActive]}
-                  onPress={() => setSelectedDriver(prev => prev?.id === driver.id ? null : driver as any)}
+                  onPress={() => {
+                    const next = selectedDriver?.id === driver.id ? null : driver as any;
+                    setSelectedDriver(next);
+                    if (next) iframeRef.current?.contentWindow?.postMessage({ type: 'FOCUS_DRIVER', id: driver.id, lat: driver.latitude, lng: driver.longitude }, '*');
+                  }}
                 >
                   <View style={[styles.driverStatusDot, { backgroundColor: STATUS_COLORS[driver.status] || colors.primary }]} />
                   <View style={styles.driverInfo}>
@@ -654,6 +700,20 @@ export const MapScreen = ({ navigation }: any) => {
                 </TouchableOpacity>
               ))
             )}
+          {selectedDriver && (
+            <GlassCard style={styles.selectedMeetCard}>
+              <View style={styles.selectedDriverHeader}>
+                <View>
+                  <Text style={styles.selectedMeetEyebrow}>FOLLOWING RACER</Text>
+                  <Text style={styles.selectedMeetTitle}>@{selectedDriver.profile?.username || 'RACER'}</Text>
+                </View>
+                <TouchableOpacity style={styles.closeFocusButton} onPress={() => { setSelectedDriver(null); setFollowMode(false); }}>
+                  <Text style={styles.closeFocusText}>X</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.selectedMeetSummary}>{selectedDriver.vehicle ? `${selectedDriver.vehicle.year} ${selectedDriver.vehicle.make} ${selectedDriver.vehicle.model}` : 'Performance build'} · {selectedDriver.speed_mph || 0} MPH</Text>
+            </GlassCard>
+          )}
           </View>
         )}
 
@@ -671,7 +731,8 @@ export const MapScreen = ({ navigation }: any) => {
                   key={meet.id}
                   style={[styles.meetCard, selectedMeet?.id === meet.id && styles.meetCardActive]}
                   onPress={() => {
-                    setSelectedMeet((prev: CarMeetWithHost | null) => prev?.id === meet.id ? null : meet);
+                    setSelectedMeet(meet);
+                    iframeRef.current?.contentWindow?.postMessage({ type: 'FOCUS_MEET', lat: meet.latitude, lng: meet.longitude }, '*');
                   }}
                 >
                   <View style={styles.meetIconBox}>
@@ -708,10 +769,10 @@ export const MapScreen = ({ navigation }: any) => {
             {POPULAR_ROUTES.map(route => (
               <TouchableOpacity
                 key={route.id}
-                style={[styles.routeCard, activeRoute?.id === route.id && styles.routeCardActive]}
-                onPress={() => setActiveRoute(activeRoute?.id === route.id ? null : route)}
+                style={[styles.routeCard, activeRoutes.some(active => active.id === route.id) && styles.routeCardActive]}
+                onPress={() => setActiveRoutes(prev => prev.some(active => active.id === route.id) ? prev.filter(active => active.id !== route.id) : [...prev, route])}
               >
-                <View style={[styles.routeIconBox, activeRoute?.id === route.id && { backgroundColor: 'rgba(0,255,102,0.2)' }]}>
+                <View style={[styles.routeIconBox, activeRoutes.some(active => active.id === route.id) && { backgroundColor: 'rgba(0,255,102,0.2)' }]}>
                   <Route size={18} color={colors.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
@@ -924,6 +985,9 @@ const styles = StyleSheet.create({
   meetLocation: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
   meetAttendees: { alignItems: 'flex-end' },
   selectedMeetCard: { marginTop: 10, padding: 14 },
+  selectedDriverHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  closeFocusButton: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', justifyContent: 'center' },
+  closeFocusText: { color: colors.text, fontWeight: '900', fontSize: 12 },
   selectedMeetEyebrow: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
   selectedMeetTitle: { color: colors.text, fontSize: 17, fontWeight: '900', marginTop: 5 },
   selectedMeetLocation: { color: colors.textSecondary, fontSize: 12, marginTop: 7, flexDirection: 'row', alignItems: 'center' },

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert } from 'react-native';
 import { useRaceStore } from '../../stores/raceStore';
 import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
@@ -19,13 +19,16 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
   const [distanceMiles, setDistanceMiles] = useState('0.50');
   const [startTime, setStartTime] = useState('Tonight, 11:30 PM');
   const [rules, setRules] = useState('60 MPH Roll Start. Finish at 1/2 Mile mark. GPS verified telemetry required.');
+  const [startNow, setStartNow] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!wagerCredits || !routeName) return;
-    createChallenge({
+    setSubmitting(true);
+    const result = await createChallenge({
       race_type: raceType,
       wager_credits: parseFloat(wagerCredits) || 500,
-      start_time: startTime,
+      start_time: startNow ? new Date().toISOString() : startTime,
       rules,
       route_name: routeName,
       status: 'open',
@@ -33,6 +36,8 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
       opponent_id: null,
       winner_id: null
     } as any, user?.id || '00000000-0000-0000-0000-000000000001');
+    setSubmitting(false);
+    if (result.error) return Alert.alert('Race unavailable', result.error);
     navigation.goBack();
   };
 
@@ -92,7 +97,15 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
           />
 
           <Text style={styles.label}>START TIME</Text>
+          <View style={styles.chipGrid}>
+            {[['START NOW', true], ['SCHEDULE', false]].map(([label, value]) => (
+              <TouchableOpacity key={String(label)} style={[styles.chip, startNow === value && styles.chipActive]} onPress={() => setStartNow(Boolean(value))}>
+                <Text style={[styles.chipText, startNow === value && { color: colors.background }]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <TextInput
+            editable={!startNow}
             style={styles.input}
             value={startTime}
             onChangeText={setStartTime}
@@ -116,6 +129,7 @@ export const CreateChallengeScreen = ({ navigation }: any) => {
             size="lg"
             style={{ marginTop: 16 }}
             onPress={handleSubmit}
+            isLoading={submitting}
           />
         </GlassCard>
 

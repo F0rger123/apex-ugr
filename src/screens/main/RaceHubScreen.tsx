@@ -33,9 +33,9 @@ import {
 } from 'lucide-react-native';
 
 const STATUS_COLOR: Record<string, string> = {
-  open: '#FFB800',
+  open: colors.warning,
   accepted: colors.primary,
-  in_progress: '#00E5FF',
+  in_progress: colors.primary,
   finished: colors.textMuted,
   disputed: colors.danger,
   cancelled: colors.textMuted,
@@ -89,7 +89,7 @@ const RaceCard = ({
           </View>
 
           <View style={styles.vsBox}>
-            <Coins size={16} color="#FFD700" />
+            <Coins size={16} color={colors.warning} />
             <Text style={styles.wagerText}>{(race.wager_credits || 0).toLocaleString()}</Text>
             <Text style={styles.vsText}>VS</Text>
           </View>
@@ -123,8 +123,8 @@ const RaceCard = ({
         {/* Winner Banner */}
         {race.winner_id && (
           <View style={[styles.winnerBanner, { backgroundColor: isWinner ? 'rgba(255,215,0,0.1)' : 'rgba(255,255,255,0.04)' }]}>
-            <Trophy size={14} color={isWinner ? '#FFD700' : colors.textMuted} />
-            <Text style={[styles.winnerText, { color: isWinner ? '#FFD700' : colors.textMuted }]}>
+            <Trophy size={14} color={isWinner ? colors.warning : colors.textMuted} />
+            <Text style={[styles.winnerText, { color: isWinner ? colors.warning : colors.textMuted }]}>
               {isWinner ? 'YOU WON · +' + (race.wager_credits || 0) + ' CR' : 'YOU LOST · WAGER SETTLED'}
             </Text>
           </View>
@@ -226,7 +226,7 @@ export const RaceHubScreen = ({ navigation }: any) => {
             <Text style={styles.heroStatLabel}>WINS</Text>
           </View>
           <View style={[styles.heroStat, styles.heroStatMid]}>
-            <Text style={[styles.heroStatVal, { color: '#FFB800' }]}>
+            <Text style={[styles.heroStatVal, { color: colors.warning }]}>
               {races.reduce((sum, r) => r.status === 'open' || r.status === 'accepted' ? sum + (r.wager_credits || 0) : sum, 0).toLocaleString()}
             </Text>
             <Text style={styles.heroStatLabel}>CR IN ESCROW</Text>
@@ -464,7 +464,7 @@ const styles = StyleSheet.create({
   racerName: { color: colors.textSecondary, fontSize: 10, fontWeight: '800', textAlign: 'center' },
 
   vsBox: { alignItems: 'center', paddingHorizontal: 10 },
-  wagerText: { color: '#FFD700', fontSize: 13, fontWeight: '900', marginTop: 2 },
+  wagerText: { color: colors.warning, fontSize: 13, fontWeight: '900', marginTop: 2 },
   vsText: { color: colors.text, fontSize: 14, fontWeight: '900', letterSpacing: 2, marginTop: 4 },
 
   routeName: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center', marginBottom: 10 },

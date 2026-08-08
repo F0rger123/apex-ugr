@@ -18,7 +18,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Exhaust',
     price: 1849.99,
     description: 'Aircraft-grade T-304 stainless steel cat-back exhaust. Deep aggressive tone with patented anti-drone tech. Dyno-proven +28 RWHP gains on most V8 applications.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Car_exhaust_pipe.jpg/640px-Car_exhaust_pipe.jpg',
+    image_url: 'https://images.unsplash.com/photo-1619767886558-efdc259cde1a?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Ford', 'Chevrolet', 'Dodge', 'Nissan', 'Toyota'],
     compatible_models: ['Mustang GT', 'Camaro SS', 'Challenger', 'GT-R', 'Supra'],
     vendor_name: 'Summit Racing',
@@ -36,7 +36,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Turbo',
     price: 2450.00,
     description: 'Billet compressor wheel, dual ceramic ball bearings, internal wastegate. Rated for 1,050HP. The go-to single turbo for street builds pushing over 800WHP.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Turbocharger.jpg/640px-Turbocharger.jpg',
+    image_url: 'https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Nissan', 'Toyota', 'Subaru', 'BMW', 'Ford'],
     compatible_models: ['GT-R', 'Supra 2JZ', 'WRX STI', 'M3', 'Mustang'],
     vendor_name: 'Summit Racing',
@@ -54,7 +54,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Supercharger',
     price: 8495.00,
     description: '99% volumetric efficiency twin-screw design. Dual-pass intercooler, oversized 68mm throttle body. Complete bolt-on kit with CARB EO compliance for street use.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Supercharger.jpg/640px-Supercharger.jpg',
+    image_url: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Ford', 'Chevrolet', 'Dodge'],
     compatible_models: ['Mustang GT', 'Camaro SS', 'Challenger'],
     vendor_name: 'Lethal Performance',
@@ -72,7 +72,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Brakes',
     price: 4995.00,
     description: 'Forged aluminum 6-piston radial mount calipers with 405x34mm 2-piece floating slotted rotors. Consistent fade-free stops from 150mph+. OEM fitment, no modifications required.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/Disk_brake_dsc03682.jpg/640px-Disk_brake_dsc03682.jpg',
+    image_url: 'https://images.unsplash.com/photo-1503736334956-4c8f8e92946d?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Porsche', 'BMW', 'Nissan', 'Chevrolet', 'Ford', 'Toyota'],
     compatible_models: ['911 GT3', 'M3', 'GT-R', 'Corvette', 'Mustang', 'Supra'],
     vendor_name: 'Brembo',
@@ -90,7 +90,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Tune',
     price: 725.00,
     description: 'Full-color display, real-time gauges, live datalog, pre-loaded Stage 1/2/E85 OTS maps. Flash in under 5 minutes. The #1 OBD tuning device for performance enthusiasts.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3b/OBD_II_adapter.jpg/640px-OBD_II_adapter.jpg',
+    image_url: 'https://images.unsplash.com/photo-1493238792000-8113da705763?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Nissan', 'Porsche', 'Subaru', 'Ford', 'Toyota', 'BMW'],
     compatible_models: ['GT-R', '911 Turbo', 'WRX STI', 'Focus RS', 'Supra', 'M4'],
     vendor_name: 'Cobb Tuning',
@@ -108,7 +108,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Suspension',
     price: 5899.00,
     description: '3-way independent damping adjustment. CNC machined aluminum top mounts. 30-step rebound, 15-step low-speed, 10-step high-speed compression control.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Shock_absorber.JPG/640px-Shock_absorber.JPG',
+    image_url: 'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Porsche', 'BMW', 'Nissan', 'Toyota', 'Chevrolet', 'Ford'],
     compatible_models: ['911 GT3', 'M4', 'GT-R', 'Supra', 'Corvette', 'Mustang'],
     vendor_name: 'ECS Tuning',
@@ -126,7 +126,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Intake',
     price: 389.99,
     description: 'Pro DRY S high-flow air filter with sealed carbon fiber airbox. Dyno-proven +15–23HP and +18 lb-ft TQ. No re-oiling required.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0a/Cold_Air_Intake.jpg/640px-Cold_Air_Intake.jpg',
+    image_url: 'https://images.unsplash.com/photo-1542362567-b07e54358753?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Ford', 'Chevrolet', 'Dodge', 'Nissan', 'Toyota', 'BMW', 'Porsche', 'Subaru'],
     compatible_models: ['All V8/V6 Models'],
     vendor_name: 'aFe Power',
@@ -144,7 +144,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Intercooler',
     price: 1199.99,
     description: '50% more cooling capacity than stock. Full aluminum end tanks, TIG-welded fittings. -30°F charge air temperature drop for consistent boosted power.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Intercooler.jpg/640px-Intercooler.jpg',
+    image_url: 'https://images.unsplash.com/photo-1504215680853-026ed2a45def?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Subaru', 'Ford', 'Nissan', 'BMW', 'Toyota'],
     compatible_models: ['WRX STI', 'Focus RS', 'GT-R', 'M2', 'Supra'],
     vendor_name: 'Mishimoto',
@@ -162,7 +162,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Wheels & Tires',
     price: 3200.00,
     description: 'Iconic 6-spoke forged JIS aluminum alloy wheel. Industry-lightest production forged wheel. Used on World Time Attack and Super GT race programs worldwide.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/79/Alloy_wheel.jpg/640px-Alloy_wheel.jpg',
+    image_url: 'https://images.unsplash.com/photo-1553440569-bcc63803a83d?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Nissan', 'Toyota', 'Honda', 'Subaru', 'Mitsubishi', 'Porsche'],
     compatible_models: ['GT-R', 'Supra', 'Civic Type R', 'WRX STI', 'Evo X', '911'],
     vendor_name: 'Tire Rack',
@@ -180,7 +180,7 @@ const REAL_ONLINE_PARTS: MarketplaceProduct[] = [
     category: 'Nitrous',
     price: 699.99,
     description: 'Street/strip dry nitrous system with purge kit and launch control relay. Progressive controller, 75–175HP power levels. Complete 10lb bottle included.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ef/NitrousBottle.jpg/640px-NitrousBottle.jpg',
+    image_url: 'https://images.unsplash.com/photo-1502877338535-766e1452684a?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Ford', 'Chevrolet', 'Dodge', 'Nissan', 'Toyota', 'Honda'],
     compatible_models: ['All EFI Models'],
     vendor_name: 'Summit Racing',
@@ -200,6 +200,14 @@ export const partsApiService = {
 
     if (params?.make && params.make !== 'All') {
       filtered = filtered.filter((p) => p.compatible_makes.includes('All') || p.compatible_makes.includes(params.make!));
+    }
+
+    if (params?.model && params.model !== 'All') {
+      const model = params.model.toLowerCase();
+      filtered = filtered.filter((p) => (p.compatible_models || []).some((fitment) => {
+        const value = fitment.toLowerCase();
+        return value === model || value.includes(model) || model.includes(value) || (model.includes('gtr') && value === 'gt-r');
+      }));
     }
 
     if (params?.category && params.category !== 'All') {

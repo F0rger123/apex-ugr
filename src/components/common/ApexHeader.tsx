@@ -70,10 +70,15 @@ export const ApexHeader: React.FC<ApexHeaderProps> = ({
 
         {onProfilePress && (
           <TouchableOpacity style={styles.avatarBtn} onPress={onProfilePress}>
-            <Image
-              source={{ uri: user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop' }}
-              style={styles.avatar}
-            />
+            {user?.avatar_url ? (
+              <Image source={{ uri: user.avatar_url }} style={styles.avatar} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarFallbackText}>
+                  {(user?.display_name || user?.username || 'AP').slice(0, 2).toUpperCase()}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         )}
       </View>
@@ -179,4 +184,15 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.primary,
   },
+  avatarFallback: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.text,
+  },
+  avatarFallbackText: { color: colors.background, fontSize: 11, fontWeight: '900' },
 });
