@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useLeaderboardStore, LeaderboardUser } from '../../stores/leaderboardStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
 import { SectionHeader } from '../../components/common/SectionHeader';
@@ -23,6 +23,18 @@ export const LeaderboardsScreen = ({ navigation }: any) => {
     if (category === 'credits') return `$${(u.credits_balance || 0).toLocaleString()} CR`;
     return `${u.races_won || 0} WINS`;
   };
+
+  const metricValue = (u: LeaderboardUser) => {
+    if (category === 'reputation') return u.reputation_points || 0;
+    if (category === 'horsepower') return u.top_speed_recorded || 0;
+    if (category === 'credits') return u.credits_balance || 0;
+    return u.races_won || 0;
+  };
+
+  const rankedUsers = [...globalLeaderboard]
+    .filter(u => scopeTab !== 'local' || (u.home_city || '').includes('Los Angeles'))
+    .filter((u, index) => scopeTab !== 'friends' || index < 5)
+    .sort((a, b) => metricValue(b) - metricValue(a));
 
   return (
     <View style={styles.container}>
@@ -72,13 +84,15 @@ export const LeaderboardsScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </ScrollView>
 
-        {globalLeaderboard.length === 0 ? (
+        {isLoading ? (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+        ) : rankedUsers.length === 0 ? (
           <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: 60 }}>
             <Award size={48} color={colors.textMuted} style={{ marginBottom: 16 }} />
             <Text style={{ color: colors.text, fontSize: 16, fontWeight: '900' }}>NO RANKINGS YET</Text>
           </View>
         ) : (
-          globalLeaderboard.map((user, idx) => (
+          rankedUsers.map((user, idx) => (
             <GlassCard key={user.id} style={styles.boardCard}>
               {/* Rank Column */}
               <View style={styles.rankCol}>

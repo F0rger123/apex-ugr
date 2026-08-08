@@ -20,7 +20,7 @@ export const DashboardScreen = ({ navigation }: any) => {
   const { getActiveVehicle, getTotalBuildValue, fetchVehicles } = useGarageStore();
   const { races, fetchRaces } = useRaceStore();
   const { currentSpeedMph, gpsLocked, gpsAccuracy } = useTelemetryStore();
-  const { meets, fetchMeets, currentLocation } = useMapStore();
+  const { meets, driversNearby, fetchMeets, currentLocation } = useMapStore();
 
   // Entrance animation
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -117,7 +117,7 @@ export const DashboardScreen = ({ navigation }: any) => {
         {/* ── Quick Nav Cards ──────────────────────────────────────────────── */}
         <View style={styles.quickNavRow}>
           {[
-            { label: 'MAP', icon: <MapPin size={20} color={colors.primary} />, screen: 'Map', sub: `${0} NEARBY` },
+            { label: 'MAP', icon: <MapPin size={20} color={colors.primary} />, screen: 'Map', sub: `${driversNearby.length} NEARBY` },
             { label: 'SHOP', icon: <Zap size={20} color={colors.warning} />, screen: 'Marketplace', sub: 'LIVE PARTS' },
             { label: 'RACE', icon: <Flame size={20} color={colors.primary} />, screen: 'RaceHub', sub: 'WAGER NOW' },
             { label: 'RANKS', icon: <Trophy size={20} color={colors.primary} />, screen: 'Leaderboards', sub: 'GLOBAL' },
@@ -130,6 +130,22 @@ export const DashboardScreen = ({ navigation }: any) => {
               <View style={styles.quickNavIcon}>{item.icon}</View>
               <Text style={styles.quickNavLabel}>{item.label}</Text>
               <Text style={styles.quickNavSub}>{item.sub}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <SectionHeader title="PILOT TOOLS" />
+        <View style={styles.toolGrid}>
+          {[
+            { label: 'DYNO LAB', sub: 'TUNE + TEST', screen: 'DynoSimulator', icon: <Gauge size={18} color={colors.primary} /> },
+            { label: 'SERVICE LOG', sub: 'MAINTENANCE', screen: 'GarageMaintenanceLog', icon: <Activity size={18} color={colors.warning} /> },
+            { label: 'TRACK LOGS', sub: 'ANALYZE RUNS', screen: 'TrackTelemetryAnalyzer', icon: <Zap size={18} color={colors.primary} /> },
+            { label: 'NEW MEET', sub: 'SET LOCATION', screen: 'CarMeets', icon: <MapPin size={18} color={colors.primary} /> },
+          ].map(tool => (
+            <TouchableOpacity key={tool.label} style={styles.toolCard} onPress={() => navigation.navigate(tool.screen)}>
+              {tool.icon}
+              <Text style={styles.toolLabel}>{tool.label}</Text>
+              <Text style={styles.toolSub}>{tool.sub}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -326,6 +342,10 @@ const styles = StyleSheet.create({
   },
   quickNavLabel: { color: colors.text, fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
   quickNavSub: { color: colors.textMuted, fontSize: 8, fontWeight: '700', marginTop: 2, letterSpacing: 0.5 },
+  toolGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  toolCard: { width: '48%', minHeight: 74, padding: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.cardBorder, borderRadius: 12 },
+  toolLabel: { color: colors.text, fontSize: 10, fontWeight: '900', marginTop: 9, letterSpacing: 0.6 },
+  toolSub: { color: colors.textMuted, fontSize: 8, fontWeight: '800', marginTop: 3, letterSpacing: 0.5 },
 
   // Add vehicle
   addVehicleCard: { alignItems: 'center', paddingVertical: 20 },

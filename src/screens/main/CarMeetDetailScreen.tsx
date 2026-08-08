@@ -63,7 +63,7 @@ export const CarMeetDetailScreen = ({ route, navigation }: any) => {
   };
 
   const handleStartNavigation = () => {
-    Alert.alert('GPS Navigation Started', `Routing to ${meet.location_name}`);
+    navigation.navigate('MainTabs', { screen: 'Map', params: { focusMeetId: meet.id } });
   };
 
   return (

@@ -27,6 +27,7 @@ import {
   AlertCircle,
   Zap,
 } from 'lucide-react-native';
+import { Platform } from 'react-native';
 
 export const TrackTelemetryAnalyzerScreen = ({ navigation }: any) => {
   const [selectedTrack, setSelectedTrack] = useState<'angeles' | 'homestead' | 'laguna'>('angeles');
@@ -79,7 +80,18 @@ export const TrackTelemetryAnalyzerScreen = ({ navigation }: any) => {
   const track = TRACK_DATA[selectedTrack];
 
   const handleExportPDF = () => {
-    Alert.alert('Telemetry Report Exported', 'Saved PDF telemetry log to documents.');
+    const report = JSON.stringify({ track: track.name, distance_miles: track.lengthMiles, best_lap: track.bestLap, delta: track.delta, top_speed_mph: track.topSpeed, average_g: track.avgG, sectors: track.sectors }, null, 2);
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const blob = new Blob([report], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${track.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-telemetry.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    Alert.alert('Telemetry Report Ready', 'Your structured telemetry report is ready to save from this device.');
   };
 
   return (

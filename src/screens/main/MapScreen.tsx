@@ -429,7 +429,7 @@ const WebRadarView = React.memo(
   }
 );
 
-export const MapScreen = ({ navigation }: any) => {
+export const MapScreen = ({ navigation, route }: any) => {
   const {
     currentLocation,
     driversNearby,
@@ -477,6 +477,16 @@ export const MapScreen = ({ navigation }: any) => {
       unsubscribeFromDriverLocations();
     };
   }, [user?.id]);
+
+  useEffect(() => {
+    const focusMeetId = route?.params?.focusMeetId;
+    const meet = focusMeetId ? meets.find(item => item.id === focusMeetId) : null;
+    if (!meet || !mapReady) return;
+    setSelectedMeet(meet);
+    setMapTab('meets');
+    iframeRef.current?.contentWindow?.postMessage({ type: 'FOCUS_MEET', lat: meet.latitude, lng: meet.longitude }, '*');
+    navigation.setParams?.({ focusMeetId: undefined });
+  }, [route?.params?.focusMeetId, mapReady, meets]);
 
   const handleZoomIn = () => setMapZoom(prev => Math.min(19, prev + 1));
   const handleZoomOut = () => setMapZoom(prev => Math.max(8, prev - 1));

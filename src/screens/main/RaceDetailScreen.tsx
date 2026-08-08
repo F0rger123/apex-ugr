@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   View,
   Text,
@@ -112,7 +113,15 @@ export const RaceDetailScreen = ({ route, navigation }: any) => {
       };
       input.click();
     } else {
-      Alert.alert('Pick Video', 'Use your device camera roll or dashcam export to select race proof footage.');
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        allowsEditing: false,
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets[0]) {
+        setProofVideoUri(result.assets[0].uri);
+        setProofVideoName(`race-proof.${result.assets[0].type === 'video' ? 'mp4' : 'jpg'}`);
+      }
     }
   };
 

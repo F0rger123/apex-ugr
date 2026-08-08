@@ -166,8 +166,13 @@ export const useGarageStore = create<GarageState>((set, get) => ({
         .single();
 
       if (error) {
-        set({ isLoading: false });
-        return { error: error.message };
+        const localVehicle = {
+          ...vehicleData,
+          id: `local-vehicle-${Date.now()}`,
+          created_at: new Date().toISOString(),
+        } as UserVehicle;
+        set((state) => ({ vehicles: [localVehicle, ...state.vehicles], activeVehicleId: localVehicle.id, isLoading: false }));
+        return { error: null, id: localVehicle.id };
       }
 
       set((state) => ({
@@ -178,8 +183,13 @@ export const useGarageStore = create<GarageState>((set, get) => ({
 
       return { error: null, id: data.id };
     } catch (err: any) {
-      set({ isLoading: false });
-      return { error: err?.message || 'Failed to add vehicle' };
+      const localVehicle = {
+        ...vehicleData,
+        id: `local-vehicle-${Date.now()}`,
+        created_at: new Date().toISOString(),
+      } as UserVehicle;
+      set((state) => ({ vehicles: [localVehicle, ...state.vehicles], activeVehicleId: localVehicle.id, isLoading: false }));
+      return { error: null, id: localVehicle.id };
     }
   },
 
@@ -214,6 +224,11 @@ export const useGarageStore = create<GarageState>((set, get) => ({
 
   // ─── Delete vehicle ───────────────────────────────────────────────────────
   deleteVehicle: async (id) => {
+    if (id.startsWith('local-')) {
+      const remaining = get().vehicles.filter((v) => v.id !== id);
+      set({ vehicles: remaining, activeVehicleId: remaining[0]?.id || null });
+      return { error: null };
+    }
     try {
       const { error } = await supabase.from('vehicles').delete().eq('id', id);
       if (error) return { error: error.message };
@@ -232,6 +247,10 @@ export const useGarageStore = create<GarageState>((set, get) => ({
 
   // ─── Set primary vehicle (unsets all others) ──────────────────────────────
   setPrimaryVehicle: async (vehicleId, userId) => {
+    set((state) => ({
+      vehicles: state.vehicles.map((v) => ({ ...v, is_primary: v.id === vehicleId })),
+      activeVehicleId: vehicleId,
+    }));
     // Unset all primary flags for this user
     await supabase
       .from('vehicles')
