@@ -9,9 +9,10 @@ import { Bell, X, Flag, ShoppingCart, Calendar, Trophy, CheckCheck } from 'lucid
 interface NotificationModalProps {
   visible: boolean;
   onClose: () => void;
+  userId?: string;
 }
 
-export const NotificationModal: React.FC<NotificationModalProps> = ({ visible, onClose }) => {
+export const NotificationModal: React.FC<NotificationModalProps> = ({ visible, onClose, userId }) => {
   const { notifications, markAsRead, markAllAsRead } = useNotificationStore();
 
   return (
@@ -25,7 +26,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ visible, o
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <TouchableOpacity onPress={() => markAllAsRead('demo-user-1')} style={{ marginRight: 12 }}>
+              <TouchableOpacity onPress={() => userId && markAllAsRead(userId)} style={{ marginRight: 12 }}>
                 <CheckCheck size={18} color={colors.primary} />
               </TouchableOpacity>
               <TouchableOpacity onPress={onClose}>
@@ -43,10 +44,12 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ visible, o
               >
                 <View style={styles.notifRow}>
                   <View style={styles.iconBox}>
-                    {(n.type as string) === 'challenge' && <Flag size={16} color={colors.warning} />}
-                    {(n.type as string) === 'race_result' && <Trophy size={16} color={colors.primary} />}
-                    {(n.type as string) === 'order' && <ShoppingCart size={16} color={colors.info} />}
-                    {(n.type as string) === 'meet' && <Calendar size={16} color={colors.text} />}
+                    {(n.type as string).includes('race') && <Trophy size={16} color={colors.primary} />}
+                    {(n.type as string).includes('order') && <ShoppingCart size={16} color={colors.info} />}
+                    {(n.type as string).includes('meet') && <Calendar size={16} color={colors.text} />}
+                    {(n.type as string).includes('challenge') && <Flag size={16} color={colors.warning} />}
+                    {['race_challenge', 'wager_won', 'new_follower', 'comment', 'like', 'meet_rsvp', 'dispute'].includes(n.type) &&
+                      !['race_challenge', 'wager_won', 'meet_rsvp'].includes(n.type) && <Bell size={16} color={colors.primary} />}
                   </View>
 
                   <View style={{ flex: 1, marginLeft: 10 }}>

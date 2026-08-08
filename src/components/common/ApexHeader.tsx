@@ -78,7 +78,7 @@ export const ApexHeader: React.FC<ApexHeaderProps> = ({
         )}
       </View>
 
-      <NotificationModal visible={showNotifModal} onClose={() => setShowNotifModal(false)} />
+      <NotificationModal visible={showNotifModal} onClose={() => setShowNotifModal(false)} userId={user?.id} />
     </View>
   );
 };

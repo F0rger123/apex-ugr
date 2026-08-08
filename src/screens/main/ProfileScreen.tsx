@@ -78,7 +78,7 @@ export const ProfileScreen = ({ navigation }: any) => {
 
           {/* Specialties Pills */}
           <View style={styles.specialtiesRow}>
-            {user?.racing_specialties.map((spec, idx) => (
+            {(Array.isArray(user?.racing_specialties) ? user.racing_specialties : []).map((spec, idx) => (
               <MatrixBadge key={idx} label={spec} variant="silver" size="sm" style={{ marginRight: 6 }} />
             ))}
           </View>
@@ -88,7 +88,7 @@ export const ProfileScreen = ({ navigation }: any) => {
         <View style={styles.statsRow}>
           <GlassCard style={styles.statBox}>
             <Text style={styles.statLab}>CREDITS BALANCE</Text>
-            <Text style={styles.statValGold}>${user?.credits_balance.toLocaleString()} CR</Text>
+              <Text style={styles.statValGold}>${(user?.credits_balance || 0).toLocaleString()} CR</Text>
           </GlassCard>
 
           <GlassCard style={styles.statBox}>

@@ -359,7 +359,19 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       filtered = filtered.filter(p => p.title.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
     }
     if (vehicleMake && vehicleMake !== 'All') {
-      filtered = filtered.filter(p => !p.compatible_makes || p.compatible_makes.includes('All') || p.compatible_makes.includes(vehicleMake));
+      const make = vehicleMake.toLowerCase();
+      filtered = filtered.filter(p => {
+        const makes = (p.compatible_makes || []).map(value => value.toLowerCase());
+        return makes.length === 0 || makes.includes('all') || makes.some(value => value === make || make.includes(value) || value.includes(make));
+      });
+    }
+    if (vehicleModel && vehicleModel !== 'All') {
+      const model = vehicleModel.toLowerCase();
+      filtered = filtered.filter(p => {
+        const models = (p.compatible_models || []).map(value => value.toLowerCase());
+        // Generic fitment remains visible, but unrelated model-specific parts do not.
+        return models.length === 0 || models.some(value => value.includes('all ') || model.includes(value) || value.includes(model.split(' ')[0]) || model.includes(value.split(' ')[0]));
+      });
     }
     return filtered;
   },

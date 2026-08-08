@@ -18,6 +18,7 @@ export type CommentWithProfile = Comment & {
 
 interface FeedState {
   posts: PostWithProfile[];
+  savedPostIds: string[];
   commentsMap: Record<string, CommentWithProfile[]>;
   isLoading: boolean;
   isLoadingMore: boolean;
@@ -31,6 +32,8 @@ interface FeedState {
 
   // Interactions
   toggleLike: (postId: string, userId: string) => Promise<void>;
+  toggleSave: (postId: string) => void;
+  repostPost: (postId: string) => void;
   addComment: (postId: string, userId: string, commentText: string) => Promise<{ error: string | null }>;
   createPost: (
     userId: string,
@@ -127,6 +130,7 @@ const SEED_POSTS: PostWithProfile[] = [
 
 export const useFeedStore = create<FeedState>((set, get) => ({
   posts: SEED_POSTS,
+  savedPostIds: [],
   commentsMap: {},
   isLoading: false,
   isLoadingMore: false,
@@ -336,6 +340,16 @@ export const useFeedStore = create<FeedState>((set, get) => ({
       }));
     }
   },
+
+  toggleSave: (postId) => set((state) => ({
+    savedPostIds: state.savedPostIds.includes(postId)
+      ? state.savedPostIds.filter((id) => id !== postId)
+      : [...state.savedPostIds, postId],
+  })),
+
+  repostPost: (postId) => set((state) => ({
+    posts: state.posts.map((post) => post.id === postId ? { ...post, reposts_count: post.reposts_count + 1 } : post),
+  })),
 
   // ─── Add comment ──────────────────────────────────────────────────────────
   addComment: async (postId, userId, commentText) => {

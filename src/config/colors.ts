@@ -1,42 +1,32 @@
 export const colors = {
-  // Primary Matrix Cyber Theme (Preserved)
-  primary: '#00FF66',          // Matrix Neon Green
-  primaryGlow: 'rgba(0, 255, 102, 0.25)',
-  primaryDark: '#00B345',      // Deep Green Accent
-  primaryBg: 'rgba(0, 38, 15, 0.6)',
-
-  // The Digital Astral Background Base (Depth)
-  deepSpace: '#060E20',        // Deep space base color for nebula
-  background: '#08090C',       // High-contrast deep dark base
-  buttonTextDark: '#000000',   // Deep solid black for primary neon green buttons
-  buttonTextLight: '#FFFFFF',  // High-contrast crisp white for dark buttons
-  surface: '#0A0C11',          
-  surfaceContainerLow: '#091328',
-  surfaceContainerHigh: '#141F38',
-  surfaceVariant: 'rgba(25, 37, 64, 0.4)', // 40% Opacity Glass Card
-  
-  card: 'rgba(25, 37, 64, 0.4)',
-  cardBorder: 'rgba(64, 72, 93, 0.15)', // Ghost Border
-  activeCardBorder: '#00FF66',
-
-  // Status & Accents
-  danger: '#FF3366',           // Racing Red
-  warning: '#FFB800',          // Telemetry Gold
-  info: '#00E5FF',             // Cyber Cyan
-  success: '#00FF66',
-  astralPurple: '#be83fa',
-  astralIndigo: '#6366f1',
-
-  // Text Hierarchy
-  text: '#DEE5FF',             // High contrast white/indigo
-  textSecondary: '#A3AAC4',    // on_surface_variant
-  textMuted: '#64748B',        
-  textMatrix: '#00FF66',       
-
-  // Glassmorphism overlays
-  glassBg: 'rgba(25, 37, 64, 0.4)',
-  glassHeader: 'rgba(6, 14, 32, 0.85)',
-  overlay: 'rgba(0, 0, 0, 0.85)',
+  primary: '#B7FF4A',
+  primaryGlow: 'rgba(183, 255, 74, 0.22)',
+  primaryDark: '#72B82F',
+  primaryBg: 'rgba(183, 255, 74, 0.10)',
+  deepSpace: '#050706',
+  background: '#070807',
+  buttonTextDark: '#071006',
+  buttonTextLight: '#FFFFFF',
+  surface: '#0D100E',
+  surfaceContainerLow: '#111612',
+  surfaceContainerHigh: '#1A201B',
+  surfaceVariant: 'rgba(22, 28, 23, 0.72)',
+  card: 'rgba(22, 28, 23, 0.72)',
+  cardBorder: 'rgba(232, 255, 235, 0.14)',
+  activeCardBorder: '#B7FF4A',
+  danger: '#FF6B6B',
+  warning: '#D8FF8B',
+  info: '#D6E8D7',
+  success: '#B7FF4A',
+  astralPurple: '#B7FF4A',
+  astralIndigo: '#D6E8D7',
+  text: '#F4FFF5',
+  textSecondary: '#B8C7BA',
+  textMuted: '#718073',
+  textMatrix: '#B7FF4A',
+  glassBg: 'rgba(22, 28, 23, 0.72)',
+  glassHeader: 'rgba(5, 8, 6, 0.90)',
+  overlay: 'rgba(0, 0, 0, 0.86)',
 };
 
 export const theme = {

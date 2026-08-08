@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, TextInput, ActivityIndicator, Alert } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useAuthStore } from '../../stores/authStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
@@ -39,6 +39,39 @@ export const CarMeetsScreen = ({ navigation }: any) => {
       ...prev,
       [meetId]: prev[meetId] === status ? 'none' : status,
     }));
+  };
+
+  const handleCreateMeet = async () => {
+    if (!user) return;
+    if (!title.trim() || !locationName.trim()) {
+      Alert.alert('Missing details', 'Add an event title and starting location.');
+      return;
+    }
+    const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const result = await useMapStore.getState().createMeet({
+      title: title.trim(),
+      description: description.trim() || 'Apex UGR community event.',
+      meet_type: meetType,
+      start_time: start.toISOString(),
+      end_time: new Date(start.getTime() + 2 * 60 * 60 * 1000).toISOString(),
+      latitude: currentLocation?.latitude || 34.0522,
+      longitude: currentLocation?.longitude || -118.2437,
+      location_name: locationName.trim(),
+      max_attendance: 100,
+      attendees_count: 1,
+      rules: 'Respect the location and local traffic laws.',
+      vehicle_requirements: 'Open to tuned and performance vehicles.',
+      cover_image_url: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=1000&auto=format&fit=crop',
+    } as any, user.id);
+    if (result.error) {
+      Alert.alert('Could not publish', result.error);
+      return;
+    }
+    setTitle('');
+    setLocationName('');
+    setDescription('');
+    setShowCreateModal(false);
+    Alert.alert('Meet published', 'Your event is now visible on the radar.');
   };
 
   return (
@@ -180,7 +213,7 @@ export const CarMeetsScreen = ({ navigation }: any) => {
               <TextInput style={[styles.input, { height: 70 }]} value={description} onChangeText={setDescription} multiline placeholder="No burnouts, respect location..." placeholderTextColor={colors.textMuted} />
             </ScrollView>
 
-            <ApexButton title="PUBLISH CAR MEET" onPress={() => setShowCreateModal(false)} style={{ marginTop: 12 }} />
+            <ApexButton title="PUBLISH CAR MEET" onPress={handleCreateMeet} style={{ marginTop: 12 }} />
           </View>
         </View>
       </Modal>

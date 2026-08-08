@@ -53,9 +53,9 @@ if (Platform.OS !== 'web') {
 
 const STATUS_COLORS: Record<string, string> = {
   'Cruising': colors.primary,
-  'Staged for Race': '#FFB800',
+  'Staged for Race': colors.warning,
   'Parked': colors.textMuted,
-  'In Telemetry Run': '#FF0055',
+  'In Telemetry Run': colors.primary,
 };
 
 const POPULAR_ROUTES = [
@@ -67,7 +67,7 @@ const POPULAR_ROUTES = [
 
 // ─── Web MapLibre GL Map — Full 3D Vector with Real GPS ──────────────────────
 const WebRadarView = React.memo(
-  ({ currentLocation, driversNearby, meets, followMode, activeRoute, mapZoom, pitchAngle, mapReady, onMapReady, iframeRef: controlledIframeRef }: any) => {
+  ({ currentLocation, driversNearby, meets, followMode, activeRoute, mapZoom, pitchAngle, mapReady, onMapReady, onDriverClick, onMeetClick, iframeRef: controlledIframeRef }: any) => {
     const internalIframeRef = useRef<HTMLIFrameElement>(null);
     const iframeRef = controlledIframeRef || internalIframeRef;
     const gpsInitSentRef = useRef(false);
@@ -250,8 +250,8 @@ const WebRadarView = React.memo(
               const el = document.createElement('div');
               el.className = 'racer-marker';
               const isRacing = d.status === 'In Telemetry Run';
-              el.style.background = isRacing ? '#FF0055' : '#FFB800';
-              el.style.boxShadow = '0 0 14px ' + (isRacing ? '#FF0055' : '#FFB800');
+              el.style.background = isRacing ? '#FFFFFF' : '#B7FF4A';
+              el.style.boxShadow = '0 0 14px ' + (isRacing ? '#FFFFFF' : '#B7FF4A');
 
               markers[d.id] = new maplibregl.Marker(el)
                 .setLngLat([d.lng, d.lat])
@@ -261,6 +261,9 @@ const WebRadarView = React.memo(
                   '<div class="speed-tag">' + d.speed + ' MPH · ' + d.status + '</div>'
                 ))
                 .addTo(map);
+              markers[d.id].getElement().addEventListener('click', () => {
+                window.parent.postMessage({ type: 'DRIVER_CLICK', id: d.id }, '*');
+              });
             });
 
             // Meets
@@ -278,10 +281,13 @@ const WebRadarView = React.memo(
               markers['meet_'+m.id] = new maplibregl.Marker(el)
                 .setLngLat([m.lng, m.lat])
                 .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(
-                  '<div class="racer-tag" style="color:#FF0055;">' + m.title + '</div>' +
+                  '<div class="racer-tag" style="color:#B7FF4A;">' + m.title + '</div>' +
                   '<div class="racer-sub">📍 ' + m.location + '</div>'
                 ))
                 .addTo(map);
+              markers['meet_'+m.id].getElement().addEventListener('click', () => {
+                window.parent.postMessage({ type: 'MEET_CLICK', id: m.id }, '*');
+              });
             });
 
             // Route Polyline
@@ -334,10 +340,12 @@ const WebRadarView = React.memo(
       if (Platform.OS !== 'web') return;
       const handleMessage = (event: MessageEvent) => {
         if (event.data?.type === 'MAP_READY') onMapReady?.();
+        if (event.data?.type === 'DRIVER_CLICK') onDriverClick?.(event.data.id);
+        if (event.data?.type === 'MEET_CLICK') onMeetClick?.(event.data.id);
       };
       window.addEventListener('message', handleMessage);
       return () => window.removeEventListener('message', handleMessage);
-    }, [onMapReady]);
+    }, [onMapReady, onDriverClick, onMeetClick]);
 
     useEffect(() => {
       if (!iframeRef.current?.contentWindow) return;
@@ -524,6 +532,17 @@ export const MapScreen = ({ navigation }: any) => {
           mapReady={mapReady}
           iframeRef={iframeRef}
           onMapReady={() => setMapReady(true)}
+          onDriverClick={(id: string) => {
+            const driver = driversNearby.find((item) => item.id === id);
+            if (driver) setSelectedDriver(driver);
+          }}
+          onMeetClick={(id: string) => {
+            const meet = meets.find((item) => item.id === id);
+            if (meet) {
+              setSelectedMeet(meet);
+              setMapTab('meets');
+            }
+          }}
         />
 
         {/* Floating Map Controls Overlay */}
@@ -653,7 +672,6 @@ export const MapScreen = ({ navigation }: any) => {
                   style={[styles.meetCard, selectedMeet?.id === meet.id && styles.meetCardActive]}
                   onPress={() => {
                     setSelectedMeet((prev: CarMeetWithHost | null) => prev?.id === meet.id ? null : meet);
-                    navigation.navigate('CarMeets');
                   }}
                 >
                   <View style={styles.meetIconBox}>
@@ -669,6 +687,18 @@ export const MapScreen = ({ navigation }: any) => {
                   </View>
                 </TouchableOpacity>
               ))
+            )}
+            {selectedMeet && (
+              <GlassCard style={styles.selectedMeetCard}>
+                <Text style={styles.selectedMeetEyebrow}>SELECTED LOCATION</Text>
+                <Text style={styles.selectedMeetTitle}>{selectedMeet.title}</Text>
+                <Text style={styles.selectedMeetLocation}><MapPin size={13} color={colors.primary} /> {selectedMeet.location_name}</Text>
+                <Text style={styles.selectedMeetSummary} numberOfLines={3}>{selectedMeet.description}</Text>
+                <TouchableOpacity style={styles.fullDetailsButton} onPress={() => navigation.navigate('CarMeetDetail', { meetId: selectedMeet.id })}>
+                  <Text style={styles.fullDetailsText}>FULL DETAILS</Text>
+                  <ChevronRight size={16} color={colors.background} />
+                </TouchableOpacity>
+              </GlassCard>
             )}
           </View>
         )}
@@ -893,6 +923,13 @@ const styles = StyleSheet.create({
   meetTitle: { color: colors.text, fontSize: 13, fontWeight: '900' },
   meetLocation: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
   meetAttendees: { alignItems: 'flex-end' },
+  selectedMeetCard: { marginTop: 10, padding: 14 },
+  selectedMeetEyebrow: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
+  selectedMeetTitle: { color: colors.text, fontSize: 17, fontWeight: '900', marginTop: 5 },
+  selectedMeetLocation: { color: colors.textSecondary, fontSize: 12, marginTop: 7, flexDirection: 'row', alignItems: 'center' },
+  selectedMeetSummary: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  fullDetailsButton: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+  fullDetailsText: { color: colors.background, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   attendeeCount: { color: colors.primary, fontSize: 18, fontWeight: '900' },
   attendeeLabel: { color: colors.textMuted, fontSize: 8, fontWeight: '800', marginTop: 2 },
 

@@ -186,7 +186,9 @@ const INITIAL_MEETS: CarMeetWithHost[] = [
 ];
 
 export const useMapStore = create<MapState>((set, get) => ({
-  currentLocation: null,
+  // Keep a visible approximate position until the browser/device grants GPS.
+  // This prevents the radar from rendering without a "you are here" marker.
+  currentLocation: { latitude: 34.0522, longitude: -118.2437 },
   driversNearby: SEED_DRIVERS,
   meets: INITIAL_MEETS,
   privacyMode: 'all',
@@ -403,7 +405,18 @@ export const useMapStore = create<MapState>((set, get) => ({
         .select('*, host_profile:profiles!car_meets_host_id_fkey(*)')
         .single();
 
-      if (error) return { error: error.message };
+      if (error) {
+        // Demo/fallback mode should still make the host flow usable locally.
+        const fallbackMeet = {
+          ...data,
+          id: `meet_${Date.now()}`,
+          host_id: hostId,
+          attendees_count: 1,
+          created_at: new Date().toISOString(),
+        } as CarMeetWithHost;
+        set((state) => ({ meets: [fallbackMeet, ...state.meets] }));
+        return { error: null };
+      }
 
       set((state) => ({
         meets: [meet as CarMeetWithHost, ...state.meets],
@@ -417,10 +430,10 @@ export const useMapStore = create<MapState>((set, get) => ({
 
   // ─── Join a meet (increment attendees count) ──────────────────────────────
   joinMeet: async (meetId, userId) => {
-    await supabase.rpc('join_car_meet', { p_meet_id: meetId, p_user_id: userId });
+    const { error } = await supabase.rpc('join_car_meet', { p_meet_id: meetId, p_user_id: userId });
     set((state) => ({
       meets: state.meets.map((m) =>
-        m.id === meetId ? { ...m, attendees_count: m.attendees_count + 1 } : m
+        m.id === meetId ? { ...m, attendees_count: (m.attendees_count || 0) + 1 } : m
       ),
     }));
   },

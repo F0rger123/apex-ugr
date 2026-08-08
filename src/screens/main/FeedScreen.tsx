@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Share,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
@@ -36,6 +37,9 @@ export const FeedScreen = ({ navigation }: any) => {
     fetchFeed,
     fetchComments,
     toggleLike,
+    toggleSave,
+    savedPostIds,
+    repostPost,
     addComment,
     createPost,
     uploadPostMedia,
@@ -165,6 +169,10 @@ export const FeedScreen = ({ navigation }: any) => {
       onLike={() => user && toggleLike(item.id, user.id)}
       onComment={() => handleOpenComments(item.id)}
       onFollow={() => {}}
+      onSave={() => toggleSave(item.id)}
+      isSaved={savedPostIds.includes(item.id)}
+      onRepost={() => repostPost(item.id)}
+      onShare={() => Share.share({ message: `${item.caption}\n${item.media_url}` })}
     />
   );
 
@@ -239,6 +247,10 @@ export const FeedScreen = ({ navigation }: any) => {
                   onLike={() => user && toggleLike(item.id, user.id)}
                   onComment={() => handleOpenComments(item.id)}
                   onFollow={() => {}}
+                  onSave={() => toggleSave(item.id)}
+                  isSaved={savedPostIds.includes(item.id)}
+                  onRepost={() => repostPost(item.id)}
+                  onShare={() => Share.share({ message: `${item.caption}\n${item.media_url}` })}
                 />
               </View>
             )}

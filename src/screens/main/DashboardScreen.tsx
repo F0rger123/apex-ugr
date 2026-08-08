@@ -62,7 +62,6 @@ export const DashboardScreen = ({ navigation }: any) => {
     <View style={styles.container}>
       <ApexHeader
         onProfilePress={() => navigation.navigate('Profile')}
-        onNotificationPress={() => navigation.navigate('Profile')}
       />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>

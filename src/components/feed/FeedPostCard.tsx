@@ -20,7 +20,7 @@ import Animated, {
 import { TapGestureHandler, State } from 'react-native-gesture-handler';
 import { PostWithProfile } from '../../stores/feedStore';
 import { colors } from '../../config/colors';
-import { Heart, MessageSquare, Repeat2, Share2, Volume2, VolumeX, UserPlus, Play } from 'lucide-react-native';
+import { Heart, MessageSquare, Repeat2, Share2, Volume2, VolumeX, UserPlus, Play, Bookmark } from 'lucide-react-native';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const POST_HEIGHT = Platform.OS === 'web' ? SCREEN_HEIGHT - 60 : SCREEN_HEIGHT - 90;
@@ -31,6 +31,10 @@ interface FeedPostCardProps {
   onLike: () => void;
   onComment: () => void;
   onFollow: () => void;
+  onSave: () => void;
+  isSaved?: boolean;
+  onRepost: () => void;
+  onShare: () => void;
 }
 
 export const FeedPostCard: React.FC<FeedPostCardProps> = ({
@@ -39,6 +43,10 @@ export const FeedPostCard: React.FC<FeedPostCardProps> = ({
   onLike,
   onComment,
   onFollow,
+  onSave,
+  isSaved = false,
+  onRepost,
+  onShare,
 }) => {
   const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -129,7 +137,7 @@ export const FeedPostCard: React.FC<FeedPostCardProps> = ({
 
               {/* Glowing Heart Overlay */}
               <Animated.View style={[styles.animatedHeartContainer, rHeartStyle]}>
-                <Heart size={120} color="#FF3366" fill="#FF3366" style={styles.heartGlow} />
+                <Heart size={120} color={colors.primary} fill={colors.primary} style={styles.heartGlow} />
               </Animated.View>
             </Animated.View>
           </TapGestureHandler>
@@ -170,11 +178,11 @@ export const FeedPostCard: React.FC<FeedPostCardProps> = ({
           <View style={[styles.actionCircle, post.user_has_liked && styles.actionCircleLiked]}>
             <Heart
               size={24}
-              color={post.user_has_liked ? '#FF3366' : colors.text}
-              fill={post.user_has_liked ? '#FF3366' : 'none'}
+              color={post.user_has_liked ? colors.primary : colors.text}
+              fill={post.user_has_liked ? colors.primary : 'none'}
             />
           </View>
-          <Text style={[styles.actionCount, post.user_has_liked && { color: '#FF3366' }]}>
+          <Text style={[styles.actionCount, post.user_has_liked && { color: colors.primary }]}>{''}
             {post.likes_count >= 1000
               ? `${(post.likes_count / 1000).toFixed(1)}K`
               : post.likes_count}
@@ -190,7 +198,7 @@ export const FeedPostCard: React.FC<FeedPostCardProps> = ({
         </TouchableOpacity>
 
         {/* Repost */}
-        <TouchableOpacity style={styles.actionItem}>
+        <TouchableOpacity style={styles.actionItem} onPress={onRepost}>
           <View style={styles.actionCircle}>
             <Repeat2 size={24} color={colors.text} />
           </View>
@@ -198,10 +206,17 @@ export const FeedPostCard: React.FC<FeedPostCardProps> = ({
         </TouchableOpacity>
 
         {/* Share */}
-        <TouchableOpacity style={styles.actionItem}>
+        <TouchableOpacity style={styles.actionItem} onPress={onShare}>
           <View style={styles.actionCircle}>
             <Share2 size={22} color={colors.text} />
           </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.actionItem} onPress={onSave}>
+          <View style={styles.actionCircle}>
+            <Bookmark size={22} color={isSaved ? colors.primary : colors.text} fill={isSaved ? colors.primary : 'none'} />
+          </View>
+          <Text style={styles.actionCount}>{isSaved ? 'SAVED' : 'SAVE'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -257,7 +272,7 @@ const styles = StyleSheet.create({
     pointerEvents: 'none',
   },
   heartGlow: {
-    shadowColor: '#FF3366',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 30,
@@ -276,7 +291,7 @@ const styles = StyleSheet.create({
 
   actionItem: { alignItems: 'center', gap: 4 },
   actionCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
-  actionCircleLiked: { backgroundColor: 'rgba(255,51,102,0.2)', borderColor: '#FF3366' },
+  actionCircleLiked: { backgroundColor: colors.primaryBg, borderColor: colors.primary },
   actionCount: { color: colors.text, fontSize: 11, fontWeight: '900' },
 
   bottomOverlay: { position: 'absolute', bottom: 30, left: 16, right: 70 },
