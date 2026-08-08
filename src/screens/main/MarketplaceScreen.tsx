@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
 import { useMarketplaceStore } from '../../stores/marketplaceStore';
 import { useGarageStore } from '../../stores/garageStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -40,17 +40,17 @@ export const MarketplaceScreen = ({ navigation }: any) => {
   const activeVehicle = getActiveVehicle();
 
   const [activeTab, setActiveTab] = useState<'catalog' | 'orders'>('catalog');
-  const [filterByGarage, setFilterByGarage] = useState(false);
+  const [filterByGarage, setFilterByGarage] = useState(true);
   const [showFilterDrawer, setShowFilterDrawer] = useState(false);
   const [selectedCompareProduct, setSelectedCompareProduct] = useState<MarketplaceProduct | null>(null);
 
   useEffect(() => {
     // The local catalog is instant; refresh the remote catalog once per session.
-    fetchProducts();
+    fetchProducts(activeVehicle?.make, activeVehicle?.model);
     if (user) {
       fetchOrders(user.id);
     }
-  }, [user?.id]);
+  }, [user?.id, activeVehicle?.id]);
 
   const products = getFilteredProducts(
     filterByGarage ? activeVehicle?.make : undefined,
@@ -87,6 +87,21 @@ export const MarketplaceScreen = ({ navigation }: any) => {
             </TouchableOpacity>
           </View>
         </View>
+
+        {activeVehicle && (
+          <View style={styles.vehicleContextCard}>
+            {activeVehicle.photos?.[0] ? (
+              <Image source={{ uri: activeVehicle.photos[0] }} style={styles.vehicleContextImage} resizeMode="cover" />
+            ) : (
+              <View style={[styles.vehicleContextImage, styles.vehicleContextPlaceholder]}><Text style={styles.vehicleContextPlaceholderText}>ADD CAR PHOTO</Text></View>
+            )}
+            <View style={styles.vehicleContextCopy}>
+              <Text style={styles.vehicleContextEyebrow}>SHOPPING FOR ACTIVE RIDE</Text>
+              <Text style={styles.vehicleContextTitle}>{activeVehicle.year} {activeVehicle.make} {activeVehicle.model}</Text>
+              <Text style={styles.vehicleContextMeta}>{activeVehicle.trim || 'Custom build'} · {activeVehicle.color}</Text>
+            </View>
+          </View>
+        )}
 
         {/* Tab Selector: Catalog vs Orders */}
         <View style={styles.tabBar}>
@@ -242,6 +257,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 10 },
+  vehicleContextCard: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.primary, overflow: 'hidden', marginBottom: 10 },
+  vehicleContextImage: { width: 112, height: 82, backgroundColor: colors.surfaceContainerHigh },
+  vehicleContextPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  vehicleContextPlaceholderText: { color: colors.textMuted, fontSize: 9, fontWeight: '900' },
+  vehicleContextCopy: { flex: 1, padding: 12, justifyContent: 'center' },
+  vehicleContextEyebrow: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  vehicleContextTitle: { color: colors.text, fontSize: 15, fontWeight: '900', marginTop: 4 },
+  vehicleContextMeta: { color: colors.textMuted, fontSize: 10, marginTop: 3 },
   title: { color: colors.text, fontSize: 18, fontWeight: '900', letterSpacing: 1 },
   subTitle: { color: colors.textMuted, fontSize: 10, fontWeight: '800' },
   cartBtn: { backgroundColor: colors.primary, padding: 10, borderRadius: 12 },

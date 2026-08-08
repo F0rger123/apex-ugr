@@ -20,7 +20,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Exhaust',
     price: 1849.99,
     description: 'Aircraft-grade T-304 stainless steel cat-back exhaust. Deep aggressive tone with patented anti-drone tech. Dyno-proven +28 RWHP gains on most V8 applications.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Car_exhaust_pipe.jpg/640px-Car_exhaust_pipe.jpg',
+    image_url: 'https://images.unsplash.com/photo-1619767886558-efdc259cde1a?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Ford', 'Chevrolet', 'Dodge', 'Nissan', 'Toyota'],
     compatible_models: ['Mustang GT', 'Camaro SS', 'Challenger', 'GT-R', 'Supra'],
     vendor_name: 'Summit Racing',
@@ -38,7 +38,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Turbo',
     price: 2450.00,
     description: 'Billet compressor wheel, dual ceramic ball bearings, internal wastegate. Rated for 1,050HP. The go-to single turbo for street builds pushing over 800WHP.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Turbocharger.jpg/640px-Turbocharger.jpg',
+    image_url: 'https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Nissan', 'Toyota', 'Subaru', 'BMW', 'Ford'],
     compatible_models: ['GT-R', 'Supra 2JZ', 'WRX STI', 'M3', 'Mustang'],
     vendor_name: 'Summit Racing',
@@ -56,7 +56,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Supercharger',
     price: 8495.00,
     description: '99% volumetric efficiency twin-screw design. Dual-pass intercooler, oversized 68mm throttle body. Complete bolt-on kit with CARB EO compliance for street use.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Supercharger.jpg/640px-Supercharger.jpg',
+    image_url: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Ford', 'Chevrolet', 'Dodge'],
     compatible_models: ['Mustang GT', 'Camaro SS', 'Challenger'],
     vendor_name: 'Lethal Performance',
@@ -74,7 +74,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Brakes',
     price: 4995.00,
     description: 'Forged aluminum 6-piston radial mount calipers with 405x34mm 2-piece floating slotted rotors. Consistent fade-free stops from 150mph+. OEM fitment, no modifications required.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/Disk_brake_dsc03682.jpg/640px-Disk_brake_dsc03682.jpg',
+    image_url: 'https://images.unsplash.com/photo-1503736334956-4c8f8e92946d?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Porsche', 'BMW', 'Nissan', 'Chevrolet', 'Ford', 'Toyota'],
     compatible_models: ['911 GT3', 'M3', 'GT-R', 'Corvette', 'Mustang', 'Supra'],
     vendor_name: 'Brembo',
@@ -92,7 +92,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Tune',
     price: 725.00,
     description: 'Full-color display, real-time gauges, live datalog, pre-loaded Stage 1/2/E85 OTS maps. Flash in under 5 minutes. The #1 OBD tuning device for performance enthusiasts.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3b/OBD_II_adapter.jpg/640px-OBD_II_adapter.jpg',
+    image_url: 'https://images.unsplash.com/photo-1493238792000-8113da705763?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Nissan', 'Porsche', 'Subaru', 'Ford', 'Toyota', 'BMW'],
     compatible_models: ['GT-R', '911 Turbo', 'WRX STI', 'Focus RS', 'Supra', 'M4'],
     vendor_name: 'Cobb Tuning',
@@ -110,7 +110,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Suspension',
     price: 5899.00,
     description: '3-way independent damping adjustment. CNC machined aluminum top mounts. 30-step rebound, 15-step low-speed, 10-step high-speed compression control.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Shock_absorber.JPG/640px-Shock_absorber.JPG',
+    image_url: 'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Porsche', 'BMW', 'Nissan', 'Toyota', 'Chevrolet', 'Ford'],
     compatible_models: ['911 GT3', 'M4', 'GT-R', 'Supra', 'Corvette', 'Mustang'],
     vendor_name: 'ECS Tuning',
@@ -128,7 +128,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Intake',
     price: 389.99,
     description: 'Pro DRY S high-flow air filter with sealed carbon fiber airbox. Dyno-proven +15–23HP and +18 lb-ft TQ. No re-oiling required.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0a/Cold_Air_Intake.jpg/640px-Cold_Air_Intake.jpg',
+    image_url: 'https://images.unsplash.com/photo-1542362567-b07e54358753?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Ford', 'Chevrolet', 'Dodge', 'Nissan', 'Toyota', 'BMW', 'Porsche', 'Subaru'],
     compatible_models: ['All V8/V6 Models'],
     vendor_name: 'aFe Power',
@@ -146,7 +146,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Intercooler',
     price: 1199.99,
     description: '50% more cooling capacity than stock. Full aluminum end tanks, TIG-welded fittings. -30°F charge air temperature drop for consistent boosted power.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Intercooler.jpg/640px-Intercooler.jpg',
+    image_url: 'https://images.unsplash.com/photo-1504215680853-026ed2a45def?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Subaru', 'Ford', 'Nissan', 'BMW', 'Toyota'],
     compatible_models: ['WRX STI', 'Focus RS', 'GT-R', 'M2', 'Supra'],
     vendor_name: 'Mishimoto',
@@ -164,7 +164,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Wheels & Tires',
     price: 3200.00,
     description: 'Iconic 6-spoke forged JIS aluminum alloy wheel. Industry-lightest production forged wheel. Used on World Time Attack and Super GT race programs worldwide.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/79/Alloy_wheel.jpg/640px-Alloy_wheel.jpg',
+    image_url: 'https://images.unsplash.com/photo-1553440569-bcc63803a83d?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Nissan', 'Toyota', 'Honda', 'Subaru', 'Mitsubishi', 'Porsche'],
     compatible_models: ['GT-R', 'Supra', 'Civic Type R', 'WRX STI', 'Evo X', '911'],
     vendor_name: 'Tire Rack',
@@ -182,7 +182,7 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     category: 'Nitrous',
     price: 699.99,
     description: 'Street/strip dry nitrous system with purge kit and launch control relay. Progressive controller, 75–175HP power levels. Complete 10lb bottle included.',
-    image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ef/NitrousBottle.jpg/640px-NitrousBottle.jpg',
+    image_url: 'https://images.unsplash.com/photo-1502877338535-766e1452684a?auto=format&fit=crop&w=900&q=85',
     compatible_makes: ['Ford', 'Chevrolet', 'Dodge', 'Nissan', 'Toyota', 'Honda'],
     compatible_models: ['All EFI Models'],
     vendor_name: 'Summit Racing',
@@ -193,6 +193,15 @@ const INSTANT_PARTS: MarketplaceProduct[] = [
     hp_gain: 150,
     created_at: new Date().toISOString(),
   },
+];
+
+const UNIVERSAL_PARTS: MarketplaceProduct[] = [
+  { id: 'universal_oil_catch_can', title: 'Mishimoto Compact Oil Catch Can', brand: 'Mishimoto', category: 'Engine', price: 149.99, description: 'Universal baffled catch can with drain valve and braided hose kit. Confirm hose diameter before ordering.', image_url: 'https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&w=900&q=85', compatible_makes: ['All'], compatible_models: ['Universal'], vendor_name: 'eBay Motors', purchase_url: 'https://www.ebay.com/sch/i.html?_nkw=universal+oil+catch+can', rating: 4.7, reviews_count: 118, in_stock: true, hp_gain: 0, created_at: new Date().toISOString() },
+  { id: 'universal_led_headlights', title: 'Morimoto XB LED Headlight Upgrade', brand: 'Morimoto', category: 'Lighting', price: 399, description: 'High-output LED replacement lighting. Vehicle-specific brackets and harnesses vary by application.', image_url: 'https://images.unsplash.com/photo-1542362567-b07e54358753?auto=format&fit=crop&w=900&q=85', compatible_makes: ['All'], compatible_models: ['Universal'], vendor_name: 'AutoZone', purchase_url: 'https://www.autozone.com/searchresult?searchText=led+headlight+upgrade', rating: 4.6, reviews_count: 84, in_stock: true, hp_gain: 0, created_at: new Date().toISOString() },
+  { id: 'universal_detailing_kit', title: 'Chemical Guys Ceramic Detailing Kit', brand: 'Chemical Guys', category: 'Cleaning Supplies', price: 119.99, description: 'Wash, iron remover, ceramic spray and microfiber kit for any exterior finish or paint color.', image_url: 'https://images.unsplash.com/photo-1503736334956-4c8f8e92946d?auto=format&fit=crop&w=900&q=85', compatible_makes: ['All'], compatible_models: ['Universal'], vendor_name: 'Amazon', purchase_url: 'https://www.amazon.com/s?k=chemical+guys+ceramic+detailing+kit', rating: 4.8, reviews_count: 331, in_stock: true, hp_gain: 0, created_at: new Date().toISOString() },
+  { id: 'universal_sway_bar', title: 'Whiteline Adjustable Rear Sway Bar', brand: 'Whiteline', category: 'Suspension', price: 329, description: 'Adjustable handling upgrade. Verify axle dimensions and vehicle application before purchase.', image_url: 'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=900&q=85', compatible_makes: ['All'], compatible_models: ['Universal'], vendor_name: 'Summit Racing', purchase_url: 'https://www.summitracing.com/search?keyword=adjustable+rear+sway+bar', rating: 4.7, reviews_count: 76, in_stock: true, hp_gain: 0, created_at: new Date().toISOString() },
+  { id: 'universal_brake_fluid', title: 'Motul RBF 600 Racing Brake Fluid', brand: 'Motul', category: 'Brakes', price: 24.99, description: 'High-temperature DOT 4 brake fluid for street, autocross and track use.', image_url: 'https://images.unsplash.com/photo-1504215680853-026ed2a45def?auto=format&fit=crop&w=900&q=85', compatible_makes: ['All'], compatible_models: ['Universal'], vendor_name: 'AutoZone', purchase_url: 'https://www.autozone.com/brakes-and-traction-control/brake-fluid', rating: 4.9, reviews_count: 204, in_stock: true, hp_gain: 0, created_at: new Date().toISOString() },
+  { id: 'universal_gauge_cluster', title: 'AEM X-Series Wideband Gauge', brand: 'AEM Electronics', category: 'Gauges', price: 199.99, description: 'Universal 52mm wideband display with sensor kit. ECU integration depends on vehicle and tune.', image_url: 'https://images.unsplash.com/photo-1493238792000-8113da705763?auto=format&fit=crop&w=900&q=85', compatible_makes: ['All'], compatible_models: ['Universal'], vendor_name: 'eBay Motors', purchase_url: 'https://www.ebay.com/sch/i.html?_nkw=AEM+X-Series+wideband+gauge', rating: 4.8, reviews_count: 167, in_stock: true, hp_gain: 0, created_at: new Date().toISOString() },
 ];
 
 interface MarketplaceState {
@@ -231,7 +240,7 @@ interface MarketplaceState {
 }
 
 export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
-  products: INSTANT_PARTS, // ← Populated immediately, zero loading delay
+  products: [...INSTANT_PARTS, ...UNIVERSAL_PARTS], // Populated immediately, zero loading delay
   cart: [],
   wishlistIds: [],
   orders: [],
@@ -243,11 +252,11 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   isLoadingOrders: false,
   error: null,
 
-  fetchProducts: async () => {
+  fetchProducts: async (vehicleMake, vehicleModel) => {
     set({ isLoading: true, error: null });
 
     const [liveResult, dbResult] = await Promise.allSettled([
-      partsApiService.fetchLiveParts(),
+      partsApiService.fetchLiveParts({ make: vehicleMake, model: vehicleModel }),
       supabase
         .from('marketplace_products')
         .select('*')
@@ -258,7 +267,7 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
 
     const liveParts = liveResult.status === 'fulfilled' ? liveResult.value : [];
     const dbParts = dbResult.status === 'fulfilled' ? dbResult.value.data || [] : [];
-    const combined = [...INSTANT_PARTS, ...liveParts, ...dbParts];
+    const combined = [...INSTANT_PARTS, ...UNIVERSAL_PARTS, ...liveParts, ...dbParts];
     const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
     set({
       products: unique as MarketplaceProduct[],
@@ -369,8 +378,11 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       const model = vehicleModel.toLowerCase();
       filtered = filtered.filter(p => {
         const models = (p.compatible_models || []).map(value => value.toLowerCase());
-        // Generic fitment remains visible, but unrelated model-specific parts do not.
-        return models.length === 0 || models.some(value => value.includes('all ') || model.includes(value) || value.includes(model.split(' ')[0]) || model.includes(value.split(' ')[0]));
+        return models.length > 0 && models.some(value => {
+          const normalized = value.replace(/[^a-z0-9]/g, '');
+          const active = model.replace(/[^a-z0-9]/g, '');
+          return value === 'allmodels' || value === 'universal' || normalized === active || normalized.includes(active) || active.includes(normalized);
+        });
       });
     }
     return filtered;

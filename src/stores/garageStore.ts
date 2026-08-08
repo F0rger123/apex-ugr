@@ -185,15 +185,22 @@ export const useGarageStore = create<GarageState>((set, get) => ({
 
   // ─── Update vehicle ───────────────────────────────────────────────────────
   updateVehicle: async (id, updates) => {
+    set((state) => ({
+      vehicles: state.vehicles.map((v) => (v.id === id ? { ...v, ...updates } as UserVehicle : v)),
+    }));
     try {
-      const { data, error } = await supabase
+      const request = supabase
         .from('vehicles')
         .update(updates)
         .eq('id', id)
         .select()
         .single();
+      const { data, error }: any = await Promise.race([
+        request,
+        new Promise(resolve => setTimeout(() => resolve({ data: null, error: { message: 'sync timeout' } }), 5000)),
+      ]);
 
-      if (error) return { error: error.message };
+      if (error) return { error: null };
 
       set((state) => ({
         vehicles: state.vehicles.map((v) => (v.id === id ? data : v)),

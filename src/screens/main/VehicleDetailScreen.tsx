@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useGarageStore } from '../../stores/garageStore';
 import { ApexHeader } from '../../components/common/ApexHeader';
 import { SectionHeader } from '../../components/common/SectionHeader';
@@ -10,11 +11,13 @@ import { ModificationItem } from '../../components/garage/ModificationItem';
 import { DynoChart } from '../../components/garage/DynoChart';
 import { playEngineSound } from '../../utils/soundSynthesizer';
 import { colors } from '../../config/colors';
+import { useAuthStore } from '../../stores/authStore';
 import { Wrench, Plus, ArrowLeft, Flame, Gauge, DollarSign, Activity, X, Volume2 } from 'lucide-react-native';
 
 export const VehicleDetailScreen = ({ route, navigation }: any) => {
   const vehicleId = route.params?.vehicleId || '11111111-1111-1111-1111-111111111111';
-  const { vehicles, getVehicleModifications, getTotalBuildValue, getTotalHpGain, addModification, deleteModification } = useGarageStore();
+  const { vehicles, getVehicleModifications, getTotalBuildValue, getTotalHpGain, addModification, deleteModification, updateVehicle, uploadVehiclePhoto } = useGarageStore();
+  const { user } = useAuthStore();
 
   const vehicle = vehicles.find((v) => v.id === vehicleId) || vehicles[0];
   const modifications = getVehicleModifications(vehicle.id);
@@ -57,6 +60,23 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
     }
   };
 
+  const handleUploadPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.9,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const localUri = result.assets[0].uri;
+    let photoUrl = localUri;
+    if (user) {
+      const uploaded = await uploadVehiclePhoto(vehicle.id, user.id, localUri, `vehicle-${Date.now()}.jpg`);
+      if (uploaded.url) photoUrl = uploaded.url;
+    }
+    await updateVehicle(vehicle.id, { photos: [photoUrl, ...vehicle.photos.filter(photo => photo !== photoUrl)] });
+    Alert.alert('Vehicle photo updated', 'This photo now represents your active ride in the garage and shop.');
+  };
+
   const handleUploadSound = () => {
     // In a real app, use DocumentPicker to select an audio file and upload to Supabase Storage
     console.log('Opening audio picker...');
@@ -76,6 +96,9 @@ export const VehicleDetailScreen = ({ route, navigation }: any) => {
         {/* Hero Image */}
         <View style={styles.heroImageContainer}>
           <Image source={{ uri: vehicle.photos[0] }} style={styles.heroImage} resizeMode="cover" />
+          <TouchableOpacity style={styles.changePhotoButton} onPress={handleUploadPhoto}>
+            <Text style={styles.changePhotoText}>CHANGE PHOTO</Text>
+          </TouchableOpacity>
           <View style={styles.heroOverlay}>
             <Text style={styles.heroMake}>{vehicle.year} {vehicle.make}</Text>
             <Text style={styles.heroModel}>{vehicle.model} {vehicle.trim}</Text>
@@ -225,6 +248,8 @@ const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   heroImageContainer: { height: 200, width: '100%', borderRadius: 16, overflow: 'hidden', marginVertical: 8 },
   heroImage: { width: '100%', height: '100%' },
+  changePhotoButton: { position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(0,0,0,0.72)', borderWidth: 1, borderColor: colors.primary, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
+  changePhotoText: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
   heroOverlay: { position: 'absolute', bottom: 12, left: 16, right: 16 },
   heroMake: { color: colors.primary, fontSize: 12, fontWeight: '800', letterSpacing: 1 },
   heroModel: { color: colors.text, fontSize: 24, fontWeight: '900' },
