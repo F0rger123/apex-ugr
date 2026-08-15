@@ -5,17 +5,25 @@ import {
   Dimensions,
   Image,
   ImageBackground,
+  Linking,
   Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
+import { useLiveNetworkStore, LiveDriver, LiveEvent } from './live/liveNetworkStore';
+import { useContentStore } from './live/contentStore';
+import { useNotificationStore } from '../stores/notificationStore';
+import { useMessageStore } from '../stores/messageStore';
+import { hasLiveBackend, supabase } from '../config/supabase';
 import {
   Activity,
   BadgeCheck,
@@ -60,11 +68,6 @@ import {
   Zap,
 } from 'lucide-react-native';
 
-const heroCar = require('./assets/apex-underground-coupe-v2.png');
-const commandHero = require('./assets/apex-command-hero.png');
-const exhaustImage = require('./assets/gtr-titanium-exhaust.png');
-const intakeImage = require('./assets/gtr-carbon-intake.png');
-const brakeImage = require('./assets/gtr-brake-kit.png');
 const accent = '#91B985';
 const paper = '#F3F5F3';
 const muted = '#858E87';
@@ -74,10 +77,12 @@ const { width: screenWidth } = Dimensions.get('window');
 
 let NativeMap: any = null;
 let NativeMarker: any = null;
+let NativeCircle: any = null;
 if (Platform.OS !== 'web') {
   const maps = require('react-native-maps');
   NativeMap = maps.default;
   NativeMarker = maps.Marker;
+  NativeCircle = maps.Circle;
 }
 
 type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard';
@@ -94,13 +99,9 @@ interface Driver {
   mystery?: boolean;
   latitude: number;
   longitude: number;
+  speedKph?: number;
+  cruiseId?: string | null;
 }
-
-const drivers: Driver[] = [
-  { id: 'void', alias: 'VOIDRUNNER', car: '2024 Nissan GT-R Nismo', hp: 710, record: '48–7', rank: 'Master', distance: '0.8 mi', latitude: 34.0442, longitude: -118.2661 },
-  { id: 'ghost', alias: 'UNKNOWN_09', car: 'CLASSIFIED', hp: null, record: '—', rank: 'Platinum', distance: '1.4 mi', mystery: true, latitude: 34.0508, longitude: -118.2554 },
-  { id: 'nova', alias: 'NOVA', car: '2021 Porsche 911 Turbo S', hp: 640, record: '31–11', rank: 'Silver', distance: '2.1 mi', latitude: 34.0388, longitude: -118.248 },
-];
 
 const tabs: { key: TabKey; label: string; icon: IconType }[] = [
   { key: 'command', label: 'COMMAND', icon: Activity },
@@ -216,65 +217,65 @@ function CreditsToken({ value, compact = false }: { value: number; compact?: boo
   );
 }
 
-function CommandScreen({ credits, onTab }: { credits: number; onTab: (tab: TabKey) => void }) {
+function CommandScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
+  const { profile, rankings, vehicles, activeVehicleId } = useContentStore();
+  const { drivers, events, cruises, networkStatus, isDriving, startDrive } = useLiveNetworkStore();
+  const vehicle = vehicles.find(item => item.id === activeVehicleId);
+  const rankIndex = profile ? rankings.findIndex(item => item.id === useContentStore.getState().userId) : -1;
+  const liveCredits = profile?.credits ?? 0;
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
-      <ImageBackground source={commandHero} style={styles.hero} imageStyle={styles.heroImage}>
+      <View style={styles.hero}>{vehicle?.photoUrl ? <Image source={{ uri: vehicle.photoUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : <View style={[StyleSheet.absoluteFill, styles.commandEmptyHero]}><CarFront size={68} color="rgba(255,255,255,.18)" /></View>}
         <LinearGradient colors={['rgba(3,4,3,0.05)', 'rgba(3,4,3,0.44)']} style={StyleSheet.absoluteFill} />
         <View style={styles.heroStatus}>
           <View style={styles.liveDot} />
-          <Text style={styles.heroStatusText}>PILOT LINK / SECURE</Text>
+          <Text style={styles.heroStatusText}>{networkStatus.replace('_', ' ').toUpperCase()} / {isDriving ? 'DRIVE ACTIVE' : 'SECURE'}</Text>
         </View>
         <View style={styles.heroBottom}>
           <Text style={styles.eyebrow}>ACTIVE BUILD</Text>
-          <Text style={styles.heroTitle}>NIGHTSHIFT</Text>
-          <Text style={styles.heroCarName}>2024 NISSAN GT-R NISMO</Text>
+          <Text style={styles.heroTitle}>{vehicle?.nickname.toUpperCase() || 'NO VEHICLE'}</Text>
+          <Text style={styles.heroCarName}>{vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''}`.toUpperCase() : 'ADD A VEHICLE IN GARAGE'}</Text>
           <View style={styles.heroActions}>
             <GlassButton label="OPEN GARAGE" icon={CarFront} onPress={() => onTab('garage')} active />
             <GlassButton label="LOCATE" icon={MapPin} onPress={() => onTab('radar')} />
           </View>
         </View>
-      </ImageBackground>
-
-      <View style={styles.metricRail}>
-        <View style={styles.metric}><Text style={styles.metricValue}>710</Text><Text style={styles.metricLabel}>HP</Text></View>
-        <View style={styles.metricDivider} />
-        <View style={styles.metric}><Text style={styles.metricValue}>48–7</Text><Text style={styles.metricLabel}>RECORD</Text></View>
-        <View style={styles.metricDivider} />
-        <View style={styles.metric}><Text style={styles.metricValue}>#018</Text><Text style={styles.metricLabel}>GLOBAL</Text></View>
       </View>
 
-      <SectionTitle label="PILOT STATUS" action="SEASON 04" />
+      <View style={styles.metricRail}>
+        <View style={styles.metric}><Text style={styles.metricValue}>{vehicle?.horsepower || '—'}</Text><Text style={styles.metricLabel}>HP</Text></View>
+        <View style={styles.metricDivider} />
+        <View style={styles.metric}><Text style={styles.metricValue}>{profile ? `${profile.wins}–${Math.max(0, profile.entered - profile.wins)}` : '—'}</Text><Text style={styles.metricLabel}>RECORD</Text></View>
+        <View style={styles.metricDivider} />
+        <View style={styles.metric}><Text style={styles.metricValue}>{rankIndex >= 0 ? `#${String(rankIndex + 1).padStart(3, '0')}` : '—'}</Text><Text style={styles.metricLabel}>GLOBAL</Text></View>
+      </View>
+
+      <SectionTitle label="PILOT STATUS" action={profile ? 'LIVE RECORD' : 'OFFLINE'} />
       <GlassPanel glow>
         <View style={styles.statusTop}>
           <View>
-            <Text style={styles.statusAlias}>CIPHER_24</Text>
-            <RankBadge />
+            <Text style={styles.statusAlias}>{profile?.alias.toUpperCase() || 'SIGN IN REQUIRED'}</Text>
+            {profile ? <RankBadge rank={(['Bronze','Silver','Master','Platinum'].includes(profile.tier) ? profile.tier : 'Bronze') as Driver['rank']} /> : null}
           </View>
-          <CreditsToken value={credits} compact />
+          <CreditsToken value={liveCredits} compact />
         </View>
-        <View style={styles.progressTrack}><View style={[styles.progressFill, { width: '72%' }]} /></View>
-        <View style={styles.progressLabels}><Text style={styles.progressText}>7,240 RP</Text><Text style={styles.progressText}>10,000 TO PLATINUM</Text></View>
+        <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.min(100, ((profile?.points || 0) % 10000) / 100)}%` }]} /></View>
+        <View style={styles.progressLabels}><Text style={styles.progressText}>{(profile?.points || 0).toLocaleString()} RP</Text><Text style={styles.progressText}>{profile?.tier?.toUpperCase() || 'UNRANKED'}</Text></View>
       </GlassPanel>
 
-      <SectionTitle label="LIVE NETWORK" action="18 ONLINE" />
+      <SectionTitle label="LIVE NETWORK" action={`${drivers.length} ONLINE`} />
       <Pressable onPress={() => onTab('race')} style={({ pressed }) => [styles.commandRow, pressed && styles.pressed]}>
         <View style={styles.commandIcon}><Swords size={20} color={accent} /></View>
-        <View style={styles.commandCopy}><Text style={styles.commandTitle}>OPEN CHALLENGE</Text><Text style={styles.commandMeta}>3 drivers · 60–130 · 500 AC</Text></View>
+        <View style={styles.commandCopy}><Text style={styles.commandTitle}>RACE CONTROL</Text><Text style={styles.commandMeta}>{drivers.length} nearby pilots available</Text></View>
         <ChevronRight size={18} color={muted} />
       </Pressable>
       <Pressable onPress={() => onTab('radar')} style={({ pressed }) => [styles.commandRow, pressed && styles.pressed]}>
         <View style={styles.commandIcon}><Radio size={20} color={paper} /></View>
-        <View style={styles.commandCopy}><Text style={styles.commandTitle}>MIDNIGHT ASSEMBLY</Text><Text style={styles.commandMeta}>1.8 mi · 42 pilots locked in</Text></View>
+        <View style={styles.commandCopy}><Text style={styles.commandTitle}>LIVE RADAR</Text><Text style={styles.commandMeta}>{events.length} events · {cruises.length} cruises</Text></View>
         <ChevronRight size={18} color={muted} />
       </Pressable>
+      <Pressable onPress={startDrive} style={({ pressed }) => [styles.commandRow, styles.commandDriveRow, pressed && styles.pressed]}><View style={styles.commandIcon}><Navigation size={20} color={accent} /></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>ENTER DRIVE MODE</Text><Text style={styles.commandMeta}>Press Enter anywhere on web · live GPS speed and distance</Text></View><Play size={18} color={paper} /></Pressable>
 
-      <SectionTitle label="RECENT REWARDS" />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.badgeRail}>
-        <RewardBadge icon={Zap} label="QUICKDRAW" detail="0–60" />
-        <RewardBadge icon={ShieldCheck} label="PROOF LOCKED" detail="VERIFIED" />
-        <RewardBadge icon={Trophy} label="NIGHT KING" detail="12 WINS" />
-      </ScrollView>
     </ScrollView>
   );
 }
@@ -294,18 +295,38 @@ function RadarMap({
   mode,
   selected,
   onSelect,
+  drivers,
+  events,
 }: {
-  location: { latitude: number; longitude: number };
+  location: { latitude: number; longitude: number } | null;
   mode: 'street' | 'satellite';
   selected: Driver | null;
   onSelect: (driver: Driver | null) => void;
+  drivers: Driver[];
+  events: LiveEvent[];
 }) {
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const listener = (event: MessageEvent) => {
+      if (event.data?.source !== 'apex-radar') return;
+      const driver = drivers.find(item => item.id === event.data.driverId);
+      if (driver) onSelect(driver);
+    };
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, [drivers, onSelect]);
+
   if (Platform.OS === 'web') {
     const tileUrl = mode === 'satellite'
       ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
       : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
     const attribution = mode === 'satellite' ? 'Esri World Imagery' : 'OpenStreetMap';
-    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#090b09}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.22) brightness(.50)}' : '#map{filter:saturate(.48) contrast(1.18) brightness(.55)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:false,attributionControl:true}).setView([${location.latitude},${location.longitude}],14);L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);</script></body></html>`;
+    const safeDrivers = JSON.stringify(drivers).replace(/</g, '\\u003c');
+    const safeEvents = JSON.stringify(events).replace(/</g, '\\u003c');
+    const center = location || { latitude: 20, longitude: 0 };
+    const zoom = location ? 14 : 2;
+    const selfMarker = location ? `L.marker([${location.latitude},${location.longitude}],{icon:L.divIcon({className:'',html:'<div class="self-pin"><span>▲</span><b>YOU</b></div>',iconSize:[58,36],iconAnchor:[29,18]})}).addTo(map);` : '';
+    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#050705}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}.driver-pin,.self-pin{display:flex;align-items:center;justify-content:center;background:rgba(4,7,5,.94);border:2px solid #f3f5f3;color:#91b985;font:900 12px monospace;border-radius:50%;box-shadow:0 0 16px rgba(145,185,133,.38)}.driver-pin{width:34px;height:34px}.driver-pin.mystery{border-style:dashed}.driver-pin.cruise{box-shadow:0 0 0 7px rgba(145,185,133,.12),0 0 18px rgba(145,185,133,.55)}.self-pin{width:58px;height:30px;border-radius:18px;background:#dbe7d8;color:#071007;gap:5px}.self-pin b{font-size:9px}.event-core{width:14px;height:14px;border-radius:50%;background:#91b985;border:2px solid #eaf0e8;box-shadow:0 0 20px #91b985}@keyframes eventPulse{0%{stroke-opacity:.68;fill-opacity:.18}50%{stroke-opacity:.18;fill-opacity:.04}100%{stroke-opacity:.68;fill-opacity:.18}}.event-zone{animation:eventPulse 2.4s ease-in-out infinite}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.22) brightness(.50)}' : '#map{filter:saturate(.48) contrast(1.18) brightness(.55)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([${center.latitude},${center.longitude}],${zoom});L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);${selfMarker}const drivers=${safeDrivers};drivers.forEach(d=>{const label=d.mystery?'?':d.alias.slice(0,1);const classes='driver-pin '+(d.mystery?'mystery ':'')+(d.cruiseId?'cruise':'');L.marker([d.latitude,d.longitude],{icon:L.divIcon({className:'',html:'<div class="'+classes+'">'+label+'</div>',iconSize:[38,38],iconAnchor:[19,19]})}).addTo(map).on('click',()=>parent.postMessage({source:'apex-radar',driverId:d.id},'*'));});const events=${safeEvents};events.forEach(e=>{L.circle([e.latitude,e.longitude],{radius:e.radiusM,color:'#91b985',weight:2,fillColor:'#91b985',fillOpacity:.12,className:'event-zone'}).addTo(map).bindTooltip(e.title);L.marker([e.latitude,e.longitude],{icon:L.divIcon({className:'',html:'<div class="event-core"></div>',iconSize:[18,18],iconAnchor:[9,9]})}).addTo(map);});</script></body></html>`;
     return (
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
@@ -314,7 +335,7 @@ function RadarMap({
           title: 'Apex Radar',
           style: { width: '100%', height: '100%', border: 0 },
         })}
-        <MapOverlays selected={selected} onSelect={onSelect} />
+        <RadarScanner />
       </View>
     );
   }
@@ -325,7 +346,7 @@ function RadarMap({
         style={StyleSheet.absoluteFill}
         mapType={mode === 'satellite' ? 'satellite' : 'standard'}
         customMapStyle={darkMapStyle}
-        region={{ ...location, latitudeDelta: 0.04, longitudeDelta: 0.04 }}
+        initialRegion={{ latitude: location?.latitude || 20, longitude: location?.longitude || 0, latitudeDelta: location ? 0.04 : 90, longitudeDelta: location ? 0.04 : 90 }}
         showsUserLocation
         showsMyLocationButton={false}
       >
@@ -336,22 +357,8 @@ function RadarMap({
             </View>
           </NativeMarker>
         ))}
+        {events.map(event => <NativeCircle key={event.id} center={{ latitude: event.latitude, longitude: event.longitude }} radius={event.radiusM} strokeColor="rgba(145,185,133,.75)" fillColor="rgba(145,185,133,.12)" />)}
       </NativeMap>
-    </View>
-  );
-}
-
-function MapOverlays({ selected, onSelect }: { selected: Driver | null; onSelect: (driver: Driver | null) => void }) {
-  const positions = [{ top: '29%', left: '64%' }, { top: '48%', left: '25%' }, { top: '65%', left: '72%' }];
-  return (
-    <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-      <RadarScanner />
-      <View style={styles.youPin}><Navigation size={13} color="#050705" fill="#050705" /><Text style={styles.youPinText}>YOU</Text></View>
-      {drivers.map((driver, index) => (
-        <Pressable key={driver.id} onPress={() => onSelect(driver)} style={[styles.driverPin, positions[index] as any, driver.mystery && styles.mysteryPin, selected?.id === driver.id && styles.driverPinSelected]}>
-          <Text style={[styles.driverPinText, driver.mystery && { color: paper }]}>{driver.mystery ? '?' : driver.alias.slice(0, 1)}</Text>
-        </Pressable>
-      ))}
     </View>
   );
 }
@@ -378,29 +385,21 @@ function RadarScanner() {
   );
 }
 
-function RadarScreen() {
+function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [selected, setSelected] = useState<Driver | null>(null);
   const [mode, setMode] = useState<'street' | 'satellite'>('street');
-  const [location, setLocation] = useState({ latitude: 34.045, longitude: -118.258 });
-  const [gpsLabel, setGpsLabel] = useState('LOCK ON');
   const [filter, setFilter] = useState<'drivers' | 'events' | 'crews'>('drivers');
-
-  const locate = async () => {
-    setGpsLabel('SCANNING');
-    const permission = await Location.requestForegroundPermissionsAsync();
-    if (permission.status !== 'granted') {
-      setGpsLabel('DENIED');
-      Alert.alert('Location permission required', 'Enable location to lock the radar onto your current position.');
-      return;
-    }
-    const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-    setLocation({ latitude: current.coords.latitude, longitude: current.coords.longitude });
-    setGpsLabel('LOCKED');
-  };
+  const { location, drivers: liveDrivers, events, cruises, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, lockLocation, startDrive, stopDrive, toggleUnit } = useLiveNetworkStore();
+  const drivers = liveDrivers.map((driver: LiveDriver): Driver => ({
+    id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record,
+    rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery,
+    latitude: driver.latitude, longitude: driver.longitude, speedKph: driver.speedKph, cruiseId: driver.cruiseId,
+  }));
+  useEffect(() => { if (!location) lockLocation(); }, []);
 
   return (
     <View style={styles.radarScreen}>
-      <RadarMap location={location} mode={mode} selected={selected} onSelect={setSelected} />
+      <RadarMap location={location} mode={mode} selected={selected} onSelect={setSelected} drivers={drivers} events={events} />
       <View style={styles.radarTopControls}>
         <View style={styles.segmentedControl}>
           {(['street', 'satellite'] as const).map(item => (
@@ -409,9 +408,9 @@ function RadarScreen() {
             </Pressable>
           ))}
         </View>
-        <Pressable onPress={locate} style={styles.locateButton}><Crosshair size={16} color={accent} /><Text style={styles.locateText}>{gpsLabel}</Text></Pressable>
+        <Pressable onPress={lockLocation} style={styles.locateButton}><Crosshair size={16} color={accent} /><Text style={styles.locateText}>{location ? 'GPS LOCKED' : 'LOCK ON'}</Text></Pressable>
       </View>
-      <View style={styles.networkPill}><View style={styles.liveDot} /><Text style={styles.networkPillText}>18 DRIVERS / 3 EVENTS</Text></View>
+      <View style={styles.networkPill}><View style={styles.liveDot} /><Text style={styles.networkPillText}>{drivers.length} DRIVERS / {events.length} EVENTS / {cruises.length} CRUISES</Text></View>
       <View style={styles.radarFilters}>
         {(['drivers', 'events', 'crews'] as const).map(item => (
           <Pressable key={item} onPress={() => setFilter(item)} style={[styles.radarFilter, filter === item && styles.radarFilterActive]}>
@@ -434,147 +433,169 @@ function RadarScreen() {
             <RankBadge rank={selected.rank} compact />
           </View>
           <View style={styles.sheetActions}>
-            <GlassButton label="CHALLENGE" icon={Swords} onPress={() => Alert.alert('Challenge staged', `${selected.alias} was added to a new race lobby.`)} active />
+            <GlassButton label="CHALLENGE" icon={Swords} onPress={() => onTab('race')} active />
             <GlassButton label="PROFILE" icon={UserRound} onPress={() => Alert.alert(selected.alias, selected.mystery ? 'This pilot is running in mystery mode.' : `${selected.car}\n${selected.record} career record`)} />
           </View>
         </GlassPanel>
       ) : (
         <GlassPanel style={styles.radarDock}>
           <Text style={styles.radarDockTitle}>RADAR ACTIVE</Text>
-          <View style={styles.radarReadout}><Text style={styles.radarDockMeta}>360° SWEEP / 2.4 MI</Text><Text style={styles.radarDockMeta}>{filter.toUpperCase()} CHANNEL</Text></View>
+          <View style={styles.radarReadout}><Text style={styles.radarDockMeta}>{networkStatus.replace('_', ' ').toUpperCase()}</Text><Text style={styles.radarDockMeta}>{filter.toUpperCase()} CHANNEL</Text></View>
+          {error ? <Text style={styles.networkError}>{error}</Text> : null}
+          <View style={styles.driveDock}>
+            <Pressable onPress={isDriving ? stopDrive : startDrive} style={[styles.driveEnter, isDriving && styles.driveEnterActive]}><Play size={16} color={isDriving ? accent : paper} /><Text style={styles.driveEnterText}>{isDriving ? 'END DRIVE' : 'ENTER DRIVE MODE'}</Text></Pressable>
+            {isDriving ? <Pressable onPress={toggleUnit} style={styles.unitButton}><Text style={styles.unitText}>{unit.toUpperCase()}</Text></Pressable> : null}
+          </View>
         </GlassPanel>
       )}
+      {isDriving ? <View pointerEvents="none" style={styles.driveHud}><Text style={styles.driveSpeed}>{Math.round(unit === 'mph' ? (location?.speedKph || 0) * .621371 : location?.speedKph || 0)}</Text><Text style={styles.driveUnit}>{unit.toUpperCase()}</Text><Text style={styles.driveMeta}>{distanceKm.toFixed(2)} KM · MAX {Math.round(maxSpeedKph * (unit === 'mph' ? .621371 : 1))}</Text></View> : null}
     </View>
   );
 }
 
-const feedPosts = [
-  { id: 'proof', alias: 'VOIDRUNNER', meta: 'VERIFIED 60–130 / 7.4 SEC', image: heroCar, caption: 'Clean pull. Closed course, dual GPS proof locked.', likes: 284 },
-  { id: 'meet', alias: 'NOVA', meta: 'MIDNIGHT ASSEMBLY / LOS ANGELES', image: commandHero, caption: 'Final location unlocks for confirmed pilots at 23:45.', likes: 119 },
-];
-
 function FeedScreen() {
-  const [liked, setLiked] = useState<string[]>(['proof']);
-  const [saved, setSaved] = useState<string[]>([]);
-  const [following, setFollowing] = useState<string[]>([]);
-  const [comments, setComments] = useState<Record<string, number>>({ proof: 18, meet: 7 });
-  const toggle = (id: string, values: string[], setter: (next: string[]) => void) => setter(values.includes(id) ? values.filter(value => value !== id) : [...values, id]);
+  const { posts, loading, error, userId, toggleLike, toggleSave, addComment, createPost, loadFeed } = useContentStore();
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [draftUri, setDraftUri] = useState<string | null>(null);
+  const [draftType, setDraftType] = useState<'photo' | 'video'>('photo');
+  const [caption, setCaption] = useState('');
+  const [commenting, setCommenting] = useState<string | null>(null);
+  const [comment, setComment] = useState('');
+
+  const pickMedia = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: .88, allowsEditing: false });
+    if (!result.canceled && result.assets[0]) {
+      setDraftUri(result.assets[0].uri);
+      setDraftType(result.assets[0].type === 'video' ? 'video' : 'photo');
+    }
+  };
+  const publish = async () => {
+    if (!draftUri) return;
+    if (await createPost(draftUri, caption, draftType)) {
+      setComposerOpen(false); setDraftUri(null); setCaption('');
+    }
+  };
   return (
-    <ScrollView contentContainerStyle={styles.feedContent} showsVerticalScrollIndicator={false}>
+    <ScrollView contentContainerStyle={styles.feedContent} showsVerticalScrollIndicator={false} decelerationRate="fast">
       <View style={styles.feedHeader}>
         <View><Text style={styles.eyebrow}>ENCRYPTED SOCIAL</Text><Text style={styles.feedTitle}>THE CURRENT</Text></View>
-        <GlassButton label="POST" icon={Plus} compact onPress={() => Alert.alert('New transmission', 'Camera, video, run proof, and build posts open from this composer.')} active />
+        <GlassButton label="POST" icon={Plus} compact onPress={() => setComposerOpen(value => !value)} active />
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyRail}>
-        {['YOU', 'VOID', 'NOVA', 'GHOST', 'R-34'].map((story, index) => <Pressable key={story} onPress={() => Alert.alert(`${story} / SIGNAL`, 'Story viewer opened.')} style={styles.storyItem}><View style={[styles.storyRing, index === 0 && styles.storyRingMuted]}><Text style={styles.storyInitial}>{index === 0 ? '+' : story.slice(0, 1)}</Text></View><Text style={styles.storyLabel}>{story}</Text></Pressable>)}
-      </ScrollView>
-      {feedPosts.map(post => {
-        const isLiked = liked.includes(post.id);
-        const isSaved = saved.includes(post.id);
-        return (
+      {composerOpen ? <GlassPanel style={styles.composerPanel} glow><Pressable onPress={pickMedia} style={styles.mediaPicker}>{draftUri ? <Image source={{ uri: draftUri }} style={styles.composerPreview} /> : <><Plus size={24} color={accent} /><Text style={styles.composerHint}>SELECT PHOTO OR VIDEO</Text></>}</Pressable><TextInput value={caption} onChangeText={setCaption} placeholder="Write a caption" placeholderTextColor={muted} style={styles.composerInput} multiline maxLength={1200} /><View style={styles.composerActions}><GlassButton label="CANCEL" icon={X} compact onPress={() => setComposerOpen(false)} /><GlassButton label={loading ? 'UPLOADING' : 'PUBLISH'} icon={Send} compact onPress={publish} active /></View></GlassPanel> : null}
+      {!userId ? <GlassPanel style={styles.emptyState}><LockKeyhole size={28} color={accent} /><Text style={styles.emptyTitle}>LIVE FEED REQUIRES SIGN-IN</Text><Text style={styles.emptyCopy}>Connect the Apex backend and sign in. No demonstration posts are injected.</Text></GlassPanel> : null}
+      {error ? <Pressable onPress={loadFeed} style={styles.inlineError}><Text style={styles.networkError}>{error}</Text><Text style={styles.sectionAction}>RETRY</Text></Pressable> : null}
+      {userId && !loading && posts.length === 0 ? <GlassPanel style={styles.emptyState}><Radio size={28} color={accent} /><Text style={styles.emptyTitle}>NO TRANSMISSIONS YET</Text><Text style={styles.emptyCopy}>Your feed will contain only posts uploaded by real pilots.</Text></GlassPanel> : null}
+      {posts.map(post => (
           <View key={post.id} style={styles.postCard}>
-            <View style={styles.postHeader}><View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0, 1)}</Text></View><View style={styles.commandCopy}><Text style={styles.postAlias}>{post.alias}</Text><Text style={styles.postMeta}>{post.meta}</Text></View><Pressable onPress={() => toggle(post.alias, following, setFollowing)} style={[styles.followButton, following.includes(post.alias) && styles.followButtonActive]}><Text style={styles.followText}>{following.includes(post.alias) ? 'FOLLOWING' : 'FOLLOW'}</Text></Pressable></View>
-            <Pressable onPress={() => Alert.alert('Proof playback', `${post.alias}'s verified race video opens full-screen.`)} style={styles.postMedia}><Image source={post.image} style={styles.postImage} /><LinearGradient colors={['transparent', 'rgba(1,2,1,.72)']} style={StyleSheet.absoluteFill} /><View style={styles.proofPill}><BadgeCheck size={13} color={accent} /><Text style={styles.proofText}>PROOF LOCKED</Text></View><View style={styles.playDisc}><Play size={22} color={paper} fill={paper} /></View></Pressable>
+            <View style={styles.postHeader}>{post.avatarUrl ? <Image source={{ uri: post.avatarUrl }} style={styles.postAvatar} /> : <View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0, 1)}</Text></View>}<View style={styles.commandCopy}><Text style={styles.postAlias}>{post.alias}</Text><Text style={styles.postMeta}>{new Date(post.createdAt).toLocaleString()}</Text></View></View>
+            <Pressable onPress={() => post.videoUrl && Linking.openURL(post.videoUrl)} style={styles.postMedia}><Image source={{ uri: post.mediaUrl }} style={styles.postImage} /><LinearGradient colors={['transparent', 'rgba(1,2,1,.38)']} style={StyleSheet.absoluteFill} />{post.videoUrl ? <View style={styles.playDisc}><Play size={22} color={paper} fill={paper} /></View> : null}</Pressable>
             <View style={styles.postActions}>
-              <View style={styles.postActionsLeft}><Pressable onPress={() => toggle(post.id, liked, setLiked)} style={styles.postAction}><Heart size={21} color={isLiked ? accent : paper} fill={isLiked ? accent : 'transparent'} /><Text style={styles.postActionText}>{post.likes + (isLiked ? 1 : 0)}</Text></Pressable><Pressable onPress={() => setComments(current => ({ ...current, [post.id]: (current[post.id] || 0) + 1 }))} style={styles.postAction}><MessageCircle size={21} color={paper} /><Text style={styles.postActionText}>{comments[post.id]}</Text></Pressable><Pressable onPress={() => Alert.alert('Transmission shared', 'Secure share link copied.')} style={styles.postAction}><Send size={20} color={paper} /></Pressable></View>
-              <Pressable onPress={() => toggle(post.id, saved, setSaved)} style={styles.postAction}><Bookmark size={21} color={isSaved ? accent : paper} fill={isSaved ? accent : 'transparent'} /></Pressable>
+              <View style={styles.postActionsLeft}><Pressable onPress={() => toggleLike(post.id)} style={styles.postAction}><Heart size={21} color={post.liked ? accent : paper} fill={post.liked ? accent : 'transparent'} /><Text style={styles.postActionText}>{post.likes}</Text></Pressable><Pressable onPress={() => setCommenting(commenting === post.id ? null : post.id)} style={styles.postAction}><MessageCircle size={21} color={paper} /><Text style={styles.postActionText}>{post.comments}</Text></Pressable><Pressable onPress={() => Linking.openURL(post.mediaUrl)} style={styles.postAction}><Send size={20} color={paper} /></Pressable></View>
+              <Pressable onPress={() => toggleSave(post.id)} style={styles.postAction}><Bookmark size={21} color={post.saved ? accent : paper} fill={post.saved ? accent : 'transparent'} /></Pressable>
             </View>
             <Text style={styles.postCaption}><Text style={styles.postAlias}>{post.alias} </Text>{post.caption}</Text>
+            {commenting === post.id ? <View style={styles.commentComposer}><TextInput value={comment} onChangeText={setComment} placeholder="Add a comment" placeholderTextColor={muted} style={styles.commentInput} maxLength={500} /><Pressable onPress={async () => { if (await addComment(post.id, comment)) { setComment(''); setCommenting(null); } }}><Send size={18} color={accent} /></Pressable></View> : null}
           </View>
-        );
-      })}
+      ))}
     </ScrollView>
   );
 }
 
-const products = [
-  { id: 'exhaust', name: 'VALVED TITANIUM CAT-BACK', category: 'EXHAUST', price: 4890, image: exhaustImage, seller: 'APEX VERIFIED', delivery: '2–4 DAYS' },
-  { id: 'intake', name: 'TWIN CARBON INTAKE SYSTEM', category: 'AIR / FUEL', price: 2195, image: intakeImage, seller: 'R35 PERFORMANCE', delivery: 'IN STOCK' },
-  { id: 'brakes', name: '6-PISTON TRACK BRAKE KIT', category: 'BRAKES', price: 6390, image: brakeImage, seller: 'MOTORSPORT DIRECT', delivery: '4–6 DAYS' },
-];
-
 function ShopScreen() {
-  const [car, setCar] = useState<'gtr' | 'm4'>('gtr');
-  const [category, setCategory] = useState('ALL');
+  const { vehicles, activeVehicleId, products, providers, loading, error, setActiveVehicle, searchParts } = useContentStore();
+  const [query, setQuery] = useState('performance parts');
   const [saved, setSaved] = useState<string[]>([]);
-  const [cart, setCart] = useState<string[]>([]);
-  const visible = car === 'gtr' ? products.filter(product => category === 'ALL' || product.category === category) : [];
+  const activeVehicle = vehicles.find(vehicle => vehicle.id === activeVehicleId);
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.shopHeader}><View><Text style={styles.eyebrow}>FITMENT-LOCKED MARKET</Text><Text style={styles.feedTitle}>PARTS VAULT</Text></View><Pressable onPress={() => Alert.alert('Cart', `${cart.length} confirmed-fit item${cart.length === 1 ? '' : 's'} staged.`)} style={styles.cartButton}><ShoppingBag size={19} color={paper} /><Text style={styles.cartCount}>{cart.length}</Text></Pressable></View>
-      <View style={styles.vehicleSelector}><Pressable onPress={() => setCar('gtr')} style={[styles.vehicleOption, car === 'gtr' && styles.vehicleOptionActive]}><CarFront size={17} color={car === 'gtr' ? accent : muted} /><View><Text style={styles.vehicleName}>NIGHTSHIFT</Text><Text style={styles.vehicleMeta}>2024 GT-R NISMO</Text></View>{car === 'gtr' ? <Check size={16} color={accent} /> : null}</Pressable><Pressable onPress={() => setCar('m4')} style={[styles.vehicleOption, car === 'm4' && styles.vehicleOptionActive]}><CarFront size={17} color={car === 'm4' ? accent : muted} /><View><Text style={styles.vehicleName}>BLACK ICE</Text><Text style={styles.vehicleMeta}>2020 BMW M4</Text></View>{car === 'm4' ? <Check size={16} color={accent} /> : null}</Pressable></View>
-      <View style={styles.fitmentBanner}><PackageCheck size={21} color={accent} /><View style={styles.commandCopy}><Text style={styles.commandTitle}>STRICT FITMENT ENABLED</Text><Text style={styles.commandMeta}>{car === 'gtr' ? '2024 · Nissan · GT-R Nismo · 3.8L TT · AWD' : 'VIN or trim confirmation required before results unlock'}</Text></View><ListFilter size={17} color={muted} /></View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRail}>{['ALL', 'EXHAUST', 'AIR / FUEL', 'BRAKES'].map(item => <Pressable key={item} onPress={() => setCategory(item)} style={[styles.categoryChip, category === item && styles.categoryChipActive]}><Text style={[styles.categoryText, category === item && styles.categoryTextActive]}>{item}</Text></Pressable>)}</ScrollView>
-      {visible.length ? visible.map(product => <View key={product.id} style={styles.productCard}><Image source={product.image} style={styles.productImage} /><View style={styles.productBody}><View style={styles.confirmedFit}><BadgeCheck size={13} color={accent} /><Text style={styles.confirmedFitText}>CONFIRMED FIT / NIGHTSHIFT</Text></View><Text style={styles.productName}>{product.name}</Text><Text style={styles.productMeta}>{product.seller} · {product.delivery}</Text><View style={styles.productBottom}><Text style={styles.productPrice}>${product.price.toLocaleString()}</Text><View style={styles.productActions}><Pressable onPress={() => setSaved(current => current.includes(product.id) ? current.filter(id => id !== product.id) : [...current, product.id])} style={styles.productIconButton}><Bookmark size={18} color={saved.includes(product.id) ? accent : paper} fill={saved.includes(product.id) ? accent : 'transparent'} /></Pressable><Pressable onPress={() => setCart(current => current.includes(product.id) ? current : [...current, product.id])} style={[styles.addToCart, cart.includes(product.id) && styles.addToCartDone]}>{cart.includes(product.id) ? <Check size={17} color={accent} /> : <Plus size={17} color={paper} />}<Text style={styles.addToCartText}>{cart.includes(product.id) ? 'STAGED' : 'ADD'}</Text></Pressable></View></View></View></View>) : <GlassPanel style={styles.emptyFitment}><ScanLine size={34} color={accent} /><Text style={styles.emptyTitle}>FITMENT ID REQUIRED</Text><Text style={styles.emptyCopy}>Confirm the M4 trim and engine in Garage before the marketplace reveals compatible parts.</Text><GlassButton label="OPEN GARAGE" icon={CarFront} onPress={() => Alert.alert('Garage', 'Vehicle fitment editor opened.')} active /></GlassPanel>}
+      <View style={styles.shopHeader}><View><Text style={styles.eyebrow}>LIVE PROVIDER MARKET</Text><Text style={styles.feedTitle}>PARTS VAULT</Text></View><ShoppingBag size={23} color={paper} /></View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.vehicleSelector}>{vehicles.map(vehicle => <Pressable key={vehicle.id} onPress={() => setActiveVehicle(vehicle.id)} style={[styles.vehicleOption, vehicle.id === activeVehicleId && styles.vehicleOptionActive]}><CarFront size={17} color={vehicle.id === activeVehicleId ? accent : muted} /><View><Text style={styles.vehicleName}>{vehicle.nickname.toUpperCase()}</Text><Text style={styles.vehicleMeta}>{vehicle.year} {vehicle.make} {vehicle.model}</Text></View>{vehicle.id === activeVehicleId ? <Check size={16} color={accent} /> : null}</Pressable>)}</ScrollView>
+      <View style={styles.fitmentBanner}><PackageCheck size={21} color={accent} /><View style={styles.commandCopy}><Text style={styles.commandTitle}>{activeVehicle ? 'STRICT FITMENT ENABLED' : 'VEHICLE REQUIRED'}</Text><Text style={styles.commandMeta}>{activeVehicle ? `${activeVehicle.year} · ${activeVehicle.make} · ${activeVehicle.model} · ${activeVehicle.trim || 'TRIM NOT SET'} · ${activeVehicle.engine}` : 'Add a complete vehicle profile before searching inventory.'}</Text></View><ListFilter size={17} color={muted} /></View>
+      <View style={styles.partsSearch}><TextInput value={query} onChangeText={setQuery} onSubmitEditing={() => searchParts(query)} placeholder="Exhaust, brakes, intake..." placeholderTextColor={muted} style={styles.partsSearchInput} /><Pressable onPress={() => searchParts(query)} style={styles.partsSearchButton}><ScanLine size={19} color={accent} /></Pressable></View>
+      {providers.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.providerRail}>{providers.map(provider => <Pressable key={provider.name} onPress={() => provider.url && Linking.openURL(provider.url)} style={styles.providerChip}><View style={[styles.providerDot, provider.mode === 'live' && styles.providerDotLive]} /><Text style={styles.providerName}>{provider.name.toUpperCase()}</Text><Text style={styles.providerMode}>{provider.mode.replace('_', ' ').toUpperCase()}</Text></Pressable>)}</ScrollView> : null}
+      {loading ? <GlassPanel style={styles.emptyState}><Activity size={26} color={accent} /><Text style={styles.emptyTitle}>QUERYING PROVIDERS</Text></GlassPanel> : null}
+      {error ? <View style={styles.inlineError}><Text style={styles.networkError}>{error}</Text></View> : null}
+      {!loading && !error && products.length === 0 ? <GlassPanel style={styles.emptyFitment}><ScanLine size={34} color={accent} /><Text style={styles.emptyTitle}>SEARCH LIVE INVENTORY</Text><Text style={styles.emptyCopy}>Results are returned directly by configured providers. No catalog samples or generated products are shown.</Text></GlassPanel> : null}
+      {products.map(product => <View key={product.id} style={styles.productCard}>{product.imageUrl ? <Image source={{ uri: product.imageUrl }} style={styles.productImage} /> : <View style={[styles.productImage, styles.productImageMissing]}><ShoppingBag size={30} color={muted} /></View>}<View style={styles.productBody}><View style={styles.confirmedFit}><BadgeCheck size={13} color={accent} /><Text style={styles.confirmedFitText}>{product.compatibility.replace('_', ' ')} / {product.provider.toUpperCase()}</Text></View><Text style={styles.productName}>{product.title}</Text><Text style={styles.productMeta}>{product.seller || 'SELLER'} · {product.condition || 'CONDITION N/A'}{product.shipping ? ` · ${product.shipping}` : ''}</Text><View style={styles.productBottom}><Text style={styles.productPrice}>{product.currency} {product.price.toLocaleString()}</Text><View style={styles.productActions}><Pressable onPress={() => setSaved(current => current.includes(product.id) ? current.filter(id => id !== product.id) : [...current, product.id])} style={styles.productIconButton}><Bookmark size={18} color={saved.includes(product.id) ? accent : paper} fill={saved.includes(product.id) ? accent : 'transparent'} /></Pressable><Pressable onPress={() => Linking.openURL(product.purchaseUrl)} style={styles.addToCart}><ShoppingBag size={17} color={paper} /><Text style={styles.addToCartText}>VIEW</Text></Pressable></View></View></View></View>)}
     </ScrollView>
   );
 }
 
 function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
+  const networkStatus = useLiveNetworkStore(state => state.networkStatus);
+  const location = useLiveNetworkStore(state => state.location);
+  const userId = useContentStore(state => state.userId);
   const modules: { tab: TabKey; label: string; meta: string; icon: IconType }[] = [
     { tab: 'race', label: 'RACE CONTROL', meta: 'Stage, track, spectate', icon: Swords }, { tab: 'meets', label: 'MEETS', meta: 'Routes and live locations', icon: MapPin },
     { tab: 'shop', label: 'PARTS VAULT', meta: 'Verified vehicle fitment', icon: ShoppingBag }, { tab: 'leaderboard', label: 'RANKINGS', meta: 'Season tiers and records', icon: Trophy },
     { tab: 'messages', label: 'COMMS', meta: 'Groups and direct messages', icon: MessagesSquare }, { tab: 'vault', label: 'CREDITS', meta: 'Rewards, wagers, badges', icon: WalletCards },
   ];
-  return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.moreHeader}><Text style={styles.eyebrow}>PILOT SYSTEMS</Text><Text style={styles.feedTitle}>ACCESS GRID</Text><Text style={styles.moreCopy}>All network tools. One encrypted identity.</Text></View><View style={styles.moduleGrid}>{modules.map(module => { const Icon = module.icon; return <Pressable key={module.tab} onPress={() => onTab(module.tab)} style={({ pressed }) => [styles.moduleCard, pressed && styles.pressed]}><View style={styles.moduleIcon}><Icon size={23} color={accent} /></View><Text style={styles.moduleTitle}>{module.label}</Text><Text style={styles.moduleMeta}>{module.meta}</Text><ChevronRight size={17} color={muted} style={styles.moduleChevron} /></Pressable>; })}</View><SectionTitle label="NETWORK HEALTH" /><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>GPS PROOF</Text><Text style={styles.healthGood}>OPERATIONAL</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>ENCRYPTED COMMS</Text><Text style={styles.healthGood}>OPERATIONAL</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>FITMENT INDEX</Text><Text style={styles.healthGood}>SYNCED</Text></View></GlassPanel></ScrollView>;
+  return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.moreHeader}><Text style={styles.eyebrow}>PILOT SYSTEMS</Text><Text style={styles.feedTitle}>ACCESS GRID</Text><Text style={styles.moreCopy}>All network tools. One encrypted identity.</Text></View><View style={styles.moduleGrid}>{modules.map(module => { const Icon = module.icon; return <Pressable key={module.tab} onPress={() => onTab(module.tab)} style={({ pressed }) => [styles.moduleCard, pressed && styles.pressed]}><View style={styles.moduleIcon}><Icon size={23} color={accent} /></View><Text style={styles.moduleTitle}>{module.label}</Text><Text style={styles.moduleMeta}>{module.meta}</Text><ChevronRight size={17} color={muted} style={styles.moduleChevron} /></Pressable>; })}</View><SectionTitle label="NETWORK HEALTH" /><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>GPS PROOF</Text><Text style={location ? styles.healthGood : styles.healthOffline}>{location ? 'LOCKED' : 'NOT GRANTED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>ENCRYPTED COMMS</Text><Text style={userId ? styles.healthGood : styles.healthOffline}>{userId ? 'LIVE' : 'SIGN IN REQUIRED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>LIVE NETWORK</Text><Text style={networkStatus === 'live' ? styles.healthGood : styles.healthOffline}>{networkStatus.replace('_', ' ').toUpperCase()}</Text></View></GlassPanel></ScrollView>;
 }
 
 function UtilityScreen({ kind }: { kind: 'meets' | 'messages' | 'leaderboard' }) {
-  const config = kind === 'meets' ? { title: 'MEET CONTROL', icon: CalendarDays, rows: ['MIDNIGHT ASSEMBLY / 42 LOCKED', 'CANYON SIGNAL / 18 INTERESTED', 'HARBOR GRID / LOCATION HIDDEN'] } : kind === 'messages' ? { title: 'SECURE COMMS', icon: MessagesSquare, rows: ['NIGHTSHIFT CREW / 4 UNREAD', 'VOIDRUNNER / PROOF RECEIVED', 'MIDNIGHT ASSEMBLY / LOCATION UPDATE'] } : { title: 'SEASON RANKINGS', icon: Trophy, rows: ['#01 / VANTA / PLATINUM / 52–4', '#02 / VOIDRUNNER / MASTER / 48–7', '#18 / CIPHER_24 / MASTER / 31–9'] };
-  const Icon = config.icon;
-  return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.utilityHero}><Icon size={28} color={accent} /><Text style={styles.feedTitle}>{config.title}</Text></View>{config.rows.map((row, index) => <Pressable key={row} onPress={() => Alert.alert(config.title, row)} style={styles.utilityRow}><Text style={styles.utilityIndex}>{String(index + 1).padStart(2, '0')}</Text><Text style={styles.utilityText}>{row}</Text><ChevronRight size={17} color={muted} /></Pressable>)}</ScrollView>;
+  const rankings = useContentStore(state => state.rankings);
+  const events = useLiveNetworkStore(state => state.events);
+  const userId = useContentStore(state => state.userId);
+  const { conversations, messagesMap, fetchMessages, sendMessage, subscribeToConversation, unsubscribeFromConversation } = useMessageStore();
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [messageDraft, setMessageDraft] = useState('');
+  const title = kind === 'meets' ? 'MEET CONTROL' : kind === 'messages' ? 'SECURE COMMS' : 'SEASON RANKINGS';
+  const Icon = kind === 'meets' ? CalendarDays : kind === 'messages' ? MessagesSquare : Trophy;
+  if (kind === 'leaderboard') return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.utilityHero}><Icon size={28} color={accent} /><Text style={styles.feedTitle}>{title}</Text></View>{rankings.map((row, index) => <View key={row.id} style={styles.utilityRow}><Text style={styles.utilityIndex}>{String(index + 1).padStart(2, '0')}</Text><View style={styles.commandCopy}><Text style={styles.utilityText}>{row.alias.toUpperCase()} / {row.tier.toUpperCase()}</Text><Text style={styles.commandMeta}>{row.wins} WINS · {row.entered} RUNS · {row.points} RP · {Math.round(row.topSpeed)} MPH</Text></View></View>)}{rankings.length === 0 ? <GlassPanel style={styles.emptyState}><Trophy size={28} color={accent} /><Text style={styles.emptyTitle}>NO RANKED PILOTS YET</Text><Text style={styles.emptyCopy}>Verified race results will populate this leaderboard.</Text></GlassPanel> : null}</ScrollView>;
+  if (kind === 'meets') return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.utilityHero}><Icon size={28} color={accent} /><Text style={styles.feedTitle}>{title}</Text></View>{events.map((event, index) => <View key={event.id} style={styles.utilityRow}><Text style={styles.utilityIndex}>{String(index + 1).padStart(2, '0')}</Text><View style={styles.commandCopy}><Text style={styles.utilityText}>{event.title.toUpperCase()}</Text><Text style={styles.commandMeta}>{event.locationName} · {event.attendees} RSVP · {new Date(event.startTime).toLocaleString()}</Text></View></View>)}{events.length === 0 ? <GlassPanel style={styles.emptyState}><MapPin size={28} color={accent} /><Text style={styles.emptyTitle}>NO LIVE EVENTS</Text></GlassPanel> : null}</ScrollView>;
+  if (conversationId) {
+    const messages = messagesMap[conversationId] || [];
+    return <View style={styles.messageScreen}><View style={styles.messageHeader}><Pressable onPress={() => { unsubscribeFromConversation(conversationId); setConversationId(null); }}><X size={20} color={paper} /></Pressable><Text style={styles.utilityText}>SECURE CHANNEL</Text></View><ScrollView contentContainerStyle={styles.messageList}>{messages.map(message => <View key={message.id} style={[styles.messageBubble, message.sender_id === userId && styles.messageBubbleOwn]}><Text style={styles.messageText}>{message.content}</Text><Text style={styles.messageTime}>{new Date(message.created_at).toLocaleTimeString()}</Text></View>)}</ScrollView><View style={styles.messageComposer}><TextInput value={messageDraft} onChangeText={setMessageDraft} placeholder="Encrypted message" placeholderTextColor={muted} style={styles.commentInput} /><Pressable onPress={async () => { if (!userId || !messageDraft.trim()) return; const result = await sendMessage(conversationId, userId, messageDraft.trim()); if (!result.error) setMessageDraft(''); }}><Send size={19} color={accent} /></Pressable></View></View>;
+  }
+  return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.utilityHero}><Icon size={28} color={accent} /><Text style={styles.feedTitle}>{title}</Text></View>{conversations.map(conversation => <Pressable key={conversation.id} onPress={async () => { await fetchMessages(conversation.id); subscribeToConversation(conversation.id); setConversationId(conversation.id); }} style={styles.utilityRow}><View style={styles.commandCopy}><Text style={styles.utilityText}>{(conversation.group_name || conversation.other_profile?.username || 'SECURE CHANNEL').toUpperCase()}</Text><Text style={styles.commandMeta}>{conversation.last_message || 'No messages yet'}</Text></View><ChevronRight size={17} color={muted} /></Pressable>)}{conversations.length === 0 ? <GlassPanel style={styles.emptyState}><MessagesSquare size={28} color={accent} /><Text style={styles.emptyTitle}>NO CONVERSATIONS</Text><Text style={styles.emptyCopy}>Challenge or follow a real pilot to start a secure channel.</Text></GlassPanel> : null}</ScrollView>;
 }
 
 function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
-  const [carIndex, setCarIndex] = useState(0);
-  const cars = [
-    { name: 'NIGHTSHIFT', model: '2024 Nissan GT-R Nismo', hp: '710', drive: 'AWD', fit: '38' },
-    { name: 'BLACK ICE', model: '2020 BMW M4 Competition', hp: '503', drive: 'RWD', fit: '64' },
-  ];
-  const car = cars[carIndex];
+  const { vehicles, activeVehicleId, setActiveVehicle } = useContentStore();
+  const car = vehicles.find(vehicle => vehicle.id === activeVehicleId);
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
       <View style={styles.garageSwitcher}>
-        {cars.map((item, index) => (
-          <Pressable key={item.name} onPress={() => setCarIndex(index)} style={[styles.carChip, carIndex === index && styles.carChipActive]}>
-            <CarFront size={15} color={carIndex === index ? accent : paper} />
-            <Text style={[styles.carChipText, carIndex === index && styles.carChipTextActive]}>{item.name}</Text>
+        {vehicles.map(item => (
+          <Pressable key={item.id} onPress={() => setActiveVehicle(item.id)} style={[styles.carChip, activeVehicleId === item.id && styles.carChipActive]}>
+            <CarFront size={15} color={activeVehicleId === item.id ? accent : paper} />
+            <Text style={[styles.carChipText, activeVehicleId === item.id && styles.carChipTextActive]}>{item.nickname.toUpperCase()}</Text>
           </Pressable>
         ))}
-        <Pressable style={styles.addCarButton}><Plus size={18} color={accent} /></Pressable>
       </View>
-
-      <View style={styles.garageHero}>
-        <Image source={heroCar} style={styles.garageImage} />
+      {!car ? <GlassPanel style={styles.emptyState}><CarFront size={30} color={accent} /><Text style={styles.emptyTitle}>ADD YOUR FIRST VEHICLE</Text><Text style={styles.emptyCopy}>Your garage will use only vehicles and photos you upload. No default car is substituted.</Text></GlassPanel> : <>
+      <View style={styles.garageHero}>{car.photoUrl ? <Image source={{ uri: car.photoUrl }} style={styles.garageImage} /> : <View style={[styles.garageImage, styles.productImageMissing]}><CarFront size={54} color={muted} /></View>}
         <LinearGradient colors={['transparent', 'rgba(2,3,2,0.95)']} style={StyleSheet.absoluteFill} />
         <View style={styles.garageHeroCopy}>
-          <View><Text style={styles.eyebrow}>PRIMARY BUILD</Text><Text style={styles.garageName}>{car.name}</Text><Text style={styles.garageModel}>{car.model}</Text></View>
+          <View><Text style={styles.eyebrow}>ACTIVE BUILD</Text><Text style={styles.garageName}>{car.nickname.toUpperCase()}</Text><Text style={styles.garageModel}>{car.year} {car.make} {car.model} {car.trim || ''}</Text></View>
           <BadgeCheck size={28} color={accent} fill="rgba(145,185,133,.12)" />
         </View>
       </View>
 
       <View style={styles.specGrid}>
-        <SpecCell value={car.hp} label="HORSEPOWER" />
-        <SpecCell value={car.drive} label="DRIVETRAIN" />
-        <SpecCell value="6" label="MODS" />
-        <SpecCell value="MASTER" label="CLASS" accentValue />
+        <SpecCell value={String(car.horsepower)} label="HORSEPOWER" />
+        <SpecCell value={car.drivetrain} label="DRIVETRAIN" />
+        <SpecCell value={car.engine} label="ENGINE" />
+        <SpecCell value={car.trim || 'BASE'} label="TRIM" accentValue />
       </View>
 
       <SectionTitle label="BUILD IDENTITY" action="EDIT" />
       <GlassPanel>
-        <View style={styles.identityRow}><Text style={styles.identityLabel}>COLOR</Text><Text style={styles.identityValue}>MIDNIGHT OBSIDIAN</Text></View>
+        <View style={styles.identityRow}><Text style={styles.identityLabel}>COLOR</Text><Text style={styles.identityValue}>{car.color.toUpperCase()}</Text></View>
         <View style={styles.identityDivider} />
-        <View style={styles.identityRow}><Text style={styles.identityLabel}>ENGINE</Text><Text style={styles.identityValue}>3.8L TWIN-TURBO V6</Text></View>
+        <View style={styles.identityRow}><Text style={styles.identityLabel}>ENGINE</Text><Text style={styles.identityValue}>{car.engine.toUpperCase()}</Text></View>
         <View style={styles.identityDivider} />
         <View style={styles.identityRow}><Text style={styles.identityLabel}>VISIBILITY</Text><Text style={styles.identityValue}>PUBLIC SPECS</Text></View>
       </GlassPanel>
 
-      <SectionTitle label="FITMENT VAULT" action={`${car.fit} MATCHES`} />
+      <SectionTitle label="FITMENT VAULT" action="LIVE SEARCH" />
       <Pressable onPress={() => onTab('shop')} style={({ pressed }) => [styles.fitmentCard, pressed && styles.pressed]}>
         <View style={styles.fitmentIcon}><ScanLine size={24} color={accent} /></View>
         <View style={styles.commandCopy}><Text style={styles.commandTitle}>PARTS FOR THIS BUILD</Text><Text style={styles.commandMeta}>Year · trim · engine · drivetrain verified</Text></View>
         <ChevronRight size={18} color={accent} />
       </Pressable>
+      </>}
     </ScrollView>
   );
 }
@@ -586,13 +607,17 @@ function SpecCell({ value, label, accentValue = false }: { value: string; label:
 function RaceScreen() {
   const formats = ['0–60', '60–130', '45 SEC', 'TOP SPEED'];
   const [format, setFormat] = useState(formats[1]);
-  const [opponents, setOpponents] = useState<string[]>(['void']);
+  const [opponents, setOpponents] = useState<string[]>([]);
   const [wager, setWager] = useState(500);
   const [tracking, setTracking] = useState(false);
   const [speed, setSpeed] = useState(0);
   const [maxSpeed, setMaxSpeed] = useState(0);
   const [gpsStatus, setGpsStatus] = useState('GPS STANDBY');
+  const [schedule, setSchedule] = useState<'now' | 'later'>('now');
+  const [contractStatus, setContractStatus] = useState('STAGE CONTRACT');
   const subscription = useRef<Location.LocationSubscription | null>(null);
+  const liveDrivers = useLiveNetworkStore(state => state.drivers);
+  const drivers: Driver[] = liveDrivers.map(driver => ({ id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record, rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery, latitude: driver.latitude, longitude: driver.longitude }));
 
   useEffect(() => () => subscription.current?.remove(), []);
 
@@ -628,6 +653,23 @@ function RaceScreen() {
     );
   };
 
+  const stageContract = async () => {
+    if (!useContentStore.getState().userId) { setContractStatus('SIGN IN REQUIRED'); return; }
+    if (opponents.length === 0) { setContractStatus('SELECT OPPONENTS'); return; }
+    setContractStatus('ENCRYPTING');
+    const type = format === '0–60' ? 'Drag Race' : format === 'TOP SPEED' ? 'Time Attack' : 'Roll Race';
+    const { data, error } = await supabase.rpc('create_race_contract', {
+      p_opponent_ids: opponents.map(id => liveDrivers.find(driver => driver.id === id)?.userId).filter(Boolean),
+      p_race_type: type,
+      p_route_name: format,
+      p_distance_miles: format === '0–60' ? .25 : .5,
+      p_rules: `${format} GPS-verified run`,
+      p_starts_at: new Date(Date.now() + (schedule === 'later' ? 3600000 : 0)).toISOString(),
+      p_wager_credits: wager,
+    });
+    setContractStatus(error ? error.message.toUpperCase().slice(0, 32) : `CONTRACT ${String(data).slice(0, 8).toUpperCase()}`);
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
       <View style={styles.raceHeader}>
@@ -644,6 +686,8 @@ function RaceScreen() {
           </Pressable>
         ))}
       </View>
+      <SectionTitle label="START" />
+      <View style={styles.segmentedControl}>{(['now', 'later'] as const).map(item => <Pressable key={item} onPress={() => setSchedule(item)} style={[styles.segment, schedule === item && styles.segmentActive]}><Text style={[styles.segmentText, schedule === item && styles.segmentTextActive]}>{item === 'now' ? 'RACE NOW' : 'SCHEDULE +1H'}</Text></Pressable>)}</View>
 
       <SectionTitle label="OPPONENTS" action={`${opponents.length} SELECTED`} />
       {drivers.map(driver => (
@@ -675,54 +719,27 @@ function RaceScreen() {
           <Text style={[styles.startRunText, tracking && { color: paper }]}>{tracking ? 'END GPS RUN' : 'START GPS RUN'}</Text>
         </Pressable>
       </GlassPanel>
+      <GlassButton label={contractStatus} icon={LockKeyhole} onPress={stageContract} active />
     </ScrollView>
   );
 }
 
-function VaultScreen({ credits, onClaim }: { credits: number; onClaim: () => void }) {
-  const [claimed, setClaimed] = useState(false);
-  const claim = () => {
-    if (claimed) return;
-    setClaimed(true);
-    onClaim();
-  };
+function VaultScreen() {
+  const profile = useContentStore(state => state.profile);
+  const balance = profile?.credits || 0;
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
       <LinearGradient colors={['rgba(145,185,133,.15)', 'rgba(9,12,10,.94)', 'rgba(2,3,2,.98)']} style={styles.vaultCard}>
         <View style={styles.vaultTop}><Text style={styles.eyebrow}>ENCRYPTED BALANCE</Text><ShieldCheck size={20} color={accent} /></View>
-        <CreditsToken value={credits} />
+        <CreditsToken value={balance} />
         <View style={styles.vaultCodeRow}><Text style={styles.vaultCode}>AC / 88–021–UGR</Text><Text style={styles.vaultCode}>PILOT VERIFIED</Text></View>
       </LinearGradient>
 
-      <View style={styles.vaultActions}>
-        <GlassButton label="ADD" icon={Plus} onPress={() => Alert.alert('Preview only', 'Credit purchases will be connected after design approval.')} active />
-        <GlassButton label="SEND" icon={Navigation} onPress={() => Alert.alert('Send credits', 'Select a pilot from Radar to open a transfer.')} />
-        <GlassButton label="HISTORY" icon={Activity} onPress={() => Alert.alert('Ledger verified', 'All virtual credit movements are visible below.')} />
-      </View>
-
-      <SectionTitle label="REWARD DROP" />
-      <Pressable onPress={claim} style={({ pressed }) => [styles.rewardDrop, claimed && styles.rewardDropClaimed, pressed && styles.pressed]}>
-        <View style={styles.dropIcon}>{claimed ? <BadgeCheck size={25} color={accent} /> : <Gift size={25} color={paper} />}</View>
-        <View style={styles.commandCopy}><Text style={styles.commandTitle}>{claimed ? 'DROP CLAIMED' : 'DAILY SIGNAL DROP'}</Text><Text style={styles.commandMeta}>{claimed ? '+250 AC added to encrypted balance' : 'Encrypted reward · expires in 04:18:22'}</Text></View>
-        <Text style={styles.dropValue}>{claimed ? 'LOCKED' : '+250'}</Text>
-      </Pressable>
-
-      <SectionTitle label="BADGE VAULT" action="8 / 24" />
+      <SectionTitle label="BADGE VAULT" action={profile ? 'LIVE RECORD' : 'OFFLINE'} />
       <View style={styles.badgeGrid}>
-        <VaultBadge icon={Medal} title="MASTER" subtitle="CURRENT TIER" />
-        <VaultBadge icon={Zap} title="QUICKDRAW" subtitle="0–60 PROOF" />
-        <VaultBadge icon={Gem} title="CLEAN STREAK" subtitle="10 VERIFIED" />
-        <VaultBadge icon={Sparkles} title="FOUNDER" subtitle="SEASON 01" locked />
+        {profile ? <VaultBadge icon={Medal} title={profile.tier.toUpperCase()} subtitle="CURRENT TIER" /> : null}
       </View>
-
-      <SectionTitle label="LEDGER" />
-      <GlassPanel>
-        <LedgerRow icon={Trophy} title="Race payout" meta="VOIDRUNNER · 60–130" value="+1,000" />
-        <View style={styles.identityDivider} />
-        <LedgerRow icon={Users} title="Spectator wager" meta="MIDNIGHT ASSEMBLY" value="−250" />
-        <View style={styles.identityDivider} />
-        <LedgerRow icon={Gift} title="Season reward" meta="MASTER TIER" value="+750" />
-      </GlassPanel>
+      {!profile ? <GlassPanel style={styles.emptyState}><LockKeyhole size={28} color={accent} /><Text style={styles.emptyTitle}>SIGN IN TO OPEN THE VAULT</Text></GlassPanel> : null}
     </ScrollView>
   );
 }
@@ -749,53 +766,89 @@ function LedgerRow({ icon: Icon, title, meta, value }: { icon: IconType; title: 
 }
 
 function NotificationCenter({ onClose, onOpen }: { onClose: () => void; onOpen: (tab: TabKey) => void }) {
-  const [unread, setUnread] = useState(['race', 'meet']);
-  const notices = [
-    { id: 'race', title: 'CHALLENGE ACCEPTED', meta: 'VOIDRUNNER locked the 60–130 contract', tab: 'race' as TabKey, icon: Swords },
-    { id: 'meet', title: 'LOCATION WINDOW OPEN', meta: 'Midnight Assembly released checkpoint one', tab: 'meets' as TabKey, icon: MapPin },
-    { id: 'reward', title: 'BADGE PROGRESS', meta: '2 verified runs until Quickdraw II', tab: 'vault' as TabKey, icon: Medal },
-  ];
+  const { notifications, markAsRead, markAllAsRead } = useNotificationStore();
+  const userId = useContentStore(state => state.userId);
+  const routeFor = (type: string): TabKey => type === 'race_challenge' || type === 'dispute' || type === 'wager_won' ? 'race' : type === 'meet_rsvp' ? 'meets' : type === 'comment' || type === 'like' || type === 'new_follower' ? 'feed' : 'command';
+  const iconFor = (type: string) => type === 'race_challenge' ? Swords : type === 'meet_rsvp' ? MapPin : type === 'comment' ? MessageCircle : Bell;
   return (
     <View style={styles.notificationOverlay}>
       <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
       <GlassPanel style={styles.notificationPanel} glow>
         <View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>SECURE INBOX</Text><Text style={styles.notificationTitle}>NOTIFICATIONS</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>
-        <Pressable onPress={() => setUnread([])}><Text style={styles.markRead}>MARK ALL READ</Text></Pressable>
-        {notices.map(notice => { const Icon = notice.icon; const fresh = unread.includes(notice.id); return <Pressable key={notice.id} onPress={() => { setUnread(current => current.filter(id => id !== notice.id)); onClose(); onOpen(notice.tab); }} style={styles.notificationRow}><View style={styles.notificationIcon}><Icon size={17} color={fresh ? accent : muted} /></View><View style={styles.commandCopy}><Text style={styles.notificationRowTitle}>{notice.title}</Text><Text style={styles.notificationMeta}>{notice.meta}</Text></View>{fresh ? <View style={styles.unreadDot} /> : null}</Pressable>; })}
+        <Pressable onPress={() => userId && markAllAsRead(userId)}><Text style={styles.markRead}>MARK ALL READ</Text></Pressable>
+        {notifications.map(notice => { const Icon = iconFor(notice.type); return <Pressable key={notice.id} onPress={async () => { if (!notice.read) await markAsRead(notice.id); onClose(); onOpen(routeFor(notice.type)); }} style={styles.notificationRow}><View style={styles.notificationIcon}><Icon size={17} color={!notice.read ? accent : muted} /></View><View style={styles.commandCopy}><Text style={styles.notificationRowTitle}>{notice.title}</Text><Text style={styles.notificationMeta}>{notice.body}</Text></View>{!notice.read ? <View style={styles.unreadDot} /> : null}</Pressable>; })}
+        {notifications.length === 0 ? <View style={styles.emptyNotification}><Bell size={23} color={muted} /><Text style={styles.emptyCopy}>No notifications.</Text></View> : null}
       </GlassPanel>
     </View>
   );
 }
 
+function AuthPanel({ onClose }: { onClose: () => void }) {
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [status, setStatus] = useState('');
+  const submit = async () => {
+    if (!hasLiveBackend) { setStatus('APEX BACKEND HAS NOT BEEN PROVISIONED'); return; }
+    setStatus('CONNECTING');
+    const result = mode === 'signin'
+      ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
+      : await supabase.auth.signUp({ email: email.trim(), password, options: { data: { username: email.split('@')[0] } } });
+    if (result.error) { setStatus(result.error.message.toUpperCase()); return; }
+    if (!result.data.session) { setStatus('CHECK EMAIL TO CONFIRM YOUR ACCOUNT'); return; }
+    await Promise.all([useContentStore.getState().initialize(), useLiveNetworkStore.getState().initialize()]);
+    onClose();
+  };
+  return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill} /><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{mode === 'signin' ? 'ENTER NETWORK' : 'CREATE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>{hasLiveBackend ? <><TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={muted} style={styles.authInput} /><TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="Password" placeholderTextColor={muted} style={styles.authInput} onSubmitEditing={submit} /><GlassButton label={mode === 'signin' ? 'SIGN IN' : 'CREATE ACCOUNT'} icon={LockKeyhole} onPress={submit} active /><Pressable onPress={() => setMode(value => value === 'signin' ? 'signup' : 'signin')}><Text style={styles.authSwitch}>{mode === 'signin' ? 'NEW PILOT / CREATE ACCOUNT' : 'EXISTING PILOT / SIGN IN'}</Text></Pressable></> : <View style={styles.emptyNotification}><Radio size={26} color={accent} /><Text style={styles.emptyTitle}>BACKEND CONNECTION REQUIRED</Text><Text style={styles.emptyCopy}>The app will not invent an account or local network data.</Text></View>}{status ? <Text style={styles.networkError}>{status}</Text> : null}</GlassPanel></View>;
+}
+
 export function ApexDesignPreview() {
   const [tab, setTab] = useState<TabKey>('command');
-  const [credits, setCredits] = useState(12480);
-  const [reward, setReward] = useState<string | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const unreadCount = useNotificationStore(state => state.unreadCount);
+  const userId = useContentStore(state => state.userId);
   const entrance = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const initialize = async () => {
+      await Promise.all([useLiveNetworkStore.getState().initialize(), useContentStore.getState().initialize()]);
+      const userId = useContentStore.getState().userId;
+      if (userId) {
+        await useNotificationStore.getState().fetchNotifications(userId);
+        useNotificationStore.getState().subscribeToNotifications(userId);
+        await useMessageStore.getState().fetchConversations(userId);
+      }
+    };
+    initialize();
+    if (Platform.OS !== 'web') return () => useLiveNetworkStore.getState().dispose();
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (event.key !== 'Enter' || target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      event.preventDefault();
+      setTab('radar');
+      useLiveNetworkStore.getState().startDrive();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => { window.removeEventListener('keydown', onKeyDown); useLiveNetworkStore.getState().dispose(); useNotificationStore.getState().unsubscribeFromNotifications(); };
+  }, []);
 
   useEffect(() => {
     entrance.setValue(0);
     Animated.timing(entrance, { toValue: 1, duration: 340, useNativeDriver: true }).start();
   }, [tab, entrance]);
 
-  const claimReward = () => {
-    setCredits(value => value + 250);
-    setReward('+250 AC / SIGNAL DROP');
-    setTimeout(() => setReward(null), 2200);
-  };
-
   const content = useMemo(() => {
-    if (tab === 'radar') return <RadarScreen />;
+    if (tab === 'radar') return <RadarScreen onTab={setTab} />;
     if (tab === 'feed') return <FeedScreen />;
     if (tab === 'garage') return <GarageScreen onTab={setTab} />;
     if (tab === 'more') return <MoreScreen onTab={setTab} />;
     if (tab === 'race') return <RaceScreen />;
-    if (tab === 'vault') return <VaultScreen credits={credits} onClaim={claimReward} />;
+    if (tab === 'vault') return <VaultScreen />;
     if (tab === 'shop') return <ShopScreen />;
     if (tab === 'meets' || tab === 'messages' || tab === 'leaderboard') return <UtilityScreen kind={tab} />;
-    return <CommandScreen credits={credits} onTab={setTab} />;
-  }, [tab, credits]);
+    return <CommandScreen onTab={setTab} />;
+  }, [tab]);
 
   return (
     <SafeAreaView style={styles.app}>
@@ -806,8 +859,8 @@ export function ApexDesignPreview() {
           <View><Text style={styles.brand}>APEX UGR</Text><Text style={styles.brandSub}>UNDERGROUND RACING NETWORK</Text></View>
         </View>
         <View style={styles.headerRight}>
-          <View style={styles.signal}><View style={styles.liveDot} /><Text style={styles.signalText}>ENCRYPTED</Text></View>
-          <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={() => setNotificationsOpen(true)} style={styles.iconButton}><Bell size={18} color={paper} /><View style={styles.headerUnread} /></Pressable>
+          <Pressable onPress={() => setAuthOpen(true)} style={styles.signal}><View style={styles.liveDot} /><Text style={styles.signalText}>{userId ? 'ENCRYPTED' : 'SIGN IN'}</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={() => setNotificationsOpen(true)} style={styles.iconButton}><Bell size={18} color={paper} />{unreadCount > 0 ? <View style={styles.headerUnread} /> : null}</Pressable>
         </View>
       </View>
 
@@ -832,10 +885,8 @@ export function ApexDesignPreview() {
         </View>
       </View>
 
-      {reward ? (
-        <Animated.View style={styles.rewardToast}><CircleDollarSign size={18} color="#050705" /><Text style={styles.rewardToastText}>{reward}</Text></Animated.View>
-      ) : null}
       {notificationsOpen ? <NotificationCenter onClose={() => setNotificationsOpen(false)} onOpen={setTab} /> : null}
+      {authOpen ? <AuthPanel onClose={() => setAuthOpen(false)} /> : null}
     </SafeAreaView>
   );
 }
@@ -1127,6 +1178,7 @@ const styles = StyleSheet.create({
   moduleChevron: { position: 'absolute', right: 11, bottom: 12 },
   healthRow: { flexDirection: 'row', justifyContent: 'space-between' },
   healthGood: { color: accent, fontSize: 8, fontWeight: '900' },
+  healthOffline: { color: muted, fontSize: 8, fontWeight: '900' },
   utilityHero: { paddingTop: 10, paddingBottom: 20, gap: 10 },
   utilityRow: { minHeight: 66, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center' },
   utilityIndex: { color: accent, fontSize: 9, fontWeight: '900', width: 34 },
@@ -1141,4 +1193,50 @@ const styles = StyleSheet.create({
   notificationRowTitle: { color: paper, fontSize: 9, fontWeight: '900' },
   notificationMeta: { color: muted, fontSize: 7, lineHeight: 11, marginTop: 4 },
   unreadDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: accent, marginLeft: 7 },
+  commandEmptyHero: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#050705' },
+  commandDriveRow: { borderColor: 'rgba(255,255,255,.25)', backgroundColor: 'rgba(255,255,255,.055)' },
+  networkError: { color: '#E8A7A7', fontSize: 8, fontWeight: '800', lineHeight: 13, marginTop: 7 },
+  driveDock: { flexDirection: 'row', gap: 7, marginTop: 12 },
+  driveEnter: { flex: 1, minHeight: 39, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(255,255,255,.07)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  driveEnterActive: { borderColor: 'rgba(145,185,133,.5)', backgroundColor: 'rgba(145,185,133,.13)' },
+  driveEnterText: { color: paper, fontSize: 8, fontWeight: '900' },
+  unitButton: { width: 48, minHeight: 39, borderRadius: 10, borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center' },
+  unitText: { color: accent, fontSize: 8, fontWeight: '900' },
+  driveHud: { position: 'absolute', top: 140, right: 14, width: 122, minHeight: 118, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,.32)', backgroundColor: 'rgba(2,4,3,.82)', alignItems: 'center', justifyContent: 'center', shadowColor: '#fff', shadowOpacity: .1, shadowRadius: 18 },
+  driveSpeed: { color: paper, fontSize: 48, lineHeight: 52, fontWeight: '300' },
+  driveUnit: { color: accent, fontSize: 8, fontWeight: '900', letterSpacing: 1.5 },
+  driveMeta: { color: muted, fontSize: 6, fontWeight: '900', marginTop: 8 },
+  composerPanel: { marginHorizontal: 14, marginBottom: 12 },
+  mediaPicker: { minHeight: 150, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(145,185,133,.4)', backgroundColor: 'rgba(145,185,133,.05)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  composerPreview: { width: '100%', height: 210, resizeMode: 'cover' },
+  composerHint: { color: muted, fontSize: 8, fontWeight: '900', marginTop: 8 },
+  composerInput: { minHeight: 76, color: paper, borderBottomWidth: 1, borderBottomColor: border, paddingVertical: 12, fontSize: 11, textAlignVertical: 'top' },
+  composerActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 7, marginTop: 11 },
+  emptyState: { margin: 14, alignItems: 'center', gap: 10, paddingVertical: 24 },
+  inlineError: { marginHorizontal: 14, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(232,167,167,.24)', borderRadius: 10, padding: 10 },
+  commentComposer: { flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: border, marginHorizontal: 13, paddingVertical: 9 },
+  commentInput: { flex: 1, minHeight: 38, color: paper, borderRadius: 10, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.04)', paddingHorizontal: 11, fontSize: 10 },
+  partsSearch: { flexDirection: 'row', gap: 7, marginTop: 10 },
+  partsSearchInput: { flex: 1, minHeight: 45, color: paper, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.05)', paddingHorizontal: 12, fontSize: 10 },
+  partsSearchButton: { width: 46, height: 45, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(145,185,133,.38)', backgroundColor: 'rgba(145,185,133,.09)', alignItems: 'center', justifyContent: 'center' },
+  providerRail: { gap: 7, paddingVertical: 10 },
+  providerChip: { minWidth: 128, minHeight: 55, borderRadius: 10, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.04)', padding: 9 },
+  providerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: muted, position: 'absolute', right: 8, top: 8 },
+  providerDotLive: { backgroundColor: accent, shadowColor: accent, shadowOpacity: .8, shadowRadius: 6 },
+  providerName: { color: paper, fontSize: 8, fontWeight: '900' },
+  providerMode: { color: muted, fontSize: 6, fontWeight: '800', marginTop: 6 },
+  productImageMissing: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#060806' },
+  emptyNotification: { alignItems: 'center', gap: 8, paddingVertical: 24 },
+  authOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 130, backgroundColor: 'rgba(0,0,0,.70)', alignItems: 'center', justifyContent: 'center', padding: 14 },
+  authPanel: { width: '100%', maxWidth: 420 },
+  authInput: { minHeight: 48, color: paper, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.05)', paddingHorizontal: 12, fontSize: 11, marginTop: 10 },
+  authSwitch: { color: accent, fontSize: 8, fontWeight: '900', textAlign: 'center', paddingTop: 14 },
+  messageScreen: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center', paddingBottom: 88 },
+  messageHeader: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  messageList: { padding: 14, gap: 8, flexGrow: 1, justifyContent: 'flex-end' },
+  messageBubble: { alignSelf: 'flex-start', maxWidth: '82%', borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.06)', padding: 10 },
+  messageBubbleOwn: { alignSelf: 'flex-end', borderColor: 'rgba(145,185,133,.35)', backgroundColor: 'rgba(145,185,133,.11)' },
+  messageText: { color: paper, fontSize: 11, lineHeight: 16 },
+  messageTime: { color: muted, fontSize: 6, marginTop: 5 },
+  messageComposer: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderTopWidth: 1, borderTopColor: border },
 });
