@@ -23,7 +23,7 @@ import { useLiveNetworkStore, LiveDriver, LiveEvent } from './live/liveNetworkSt
 import { useContentStore } from './live/contentStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useMessageStore } from '../stores/messageStore';
-import { hasLiveBackend, supabase } from '../config/supabase';
+import { cloudflareApi, hasCloudflareBackend } from '../config/cloudflareApi';
 import {
   Activity,
   BadgeCheck,
@@ -78,11 +78,13 @@ const { width: screenWidth } = Dimensions.get('window');
 let NativeMap: any = null;
 let NativeMarker: any = null;
 let NativeCircle: any = null;
+let NativePolyline: any = null;
 if (Platform.OS !== 'web') {
   const maps = require('react-native-maps');
   NativeMap = maps.default;
   NativeMarker = maps.Marker;
   NativeCircle = maps.Circle;
+  NativePolyline = maps.Polyline;
 }
 
 type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard';
@@ -156,17 +158,18 @@ function GlassButton({
   onPress,
   active = false,
   compact = false,
+  grow = false,
 }: {
   label: string;
   icon: IconType;
   onPress: () => void;
   active?: boolean;
   compact?: boolean;
+  grow?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.glassButtonShell, compact && styles.glassButtonCompact, pressed && styles.pressed]}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.glassButtonShell, compact && styles.glassButtonCompact, grow && styles.glassButtonGrow, pressed && styles.pressed]}>
       <BlurView intensity={Platform.OS === 'web' ? 48 : 34} tint="dark" style={[styles.glassButton, active && styles.glassButtonActive]}>
-        <View pointerEvents="none" style={styles.glassButtonShine} />
         <Icon size={compact ? 14 : 17} color={active ? accent : paper} strokeWidth={2.2} />
         <Text style={[styles.glassButtonText, active && styles.glassButtonTextActive]}>{label}</Text>
       </BlurView>
@@ -236,8 +239,8 @@ function CommandScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           <Text style={styles.heroTitle}>{vehicle?.nickname.toUpperCase() || 'NO VEHICLE'}</Text>
           <Text style={styles.heroCarName}>{vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''}`.toUpperCase() : 'ADD A VEHICLE IN GARAGE'}</Text>
           <View style={styles.heroActions}>
-            <GlassButton label="OPEN GARAGE" icon={CarFront} onPress={() => onTab('garage')} active />
-            <GlassButton label="LOCATE" icon={MapPin} onPress={() => onTab('radar')} />
+            <GlassButton label="OPEN GARAGE" icon={CarFront} onPress={() => onTab('garage')} active grow />
+            <GlassButton label="LOCATE" icon={MapPin} onPress={() => onTab('radar')} grow />
           </View>
         </View>
       </View>
@@ -275,6 +278,7 @@ function CommandScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
         <ChevronRight size={18} color={muted} />
       </Pressable>
       <Pressable onPress={startDrive} style={({ pressed }) => [styles.commandRow, styles.commandDriveRow, pressed && styles.pressed]}><View style={styles.commandIcon}><Navigation size={20} color={accent} /></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>ENTER DRIVE MODE</Text><Text style={styles.commandMeta}>Press Enter anywhere on web · live GPS speed and distance</Text></View><Play size={18} color={paper} /></Pressable>
+      <Pressable onPress={() => onTab('leaderboard')} style={({ pressed }) => [styles.commandRow, pressed && styles.pressed]}><View style={styles.commandIcon}><Trophy size={20} color={paper} /></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>SEASON LEADERBOARD</Text><Text style={styles.commandMeta}>{rankings.length ? `${rankings.length} ranked pilots · ${rankings[0]?.alias || 'season live'} leads` : 'Verified results and rank progression'}</Text></View><ChevronRight size={18} color={muted} /></Pressable>
 
     </ScrollView>
   );
@@ -293,28 +297,37 @@ function RewardBadge({ icon: Icon, label, detail }: { icon: IconType; label: str
 function RadarMap({
   location,
   mode,
-  selected,
   onSelect,
+  onSelectEvent,
   drivers,
   events,
+  routeCoordinates,
+  followRevision,
 }: {
   location: { latitude: number; longitude: number } | null;
   mode: 'street' | 'satellite';
-  selected: Driver | null;
   onSelect: (driver: Driver | null) => void;
+  onSelectEvent: (event: LiveEvent | null) => void;
   drivers: Driver[];
   events: LiveEvent[];
+  routeCoordinates: Array<{ latitude: number; longitude: number }>;
+  followRevision: number;
 }) {
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const listener = (event: MessageEvent) => {
       if (event.data?.source !== 'apex-radar') return;
+      if (event.data.eventId) {
+        const meet = events.find(item => item.id === event.data.eventId);
+        if (meet) onSelectEvent(meet);
+        return;
+      }
       const driver = drivers.find(item => item.id === event.data.driverId);
       if (driver) onSelect(driver);
     };
     window.addEventListener('message', listener);
     return () => window.removeEventListener('message', listener);
-  }, [drivers, onSelect]);
+  }, [drivers, events, onSelect, onSelectEvent]);
 
   if (Platform.OS === 'web') {
     const tileUrl = mode === 'satellite'
@@ -323,19 +336,19 @@ function RadarMap({
     const attribution = mode === 'satellite' ? 'Esri World Imagery' : 'OpenStreetMap';
     const safeDrivers = JSON.stringify(drivers).replace(/</g, '\\u003c');
     const safeEvents = JSON.stringify(events).replace(/</g, '\\u003c');
+    const safeRoute = JSON.stringify(routeCoordinates).replace(/</g, '\\u003c');
     const center = location || { latitude: 20, longitude: 0 };
     const zoom = location ? 14 : 2;
-    const selfMarker = location ? `L.marker([${location.latitude},${location.longitude}],{icon:L.divIcon({className:'',html:'<div class="self-pin"><span>▲</span><b>YOU</b></div>',iconSize:[58,36],iconAnchor:[29,18]})}).addTo(map);` : '';
-    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#050705}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}.driver-pin,.self-pin{display:flex;align-items:center;justify-content:center;background:rgba(4,7,5,.94);border:2px solid #f3f5f3;color:#91b985;font:900 12px monospace;border-radius:50%;box-shadow:0 0 16px rgba(145,185,133,.38)}.driver-pin{width:34px;height:34px}.driver-pin.mystery{border-style:dashed}.driver-pin.cruise{box-shadow:0 0 0 7px rgba(145,185,133,.12),0 0 18px rgba(145,185,133,.55)}.self-pin{width:58px;height:30px;border-radius:18px;background:#dbe7d8;color:#071007;gap:5px}.self-pin b{font-size:9px}.event-core{width:14px;height:14px;border-radius:50%;background:#91b985;border:2px solid #eaf0e8;box-shadow:0 0 20px #91b985}@keyframes eventPulse{0%{stroke-opacity:.68;fill-opacity:.18}50%{stroke-opacity:.18;fill-opacity:.04}100%{stroke-opacity:.68;fill-opacity:.18}}.event-zone{animation:eventPulse 2.4s ease-in-out infinite}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.22) brightness(.50)}' : '#map{filter:saturate(.48) contrast(1.18) brightness(.55)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([${center.latitude},${center.longitude}],${zoom});L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);${selfMarker}const drivers=${safeDrivers};drivers.forEach(d=>{const label=d.mystery?'?':d.alias.slice(0,1);const classes='driver-pin '+(d.mystery?'mystery ':'')+(d.cruiseId?'cruise':'');L.marker([d.latitude,d.longitude],{icon:L.divIcon({className:'',html:'<div class="'+classes+'">'+label+'</div>',iconSize:[38,38],iconAnchor:[19,19]})}).addTo(map).on('click',()=>parent.postMessage({source:'apex-radar',driverId:d.id},'*'));});const events=${safeEvents};events.forEach(e=>{L.circle([e.latitude,e.longitude],{radius:e.radiusM,color:'#91b985',weight:2,fillColor:'#91b985',fillOpacity:.12,className:'event-zone'}).addTo(map).bindTooltip(e.title);L.marker([e.latitude,e.longitude],{icon:L.divIcon({className:'',html:'<div class="event-core"></div>',iconSize:[18,18],iconAnchor:[9,9]})}).addTo(map);});</script></body></html>`;
+    const selfMarker = location ? `L.marker([${location.latitude},${location.longitude}],{zIndexOffset:1000,icon:L.divIcon({className:'',html:'<div class="self-anchor"><i class="radar-ring r1"></i><i class="radar-ring r2"></i><i class="radar-ring r3"></i><i class="radar-sweep"></i><div class="self-pin"><span>▲</span><b>YOU</b></div></div>',iconSize:[180,180],iconAnchor:[90,90]})}).addTo(map);` : '';
+    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#030503}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}.driver-pin,.self-pin{display:flex;align-items:center;justify-content:center;background:rgba(3,6,4,.96);border:2px solid #f3f5f3;color:#b9deb0;font:900 12px monospace;border-radius:50%;box-shadow:0 0 18px rgba(255,255,255,.18),0 0 26px rgba(145,185,133,.28)}.driver-pin{width:34px;height:34px;transition:transform .22s ease}.driver-pin:hover{transform:scale(1.14)}.driver-pin.mystery{border-style:dashed}.driver-pin.cruise{box-shadow:0 0 0 7px rgba(145,185,133,.12),0 0 20px rgba(145,185,133,.58)}.self-anchor{position:relative;width:180px;height:180px;display:flex;align-items:center;justify-content:center}.self-pin{position:relative;z-index:5;width:58px;height:30px;border-radius:18px;background:#edf5ea;color:#071007;gap:5px}.self-pin b{font-size:9px}.radar-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(180,224,170,.4);border-radius:50%;transform:translate(-50%,-50%)}.r1{width:72px;height:72px}.r2{width:116px;height:116px;opacity:.65}.r3{width:168px;height:168px;opacity:.36}.radar-sweep{position:absolute;left:50%;top:50%;width:84px;height:84px;transform-origin:0 0;background:conic-gradient(from -18deg,rgba(145,185,133,.34),transparent 48deg);animation:sweep 3.2s linear infinite}.event-core{width:16px;height:16px;border-radius:50%;background:#b9deb0;border:2px solid #fff;box-shadow:0 0 20px #91b985;cursor:pointer}@keyframes sweep{to{transform:rotate(360deg)}}@keyframes eventPulse{0%{stroke-opacity:.74;fill-opacity:.2}50%{stroke-opacity:.16;fill-opacity:.04}100%{stroke-opacity:.74;fill-opacity:.2}}.event-zone{animation:eventPulse 2.4s ease-in-out infinite}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.25) brightness(.43)}' : '#map{filter:saturate(.38) contrast(1.24) brightness(.43)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([${center.latitude},${center.longitude}],${zoom});L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);${selfMarker}const route=${safeRoute};if(route.length>1){L.polyline(route.map(p=>[p.latitude,p.longitude]),{color:'#dfffd7',weight:4,opacity:.9,lineCap:'round'}).addTo(map);}const drivers=${safeDrivers};drivers.forEach(d=>{const label=d.mystery?'?':d.alias.slice(0,1);const classes='driver-pin '+(d.mystery?'mystery ':'')+(d.cruiseId?'cruise':'');L.marker([d.latitude,d.longitude],{icon:L.divIcon({className:'',html:'<div class="'+classes+'">'+label+'</div>',iconSize:[38,38],iconAnchor:[19,19]})}).addTo(map).on('click',()=>parent.postMessage({source:'apex-radar',driverId:d.id},'*'));});const events=${safeEvents};events.forEach(e=>{L.circle([e.latitude,e.longitude],{radius:e.radiusM,color:'#b9deb0',weight:2,fillColor:'#91b985',fillOpacity:.12,className:'event-zone'}).addTo(map).on('click',()=>parent.postMessage({source:'apex-radar',eventId:e.id},'*')).bindTooltip(e.title);L.marker([e.latitude,e.longitude],{icon:L.divIcon({className:'',html:'<div class="event-core"></div>',iconSize:[20,20],iconAnchor:[10,10]})}).addTo(map).on('click',()=>parent.postMessage({source:'apex-radar',eventId:e.id},'*'));});</script></body></html>`;
     return (
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
-          key: mode,
+          key: `${mode}-${followRevision}`,
           srcDoc: mapDocument,
           title: 'Apex Radar',
           style: { width: '100%', height: '100%', border: 0 },
         })}
-        <RadarScanner />
       </View>
     );
   }
@@ -343,6 +356,7 @@ function RadarMap({
   return (
     <View style={styles.mapFrame}>
       <NativeMap
+        key={`${mode}-${followRevision}`}
         style={StyleSheet.absoluteFill}
         mapType={mode === 'satellite' ? 'satellite' : 'standard'}
         customMapStyle={darkMapStyle}
@@ -358,6 +372,7 @@ function RadarMap({
           </NativeMarker>
         ))}
         {events.map(event => <NativeCircle key={event.id} center={{ latitude: event.latitude, longitude: event.longitude }} radius={event.radiusM} strokeColor="rgba(145,185,133,.75)" fillColor="rgba(145,185,133,.12)" />)}
+        {routeCoordinates.length > 1 ? <NativePolyline coordinates={routeCoordinates} strokeColor="#DFFFD7" strokeWidth={4} /> : null}
       </NativeMap>
     </View>
   );
@@ -387,9 +402,14 @@ function RadarScanner() {
 
 function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [selected, setSelected] = useState<Driver | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<LiveEvent | null>(null);
   const [mode, setMode] = useState<'street' | 'satellite'>('street');
   const [filter, setFilter] = useState<'drivers' | 'events' | 'crews'>('drivers');
-  const { location, drivers: liveDrivers, events, cruises, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, lockLocation, startDrive, stopDrive, toggleUnit } = useLiveNetworkStore();
+  const [followRevision, setFollowRevision] = useState(0);
+  const [routeOpen, setRouteOpen] = useState(false);
+  const [destination, setDestination] = useState('');
+  const [routeLoading, setRouteLoading] = useState(false);
+  const { location, drivers: liveDrivers, events, cruises, route, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, lockLocation, startDrive, stopDrive, toggleUnit, setRoute, clearRoute } = useLiveNetworkStore();
   const drivers = liveDrivers.map((driver: LiveDriver): Driver => ({
     id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record,
     rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery,
@@ -397,9 +417,34 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   }));
   useEffect(() => { if (!location) lockLocation(); }, []);
 
+  const recenter = async () => {
+    await lockLocation();
+    setSelected(null);
+    setSelectedEvent(null);
+    setFollowRevision(value => value + 1);
+  };
+  const submitRoute = async (target = destination) => {
+    if (!target.trim()) return;
+    setRouteLoading(true);
+    const ready = await setRoute(target.trim());
+    setRouteLoading(false);
+    if (ready) { setRouteOpen(false); setFollowRevision(value => value + 1); }
+  };
+  const rsvpEvent = async () => {
+    if (!selectedEvent) return;
+    try {
+      const result = await cloudflareApi.request<{ active: boolean; attendees: number }>(`/api/events/${selectedEvent.id}/rsvp`, { method: 'POST' });
+      setSelectedEvent({ ...selectedEvent, attendees: result.attendees });
+    } catch (error) {
+      Alert.alert('RSVP failed', error instanceof Error ? error.message : 'Could not update RSVP.');
+    }
+  };
+  const shownDrivers = filter === 'events' ? [] : filter === 'crews' ? drivers.filter(driver => driver.cruiseId) : drivers;
+  const shownEvents = events;
+
   return (
     <View style={styles.radarScreen}>
-      <RadarMap location={location} mode={mode} selected={selected} onSelect={setSelected} drivers={drivers} events={events} />
+      <RadarMap location={location} mode={mode} onSelect={driver => { setSelected(driver); setSelectedEvent(null); }} onSelectEvent={event => { setSelectedEvent(event); setSelected(null); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} followRevision={followRevision} />
       <View style={styles.radarTopControls}>
         <View style={styles.segmentedControl}>
           {(['street', 'satellite'] as const).map(item => (
@@ -408,7 +453,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
             </Pressable>
           ))}
         </View>
-        <Pressable onPress={lockLocation} style={styles.locateButton}><Crosshair size={16} color={accent} /><Text style={styles.locateText}>{location ? 'GPS LOCKED' : 'LOCK ON'}</Text></Pressable>
+        <Pressable onPress={recenter} style={styles.locateButton}><Crosshair size={16} color={accent} /><Text style={styles.locateText}>{location ? 'CENTER ME' : 'LOCK ON'}</Text></Pressable>
       </View>
       <View style={styles.networkPill}><View style={styles.liveDot} /><Text style={styles.networkPillText}>{drivers.length} DRIVERS / {events.length} EVENTS / {cruises.length} CRUISES</Text></View>
       <View style={styles.radarFilters}>
@@ -433,21 +478,30 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
             <RankBadge rank={selected.rank} compact />
           </View>
           <View style={styles.sheetActions}>
-            <GlassButton label="CHALLENGE" icon={Swords} onPress={() => onTab('race')} active />
-            <GlassButton label="PROFILE" icon={UserRound} onPress={() => Alert.alert(selected.alias, selected.mystery ? 'This pilot is running in mystery mode.' : `${selected.car}\n${selected.record} career record`)} />
+            <GlassButton label="CHALLENGE" icon={Swords} onPress={() => onTab('race')} active grow />
+            <GlassButton label="PROFILE" icon={UserRound} onPress={() => Alert.alert(selected.alias, selected.mystery ? 'This pilot is running in mystery mode.' : `${selected.car}\n${selected.record} career record`)} grow />
           </View>
+        </GlassPanel>
+      ) : selectedEvent ? (
+        <GlassPanel style={styles.driverSheet} glow>
+          <View style={styles.driverSheetHeader}><View style={styles.eventAvatar}><MapPin size={21} color={paper} /></View><View style={styles.driverIdentity}><Text style={styles.driverAlias}>{selectedEvent.title.toUpperCase()}</Text><Text style={styles.driverCar}>{selectedEvent.locationName}</Text></View><Pressable onPress={() => setSelectedEvent(null)} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>
+          <View style={styles.driverStats}><View><Text style={styles.driverStatValue}>{selectedEvent.attendees}</Text><Text style={styles.driverStatLabel}>RSVP</Text></View><View><Text style={styles.driverStatValue}>{Math.round(selectedEvent.radiusM)} M</Text><Text style={styles.driverStatLabel}>EVENT ZONE</Text></View><View><Text style={styles.driverStatValue}>{new Date(selectedEvent.startTime).toLocaleDateString()}</Text><Text style={styles.driverStatLabel}>START</Text></View></View>
+          <View style={styles.sheetActions}><GlassButton label="RSVP" icon={Check} onPress={() => void rsvpEvent()} active grow /><GlassButton label="ROUTE" icon={Navigation} onPress={() => { setDestination(selectedEvent.locationName); void submitRoute(selectedEvent.locationName); }} grow /><GlassButton label="DETAILS" icon={CalendarDays} onPress={() => Alert.alert(selectedEvent.title, `${selectedEvent.locationName}\n${new Date(selectedEvent.startTime).toLocaleString()}\n${selectedEvent.attendees} pilots attending`)} grow /></View>
         </GlassPanel>
       ) : (
         <GlassPanel style={styles.radarDock}>
           <Text style={styles.radarDockTitle}>RADAR ACTIVE</Text>
           <View style={styles.radarReadout}><Text style={styles.radarDockMeta}>{networkStatus.replace('_', ' ').toUpperCase()}</Text><Text style={styles.radarDockMeta}>{filter.toUpperCase()} CHANNEL</Text></View>
           {error ? <Text style={styles.networkError}>{error}</Text> : null}
+          {route ? <View style={styles.activeRoute}><Navigation size={15} color={accent} /><View style={styles.commandCopy}><Text style={styles.activeRouteTitle}>{route.destination.toUpperCase()}</Text><Text style={styles.activeRouteMeta}>{route.distanceKm.toFixed(1)} KM · {Math.round(route.durationMinutes)} MIN</Text></View><Pressable onPress={clearRoute} style={styles.routeClose}><X size={14} color={paper} /></Pressable></View> : null}
           <View style={styles.driveDock}>
             <Pressable onPress={isDriving ? stopDrive : startDrive} style={[styles.driveEnter, isDriving && styles.driveEnterActive]}><Play size={16} color={isDriving ? accent : paper} /><Text style={styles.driveEnterText}>{isDriving ? 'END DRIVE' : 'ENTER DRIVE MODE'}</Text></Pressable>
+            <Pressable onPress={() => setRouteOpen(value => !value)} style={styles.routeButton}><Navigation size={16} color={route ? accent : paper} /></Pressable>
             {isDriving ? <Pressable onPress={toggleUnit} style={styles.unitButton}><Text style={styles.unitText}>{unit.toUpperCase()}</Text></Pressable> : null}
           </View>
         </GlassPanel>
       )}
+      {routeOpen && !selected && !selectedEvent ? <GlassPanel style={styles.routePanel} glow><View style={styles.routeComposer}><TextInput value={destination} onChangeText={setDestination} onSubmitEditing={() => void submitRoute()} placeholder="Destination or address" placeholderTextColor={muted} style={styles.routeInput} autoFocus /><Pressable onPress={() => void submitRoute()} style={styles.routeSubmit}><Navigation size={17} color={accent} /><Text style={styles.routeSubmitText}>{routeLoading ? 'ROUTING' : 'GO'}</Text></Pressable></View></GlassPanel> : null}
       {isDriving ? <View pointerEvents="none" style={styles.driveHud}><Text style={styles.driveSpeed}>{Math.round(unit === 'mph' ? (location?.speedKph || 0) * .621371 : location?.speedKph || 0)}</Text><Text style={styles.driveUnit}>{unit.toUpperCase()}</Text><Text style={styles.driveMeta}>{distanceKm.toFixed(2)} KM · MAX {Math.round(maxSpeedKph * (unit === 'mph' ? .621371 : 1))}</Text></View> : null}
     </View>
   );
@@ -552,8 +606,20 @@ function UtilityScreen({ kind }: { kind: 'meets' | 'messages' | 'leaderboard' })
 }
 
 function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
-  const { vehicles, activeVehicleId, setActiveVehicle } = useContentStore();
+  const { vehicles, activeVehicleId, loading, error, setActiveVehicle, addVehicle } = useContentStore();
+  const [showAdd, setShowAdd] = useState(false);
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [vehicleDraft, setVehicleDraft] = useState({ nickname: '', year: '', make: '', model: '', trim: '', engine: '', drivetrain: '', horsepower: '', color: '' });
   const car = vehicles.find(vehicle => vehicle.id === activeVehicleId);
+  const updateVehicle = (key: keyof typeof vehicleDraft, value: string) => setVehicleDraft(current => ({ ...current, [key]: value }));
+  const pickVehiclePhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: .9, allowsEditing: false });
+    if (!result.canceled && result.assets[0]) setPhotoUri(result.assets[0].uri);
+  };
+  const saveVehicle = async () => {
+    const ready = await addVehicle({ ...vehicleDraft, nickname: vehicleDraft.nickname || `${vehicleDraft.make} ${vehicleDraft.model}`, year: Number(vehicleDraft.year), horsepower: Number(vehicleDraft.horsepower) || 0 }, photoUri);
+    if (ready) { setShowAdd(false); setPhotoUri(null); setVehicleDraft({ nickname: '', year: '', make: '', model: '', trim: '', engine: '', drivetrain: '', horsepower: '', color: '' }); }
+  };
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
       <View style={styles.garageSwitcher}>
@@ -563,8 +629,9 @@ function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
             <Text style={[styles.carChipText, activeVehicleId === item.id && styles.carChipTextActive]}>{item.nickname.toUpperCase()}</Text>
           </Pressable>
         ))}
+        <Pressable onPress={() => setShowAdd(value => !value)} style={styles.addCarButton}><Plus size={18} color={accent} /></Pressable>
       </View>
-      {!car ? <GlassPanel style={styles.emptyState}><CarFront size={30} color={accent} /><Text style={styles.emptyTitle}>ADD YOUR FIRST VEHICLE</Text><Text style={styles.emptyCopy}>Your garage will use only vehicles and photos you upload. No default car is substituted.</Text></GlassPanel> : <>
+      {(showAdd || !car) ? <GlassPanel style={styles.vehicleForm} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>FITMENT IDENTITY</Text><Text style={styles.notificationTitle}>ADD VEHICLE</Text></View>{car ? <Pressable onPress={() => setShowAdd(false)} style={styles.closeButton}><X size={17} color={paper} /></Pressable> : null}</View><Pressable onPress={pickVehiclePhoto} style={styles.vehiclePhotoPicker}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.vehiclePhotoPreview} /> : <><CarFront size={32} color={accent} /><Text style={styles.composerHint}>UPLOAD YOUR ACTUAL CAR PHOTO</Text></>}</Pressable><View style={styles.vehicleFormGrid}>{(['year','make','model','trim','engine','drivetrain','horsepower','color','nickname'] as const).map(field => <TextInput key={field} value={vehicleDraft[field]} onChangeText={value => updateVehicle(field, value)} placeholder={field.toUpperCase()} placeholderTextColor={muted} keyboardType={field === 'year' || field === 'horsepower' ? 'numeric' : 'default'} style={[styles.authInput, styles.vehicleFormInput]} />)}</View>{error ? <Text style={styles.networkError}>{error}</Text> : null}<GlassButton label={loading ? 'UPLOADING BUILD' : 'ADD TO GARAGE'} icon={Plus} onPress={() => void saveVehicle()} active /></GlassPanel> : <>
       <View style={styles.garageHero}>{car.photoUrl ? <Image source={{ uri: car.photoUrl }} style={styles.garageImage} /> : <View style={[styles.garageImage, styles.productImageMissing]}><CarFront size={54} color={muted} /></View>}
         <LinearGradient colors={['transparent', 'rgba(2,3,2,0.95)']} style={StyleSheet.absoluteFill} />
         <View style={styles.garageHeroCopy}>
@@ -658,16 +725,15 @@ function RaceScreen() {
     if (opponents.length === 0) { setContractStatus('SELECT OPPONENTS'); return; }
     setContractStatus('ENCRYPTING');
     const type = format === '0–60' ? 'Drag Race' : format === 'TOP SPEED' ? 'Time Attack' : 'Roll Race';
-    const { data, error } = await supabase.rpc('create_race_contract', {
-      p_opponent_ids: opponents.map(id => liveDrivers.find(driver => driver.id === id)?.userId).filter(Boolean),
-      p_race_type: type,
-      p_route_name: format,
-      p_distance_miles: format === '0–60' ? .25 : .5,
-      p_rules: `${format} GPS-verified run`,
-      p_starts_at: new Date(Date.now() + (schedule === 'later' ? 3600000 : 0)).toISOString(),
-      p_wager_credits: wager,
-    });
-    setContractStatus(error ? error.message.toUpperCase().slice(0, 32) : `CONTRACT ${String(data).slice(0, 8).toUpperCase()}`);
+    try {
+      const data = await cloudflareApi.request<{ id: string }>('/api/races', { method: 'POST', body: JSON.stringify({
+        opponentIds: opponents.map(id => liveDrivers.find(driver => driver.id === id)?.userId).filter(Boolean), raceType: type, routeName: format,
+        distanceMiles: format === '0–60' ? .25 : .5, rules: `${format} GPS-verified run`, startsAt: new Date(Date.now() + (schedule === 'later' ? 3600000 : 0)).toISOString(), wagerCredits: wager,
+      }) });
+      setContractStatus(`CONTRACT ${data.id.slice(0, 8).toUpperCase()}`);
+    } catch (error) {
+      setContractStatus((error instanceof Error ? error.message : 'CONTRACT FAILED').toUpperCase().slice(0, 32));
+    }
   };
 
   return (
@@ -789,17 +855,21 @@ function AuthPanel({ onClose }: { onClose: () => void }) {
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState('');
   const submit = async () => {
-    if (!hasLiveBackend) { setStatus('APEX BACKEND HAS NOT BEEN PROVISIONED'); return; }
+    if (!hasCloudflareBackend) { setStatus('APEX BACKEND HAS NOT BEEN PROVISIONED'); return; }
+    if (!email.trim() || password.length < 8) { setStatus('ENTER AN EMAIL AND 8+ CHARACTER PASSWORD'); return; }
     setStatus('CONNECTING');
-    const result = mode === 'signin'
-      ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
-      : await supabase.auth.signUp({ email: email.trim(), password, options: { data: { username: email.split('@')[0] } } });
-    if (result.error) { setStatus(result.error.message.toUpperCase()); return; }
-    if (!result.data.session) { setStatus('CHECK EMAIL TO CONFIRM YOUR ACCOUNT'); return; }
-    await Promise.all([useContentStore.getState().initialize(), useLiveNetworkStore.getState().initialize()]);
-    onClose();
+    try {
+      if (mode === 'signin') await cloudflareApi.signIn(email.trim(), password);
+      else await cloudflareApi.signUp(email.trim(), password);
+      await Promise.all([useContentStore.getState().initialize(), useLiveNetworkStore.getState().initialize()]);
+      const userId = useContentStore.getState().userId;
+      if (userId) await Promise.all([useNotificationStore.getState().fetchNotifications(userId), useMessageStore.getState().fetchConversations(userId)]);
+      onClose();
+    } catch (error) {
+      setStatus((error instanceof Error ? error.message : 'CONNECTION FAILED').toUpperCase());
+    }
   };
-  return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill} /><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{mode === 'signin' ? 'ENTER NETWORK' : 'CREATE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>{hasLiveBackend ? <><TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={muted} style={styles.authInput} /><TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="Password" placeholderTextColor={muted} style={styles.authInput} onSubmitEditing={submit} /><GlassButton label={mode === 'signin' ? 'SIGN IN' : 'CREATE ACCOUNT'} icon={LockKeyhole} onPress={submit} active /><Pressable onPress={() => setMode(value => value === 'signin' ? 'signup' : 'signin')}><Text style={styles.authSwitch}>{mode === 'signin' ? 'NEW PILOT / CREATE ACCOUNT' : 'EXISTING PILOT / SIGN IN'}</Text></Pressable></> : <View style={styles.emptyNotification}><Radio size={26} color={accent} /><Text style={styles.emptyTitle}>BACKEND CONNECTION REQUIRED</Text><Text style={styles.emptyCopy}>The app will not invent an account or local network data.</Text></View>}{status ? <Text style={styles.networkError}>{status}</Text> : null}</GlassPanel></View>;
+  return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill} /><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{mode === 'signin' ? 'ENTER NETWORK' : 'CREATE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>{hasCloudflareBackend ? <><TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={muted} style={styles.authInput} /><TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="Password" placeholderTextColor={muted} style={styles.authInput} onSubmitEditing={submit} /><GlassButton label={mode === 'signin' ? 'SIGN IN' : 'CREATE ACCOUNT'} icon={LockKeyhole} onPress={submit} active /><Pressable onPress={() => setMode(value => value === 'signin' ? 'signup' : 'signin')}><Text style={styles.authSwitch}>{mode === 'signin' ? 'NEW PILOT / CREATE ACCOUNT' : 'EXISTING PILOT / SIGN IN'}</Text></Pressable></> : <View style={styles.emptyNotification}><Radio size={26} color={accent} /><Text style={styles.emptyTitle}>BACKEND CONNECTION REQUIRED</Text><Text style={styles.emptyCopy}>The app will not invent an account or local network data.</Text></View>}{status ? <Text style={styles.networkError}>{status}</Text> : null}</GlassPanel></View>;
 }
 
 export function ApexDesignPreview() {
@@ -925,12 +995,12 @@ const styles = StyleSheet.create({
   glassShell: { borderRadius: 12, borderWidth: 1, borderColor: border, overflow: 'hidden', backgroundColor: surface, shadowColor: '#000', shadowOpacity: .36, shadowRadius: 18 },
   glassGlow: { borderColor: 'rgba(145,185,133,.42)', shadowColor: accent, shadowOpacity: 0.12, shadowRadius: 20, elevation: 4 },
   glassBlur: { padding: 14, backgroundColor: 'rgba(4,7,5,.58)' },
-  glassButtonShell: { minHeight: 43, borderRadius: 13, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.22)', backgroundColor: 'rgba(255,255,255,.05)', shadowColor: '#000', shadowOpacity: .45, shadowRadius: 12 },
+  glassButtonShell: { minHeight: 43, minWidth: 0, flexShrink: 1, borderRadius: 13, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.26)', backgroundColor: 'rgba(255,255,255,.05)', shadowColor: '#FFFFFF', shadowOpacity: .08, shadowRadius: 14 },
+  glassButtonGrow: { flex: 1 },
   glassButton: { minHeight: 41, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,.065)', position: 'relative', overflow: 'hidden' },
-  glassButtonShine: { position: 'absolute', left: 10, right: 10, top: 1, height: 1, backgroundColor: 'rgba(255,255,255,.38)' },
-  glassButtonActive: { backgroundColor: 'rgba(145,185,133,.16)' },
+  glassButtonActive: { backgroundColor: 'rgba(126,164,117,.14)', borderColor: 'rgba(218,255,210,.26)' },
   glassButtonCompact: { minHeight: 36 },
-  glassButtonText: { color: paper, fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
+  glassButtonText: { color: paper, fontSize: 9, fontWeight: '900', letterSpacing: 0.8, flexShrink: 1 },
   glassButtonTextActive: { color: paper },
   pressed: { opacity: 0.75, transform: [{ scale: 0.985 }] },
   hero: { height: 330, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.16)', justifyContent: 'space-between' },
@@ -1001,6 +1071,7 @@ const styles = StyleSheet.create({
   driverSheet: { position: 'absolute', left: 14, right: 14, bottom: 88 },
   driverSheetHeader: { flexDirection: 'row', alignItems: 'center' },
   driverAvatar: { width: 48, height: 48, borderRadius: 11, backgroundColor: accent, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
+  eventAvatar: { width: 48, height: 48, borderRadius: 11, backgroundColor: 'rgba(145,185,133,.18)', borderWidth: 1, borderColor: 'rgba(218,255,210,.38)', alignItems: 'center', justifyContent: 'center', marginRight: 11 },
   mysteryAvatar: { backgroundColor: '#0A0C0A', borderWidth: 1, borderColor: accent, borderStyle: 'dashed' },
   driverAvatarText: { color: '#050705', fontSize: 15, fontWeight: '900' },
   driverIdentity: { flex: 1 },
@@ -1014,12 +1085,27 @@ const styles = StyleSheet.create({
   radarDock: { position: 'absolute', left: 14, right: 14, bottom: 88 },
   radarDockTitle: { color: paper, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
   radarDockMeta: { color: muted, fontSize: 9, fontWeight: '700', marginTop: 4 },
+  activeRoute: { minHeight: 46, marginTop: 10, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: 'rgba(145,185,133,.30)', borderRadius: 9, backgroundColor: 'rgba(145,185,133,.07)' },
+  activeRouteTitle: { color: paper, fontSize: 8, fontWeight: '900' },
+  activeRouteMeta: { color: accent, fontSize: 7, fontWeight: '800', marginTop: 3 },
+  routeClose: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
+  routeButton: { width: 42, minHeight: 39, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(255,255,255,.06)', alignItems: 'center', justifyContent: 'center' },
+  routePanel: { position: 'absolute', left: 14, right: 14, bottom: 248, zIndex: 20 },
+  routeComposer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  routeInput: { flex: 1, minWidth: 0, minHeight: 44, color: paper, borderRadius: 10, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.05)', paddingHorizontal: 12, fontSize: 10 },
+  routeSubmit: { minWidth: 66, minHeight: 44, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(145,185,133,.42)', backgroundColor: 'rgba(145,185,133,.12)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  routeSubmitText: { color: paper, fontSize: 8, fontWeight: '900' },
   garageSwitcher: { flexDirection: 'row', gap: 7, marginBottom: 10 },
   carChip: { flex: 1, minHeight: 42, borderWidth: 1, borderColor: border, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: 'rgba(255,255,255,.04)' },
   carChipActive: { backgroundColor: 'rgba(145,185,133,.13)', borderColor: 'rgba(145,185,133,.4)' },
   carChipText: { color: paper, fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },
   carChipTextActive: { color: paper },
   addCarButton: { width: 42, height: 42, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(145,185,133,.3)', alignItems: 'center', justifyContent: 'center' },
+  vehicleForm: { marginBottom: 12 },
+  vehiclePhotoPicker: { height: 190, marginTop: 14, borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(145,185,133,.42)', backgroundColor: 'rgba(145,185,133,.05)', alignItems: 'center', justifyContent: 'center' },
+  vehiclePhotoPreview: { width: '100%', height: '100%', resizeMode: 'cover' },
+  vehicleFormGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  vehicleFormInput: { width: screenWidth > 620 ? '31.8%' : '48.5%', flexGrow: 1 },
   garageHero: { height: 315, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: border },
   garageImage: { width: '100%', height: '100%', resizeMode: 'cover', objectPosition: '68% 50%' } as any,
   garageHeroCopy: { position: 'absolute', left: 16, right: 16, bottom: 16, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
