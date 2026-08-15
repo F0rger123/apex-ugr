@@ -20,7 +20,10 @@ import {
   Activity,
   BadgeCheck,
   Bell,
+  Bookmark,
+  CalendarDays,
   CarFront,
+  Check,
   ChevronRight,
   CircleDollarSign,
   Crosshair,
@@ -28,16 +31,25 @@ import {
   Gauge,
   Gem,
   Gift,
+  Heart,
+  Layers3,
+  ListFilter,
   LockKeyhole,
   Map,
   MapPin,
   Medal,
+  MessageCircle,
+  MessagesSquare,
+  MoreHorizontal,
   Navigation,
+  PackageCheck,
   Play,
   Plus,
   Radio,
   ScanLine,
+  Send,
   ShieldCheck,
+  ShoppingBag,
   Sparkles,
   Swords,
   Trophy,
@@ -50,11 +62,14 @@ import {
 
 const heroCar = require('./assets/apex-underground-coupe-v2.png');
 const commandHero = require('./assets/apex-command-hero.png');
-const accent = '#B6FF4A';
-const paper = '#F5F7F5';
-const muted = '#899189';
-const surface = 'rgba(13, 16, 14, 0.76)';
-const border = 'rgba(255, 255, 255, 0.13)';
+const exhaustImage = require('./assets/gtr-titanium-exhaust.png');
+const intakeImage = require('./assets/gtr-carbon-intake.png');
+const brakeImage = require('./assets/gtr-brake-kit.png');
+const accent = '#91B985';
+const paper = '#F3F5F3';
+const muted = '#858E87';
+const surface = 'rgba(6, 9, 7, 0.78)';
+const border = 'rgba(255, 255, 255, 0.16)';
 const { width: screenWidth } = Dimensions.get('window');
 
 let NativeMap: any = null;
@@ -65,7 +80,7 @@ if (Platform.OS !== 'web') {
   NativeMarker = maps.Marker;
 }
 
-type TabKey = 'command' | 'radar' | 'garage' | 'race' | 'vault';
+type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard';
 type IconType = any;
 
 interface Driver {
@@ -90,9 +105,9 @@ const drivers: Driver[] = [
 const tabs: { key: TabKey; label: string; icon: IconType }[] = [
   { key: 'command', label: 'COMMAND', icon: Activity },
   { key: 'radar', label: 'RADAR', icon: Crosshair },
+  { key: 'feed', label: 'FEED', icon: Play },
   { key: 'garage', label: 'GARAGE', icon: CarFront },
-  { key: 'race', label: 'RACE', icon: Swords },
-  { key: 'vault', label: 'VAULT', icon: WalletCards },
+  { key: 'more', label: 'MORE', icon: MoreHorizontal },
 ];
 
 const rankColors: Record<Driver['rank'], string> = {
@@ -148,9 +163,12 @@ function GlassButton({
   compact?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.glassButton, active && styles.glassButtonActive, compact && styles.glassButtonCompact, pressed && styles.pressed]}>
-      <Icon size={compact ? 14 : 17} color={active ? '#050705' : paper} strokeWidth={2.2} />
-      <Text style={[styles.glassButtonText, active && styles.glassButtonTextActive]}>{label}</Text>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.glassButtonShell, compact && styles.glassButtonCompact, pressed && styles.pressed]}>
+      <BlurView intensity={Platform.OS === 'web' ? 48 : 34} tint="dark" style={[styles.glassButton, active && styles.glassButtonActive]}>
+        <View pointerEvents="none" style={styles.glassButtonShine} />
+        <Icon size={compact ? 14 : 17} color={active ? accent : paper} strokeWidth={2.2} />
+        <Text style={[styles.glassButtonText, active && styles.glassButtonTextActive]}>{label}</Text>
+      </BlurView>
     </Pressable>
   );
 }
@@ -287,10 +305,11 @@ function RadarMap({
       ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
       : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
     const attribution = mode === 'satellite' ? 'Esri World Imagery' : 'OpenStreetMap';
-    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#090b09}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#b6ff4a}.leaflet-control-zoom{display:none}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.22) brightness(.57)}' : '#map{filter:saturate(.65) contrast(1.16) brightness(.68)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:false,attributionControl:true}).setView([${location.latitude},${location.longitude}],14);L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);</script></body></html>`;
+    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#090b09}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.22) brightness(.50)}' : '#map{filter:saturate(.48) contrast(1.18) brightness(.55)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:false,attributionControl:true}).setView([${location.latitude},${location.longitude}],14);L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);</script></body></html>`;
     return (
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
+          key: mode,
           srcDoc: mapDocument,
           title: 'Apex Radar',
           style: { width: '100%', height: '100%', border: 0 },
@@ -326,6 +345,7 @@ function MapOverlays({ selected, onSelect }: { selected: Driver | null; onSelect
   const positions = [{ top: '29%', left: '64%' }, { top: '48%', left: '25%' }, { top: '65%', left: '72%' }];
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+      <RadarScanner />
       <View style={styles.youPin}><Navigation size={13} color="#050705" fill="#050705" /><Text style={styles.youPinText}>YOU</Text></View>
       {drivers.map((driver, index) => (
         <Pressable key={driver.id} onPress={() => onSelect(driver)} style={[styles.driverPin, positions[index] as any, driver.mystery && styles.mysteryPin, selected?.id === driver.id && styles.driverPinSelected]}>
@@ -336,11 +356,34 @@ function MapOverlays({ selected, onSelect }: { selected: Driver | null; onSelect
   );
 }
 
+function RadarScanner() {
+  const sweep = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const animation = Animated.loop(Animated.timing(sweep, { toValue: 1, duration: 3200, useNativeDriver: true }));
+    animation.start();
+    return () => animation.stop();
+  }, [sweep]);
+  const rotation = sweep.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  return (
+    <View pointerEvents="none" style={styles.scannerField}>
+      <View style={[styles.scannerRing, styles.scannerRingOuter]} />
+      <View style={[styles.scannerRing, styles.scannerRingMiddle]} />
+      <View style={[styles.scannerRing, styles.scannerRingInner]} />
+      <View style={styles.scannerAxisHorizontal} />
+      <View style={styles.scannerAxisVertical} />
+      <Animated.View style={[styles.scannerSweep, { transform: [{ rotate: rotation }] }]}>
+        <LinearGradient colors={['rgba(145,185,133,0)', 'rgba(145,185,133,.30)']} style={styles.scannerBeam} />
+      </Animated.View>
+    </View>
+  );
+}
+
 function RadarScreen() {
   const [selected, setSelected] = useState<Driver | null>(null);
   const [mode, setMode] = useState<'street' | 'satellite'>('street');
   const [location, setLocation] = useState({ latitude: 34.045, longitude: -118.258 });
   const [gpsLabel, setGpsLabel] = useState('LOCK ON');
+  const [filter, setFilter] = useState<'drivers' | 'events' | 'crews'>('drivers');
 
   const locate = async () => {
     setGpsLabel('SCANNING');
@@ -369,6 +412,13 @@ function RadarScreen() {
         <Pressable onPress={locate} style={styles.locateButton}><Crosshair size={16} color={accent} /><Text style={styles.locateText}>{gpsLabel}</Text></Pressable>
       </View>
       <View style={styles.networkPill}><View style={styles.liveDot} /><Text style={styles.networkPillText}>18 DRIVERS / 3 EVENTS</Text></View>
+      <View style={styles.radarFilters}>
+        {(['drivers', 'events', 'crews'] as const).map(item => (
+          <Pressable key={item} onPress={() => setFilter(item)} style={[styles.radarFilter, filter === item && styles.radarFilterActive]}>
+            <Text style={[styles.radarFilterText, filter === item && styles.radarFilterTextActive]}>{item.toUpperCase()}</Text>
+          </Pressable>
+        ))}
+      </View>
 
       {selected ? (
         <GlassPanel style={styles.driverSheet} glow>
@@ -391,14 +441,91 @@ function RadarScreen() {
       ) : (
         <GlassPanel style={styles.radarDock}>
           <Text style={styles.radarDockTitle}>RADAR ACTIVE</Text>
-          <Text style={styles.radarDockMeta}>Tap a signal to inspect the pilot.</Text>
+          <View style={styles.radarReadout}><Text style={styles.radarDockMeta}>360° SWEEP / 2.4 MI</Text><Text style={styles.radarDockMeta}>{filter.toUpperCase()} CHANNEL</Text></View>
         </GlassPanel>
       )}
     </View>
   );
 }
 
-function GarageScreen() {
+const feedPosts = [
+  { id: 'proof', alias: 'VOIDRUNNER', meta: 'VERIFIED 60–130 / 7.4 SEC', image: heroCar, caption: 'Clean pull. Closed course, dual GPS proof locked.', likes: 284 },
+  { id: 'meet', alias: 'NOVA', meta: 'MIDNIGHT ASSEMBLY / LOS ANGELES', image: commandHero, caption: 'Final location unlocks for confirmed pilots at 23:45.', likes: 119 },
+];
+
+function FeedScreen() {
+  const [liked, setLiked] = useState<string[]>(['proof']);
+  const [saved, setSaved] = useState<string[]>([]);
+  const [following, setFollowing] = useState<string[]>([]);
+  const [comments, setComments] = useState<Record<string, number>>({ proof: 18, meet: 7 });
+  const toggle = (id: string, values: string[], setter: (next: string[]) => void) => setter(values.includes(id) ? values.filter(value => value !== id) : [...values, id]);
+  return (
+    <ScrollView contentContainerStyle={styles.feedContent} showsVerticalScrollIndicator={false}>
+      <View style={styles.feedHeader}>
+        <View><Text style={styles.eyebrow}>ENCRYPTED SOCIAL</Text><Text style={styles.feedTitle}>THE CURRENT</Text></View>
+        <GlassButton label="POST" icon={Plus} compact onPress={() => Alert.alert('New transmission', 'Camera, video, run proof, and build posts open from this composer.')} active />
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyRail}>
+        {['YOU', 'VOID', 'NOVA', 'GHOST', 'R-34'].map((story, index) => <Pressable key={story} onPress={() => Alert.alert(`${story} / SIGNAL`, 'Story viewer opened.')} style={styles.storyItem}><View style={[styles.storyRing, index === 0 && styles.storyRingMuted]}><Text style={styles.storyInitial}>{index === 0 ? '+' : story.slice(0, 1)}</Text></View><Text style={styles.storyLabel}>{story}</Text></Pressable>)}
+      </ScrollView>
+      {feedPosts.map(post => {
+        const isLiked = liked.includes(post.id);
+        const isSaved = saved.includes(post.id);
+        return (
+          <View key={post.id} style={styles.postCard}>
+            <View style={styles.postHeader}><View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0, 1)}</Text></View><View style={styles.commandCopy}><Text style={styles.postAlias}>{post.alias}</Text><Text style={styles.postMeta}>{post.meta}</Text></View><Pressable onPress={() => toggle(post.alias, following, setFollowing)} style={[styles.followButton, following.includes(post.alias) && styles.followButtonActive]}><Text style={styles.followText}>{following.includes(post.alias) ? 'FOLLOWING' : 'FOLLOW'}</Text></Pressable></View>
+            <Pressable onPress={() => Alert.alert('Proof playback', `${post.alias}'s verified race video opens full-screen.`)} style={styles.postMedia}><Image source={post.image} style={styles.postImage} /><LinearGradient colors={['transparent', 'rgba(1,2,1,.72)']} style={StyleSheet.absoluteFill} /><View style={styles.proofPill}><BadgeCheck size={13} color={accent} /><Text style={styles.proofText}>PROOF LOCKED</Text></View><View style={styles.playDisc}><Play size={22} color={paper} fill={paper} /></View></Pressable>
+            <View style={styles.postActions}>
+              <View style={styles.postActionsLeft}><Pressable onPress={() => toggle(post.id, liked, setLiked)} style={styles.postAction}><Heart size={21} color={isLiked ? accent : paper} fill={isLiked ? accent : 'transparent'} /><Text style={styles.postActionText}>{post.likes + (isLiked ? 1 : 0)}</Text></Pressable><Pressable onPress={() => setComments(current => ({ ...current, [post.id]: (current[post.id] || 0) + 1 }))} style={styles.postAction}><MessageCircle size={21} color={paper} /><Text style={styles.postActionText}>{comments[post.id]}</Text></Pressable><Pressable onPress={() => Alert.alert('Transmission shared', 'Secure share link copied.')} style={styles.postAction}><Send size={20} color={paper} /></Pressable></View>
+              <Pressable onPress={() => toggle(post.id, saved, setSaved)} style={styles.postAction}><Bookmark size={21} color={isSaved ? accent : paper} fill={isSaved ? accent : 'transparent'} /></Pressable>
+            </View>
+            <Text style={styles.postCaption}><Text style={styles.postAlias}>{post.alias} </Text>{post.caption}</Text>
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+const products = [
+  { id: 'exhaust', name: 'VALVED TITANIUM CAT-BACK', category: 'EXHAUST', price: 4890, image: exhaustImage, seller: 'APEX VERIFIED', delivery: '2–4 DAYS' },
+  { id: 'intake', name: 'TWIN CARBON INTAKE SYSTEM', category: 'AIR / FUEL', price: 2195, image: intakeImage, seller: 'R35 PERFORMANCE', delivery: 'IN STOCK' },
+  { id: 'brakes', name: '6-PISTON TRACK BRAKE KIT', category: 'BRAKES', price: 6390, image: brakeImage, seller: 'MOTORSPORT DIRECT', delivery: '4–6 DAYS' },
+];
+
+function ShopScreen() {
+  const [car, setCar] = useState<'gtr' | 'm4'>('gtr');
+  const [category, setCategory] = useState('ALL');
+  const [saved, setSaved] = useState<string[]>([]);
+  const [cart, setCart] = useState<string[]>([]);
+  const visible = car === 'gtr' ? products.filter(product => category === 'ALL' || product.category === category) : [];
+  return (
+    <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
+      <View style={styles.shopHeader}><View><Text style={styles.eyebrow}>FITMENT-LOCKED MARKET</Text><Text style={styles.feedTitle}>PARTS VAULT</Text></View><Pressable onPress={() => Alert.alert('Cart', `${cart.length} confirmed-fit item${cart.length === 1 ? '' : 's'} staged.`)} style={styles.cartButton}><ShoppingBag size={19} color={paper} /><Text style={styles.cartCount}>{cart.length}</Text></Pressable></View>
+      <View style={styles.vehicleSelector}><Pressable onPress={() => setCar('gtr')} style={[styles.vehicleOption, car === 'gtr' && styles.vehicleOptionActive]}><CarFront size={17} color={car === 'gtr' ? accent : muted} /><View><Text style={styles.vehicleName}>NIGHTSHIFT</Text><Text style={styles.vehicleMeta}>2024 GT-R NISMO</Text></View>{car === 'gtr' ? <Check size={16} color={accent} /> : null}</Pressable><Pressable onPress={() => setCar('m4')} style={[styles.vehicleOption, car === 'm4' && styles.vehicleOptionActive]}><CarFront size={17} color={car === 'm4' ? accent : muted} /><View><Text style={styles.vehicleName}>BLACK ICE</Text><Text style={styles.vehicleMeta}>2020 BMW M4</Text></View>{car === 'm4' ? <Check size={16} color={accent} /> : null}</Pressable></View>
+      <View style={styles.fitmentBanner}><PackageCheck size={21} color={accent} /><View style={styles.commandCopy}><Text style={styles.commandTitle}>STRICT FITMENT ENABLED</Text><Text style={styles.commandMeta}>{car === 'gtr' ? '2024 · Nissan · GT-R Nismo · 3.8L TT · AWD' : 'VIN or trim confirmation required before results unlock'}</Text></View><ListFilter size={17} color={muted} /></View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRail}>{['ALL', 'EXHAUST', 'AIR / FUEL', 'BRAKES'].map(item => <Pressable key={item} onPress={() => setCategory(item)} style={[styles.categoryChip, category === item && styles.categoryChipActive]}><Text style={[styles.categoryText, category === item && styles.categoryTextActive]}>{item}</Text></Pressable>)}</ScrollView>
+      {visible.length ? visible.map(product => <View key={product.id} style={styles.productCard}><Image source={product.image} style={styles.productImage} /><View style={styles.productBody}><View style={styles.confirmedFit}><BadgeCheck size={13} color={accent} /><Text style={styles.confirmedFitText}>CONFIRMED FIT / NIGHTSHIFT</Text></View><Text style={styles.productName}>{product.name}</Text><Text style={styles.productMeta}>{product.seller} · {product.delivery}</Text><View style={styles.productBottom}><Text style={styles.productPrice}>${product.price.toLocaleString()}</Text><View style={styles.productActions}><Pressable onPress={() => setSaved(current => current.includes(product.id) ? current.filter(id => id !== product.id) : [...current, product.id])} style={styles.productIconButton}><Bookmark size={18} color={saved.includes(product.id) ? accent : paper} fill={saved.includes(product.id) ? accent : 'transparent'} /></Pressable><Pressable onPress={() => setCart(current => current.includes(product.id) ? current : [...current, product.id])} style={[styles.addToCart, cart.includes(product.id) && styles.addToCartDone]}>{cart.includes(product.id) ? <Check size={17} color={accent} /> : <Plus size={17} color={paper} />}<Text style={styles.addToCartText}>{cart.includes(product.id) ? 'STAGED' : 'ADD'}</Text></Pressable></View></View></View></View>) : <GlassPanel style={styles.emptyFitment}><ScanLine size={34} color={accent} /><Text style={styles.emptyTitle}>FITMENT ID REQUIRED</Text><Text style={styles.emptyCopy}>Confirm the M4 trim and engine in Garage before the marketplace reveals compatible parts.</Text><GlassButton label="OPEN GARAGE" icon={CarFront} onPress={() => Alert.alert('Garage', 'Vehicle fitment editor opened.')} active /></GlassPanel>}
+    </ScrollView>
+  );
+}
+
+function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
+  const modules: { tab: TabKey; label: string; meta: string; icon: IconType }[] = [
+    { tab: 'race', label: 'RACE CONTROL', meta: 'Stage, track, spectate', icon: Swords }, { tab: 'meets', label: 'MEETS', meta: 'Routes and live locations', icon: MapPin },
+    { tab: 'shop', label: 'PARTS VAULT', meta: 'Verified vehicle fitment', icon: ShoppingBag }, { tab: 'leaderboard', label: 'RANKINGS', meta: 'Season tiers and records', icon: Trophy },
+    { tab: 'messages', label: 'COMMS', meta: 'Groups and direct messages', icon: MessagesSquare }, { tab: 'vault', label: 'CREDITS', meta: 'Rewards, wagers, badges', icon: WalletCards },
+  ];
+  return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.moreHeader}><Text style={styles.eyebrow}>PILOT SYSTEMS</Text><Text style={styles.feedTitle}>ACCESS GRID</Text><Text style={styles.moreCopy}>All network tools. One encrypted identity.</Text></View><View style={styles.moduleGrid}>{modules.map(module => { const Icon = module.icon; return <Pressable key={module.tab} onPress={() => onTab(module.tab)} style={({ pressed }) => [styles.moduleCard, pressed && styles.pressed]}><View style={styles.moduleIcon}><Icon size={23} color={accent} /></View><Text style={styles.moduleTitle}>{module.label}</Text><Text style={styles.moduleMeta}>{module.meta}</Text><ChevronRight size={17} color={muted} style={styles.moduleChevron} /></Pressable>; })}</View><SectionTitle label="NETWORK HEALTH" /><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>GPS PROOF</Text><Text style={styles.healthGood}>OPERATIONAL</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>ENCRYPTED COMMS</Text><Text style={styles.healthGood}>OPERATIONAL</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>FITMENT INDEX</Text><Text style={styles.healthGood}>SYNCED</Text></View></GlassPanel></ScrollView>;
+}
+
+function UtilityScreen({ kind }: { kind: 'meets' | 'messages' | 'leaderboard' }) {
+  const config = kind === 'meets' ? { title: 'MEET CONTROL', icon: CalendarDays, rows: ['MIDNIGHT ASSEMBLY / 42 LOCKED', 'CANYON SIGNAL / 18 INTERESTED', 'HARBOR GRID / LOCATION HIDDEN'] } : kind === 'messages' ? { title: 'SECURE COMMS', icon: MessagesSquare, rows: ['NIGHTSHIFT CREW / 4 UNREAD', 'VOIDRUNNER / PROOF RECEIVED', 'MIDNIGHT ASSEMBLY / LOCATION UPDATE'] } : { title: 'SEASON RANKINGS', icon: Trophy, rows: ['#01 / VANTA / PLATINUM / 52–4', '#02 / VOIDRUNNER / MASTER / 48–7', '#18 / CIPHER_24 / MASTER / 31–9'] };
+  const Icon = config.icon;
+  return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.utilityHero}><Icon size={28} color={accent} /><Text style={styles.feedTitle}>{config.title}</Text></View>{config.rows.map((row, index) => <Pressable key={row} onPress={() => Alert.alert(config.title, row)} style={styles.utilityRow}><Text style={styles.utilityIndex}>{String(index + 1).padStart(2, '0')}</Text><Text style={styles.utilityText}>{row}</Text><ChevronRight size={17} color={muted} /></Pressable>)}</ScrollView>;
+}
+
+function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [carIndex, setCarIndex] = useState(0);
   const cars = [
     { name: 'NIGHTSHIFT', model: '2024 Nissan GT-R Nismo', hp: '710', drive: 'AWD', fit: '38' },
@@ -410,7 +537,7 @@ function GarageScreen() {
       <View style={styles.garageSwitcher}>
         {cars.map((item, index) => (
           <Pressable key={item.name} onPress={() => setCarIndex(index)} style={[styles.carChip, carIndex === index && styles.carChipActive]}>
-            <CarFront size={15} color={carIndex === index ? '#050705' : paper} />
+            <CarFront size={15} color={carIndex === index ? accent : paper} />
             <Text style={[styles.carChipText, carIndex === index && styles.carChipTextActive]}>{item.name}</Text>
           </Pressable>
         ))}
@@ -422,7 +549,7 @@ function GarageScreen() {
         <LinearGradient colors={['transparent', 'rgba(2,3,2,0.95)']} style={StyleSheet.absoluteFill} />
         <View style={styles.garageHeroCopy}>
           <View><Text style={styles.eyebrow}>PRIMARY BUILD</Text><Text style={styles.garageName}>{car.name}</Text><Text style={styles.garageModel}>{car.model}</Text></View>
-          <BadgeCheck size={28} color={accent} fill="rgba(182,255,74,.12)" />
+          <BadgeCheck size={28} color={accent} fill="rgba(145,185,133,.12)" />
         </View>
       </View>
 
@@ -443,7 +570,7 @@ function GarageScreen() {
       </GlassPanel>
 
       <SectionTitle label="FITMENT VAULT" action={`${car.fit} MATCHES`} />
-      <Pressable onPress={() => Alert.alert('Fitment locked', `${car.fit} confirmed-fit parts for ${car.model}. Universal parts are shown separately.`)} style={({ pressed }) => [styles.fitmentCard, pressed && styles.pressed]}>
+      <Pressable onPress={() => onTab('shop')} style={({ pressed }) => [styles.fitmentCard, pressed && styles.pressed]}>
         <View style={styles.fitmentIcon}><ScanLine size={24} color={accent} /></View>
         <View style={styles.commandCopy}><Text style={styles.commandTitle}>PARTS FOR THIS BUILD</Text><Text style={styles.commandMeta}>Year · trim · engine · drivetrain verified</Text></View>
         <ChevronRight size={18} color={accent} />
@@ -512,7 +639,7 @@ function RaceScreen() {
       <View style={styles.formatGrid}>
         {formats.map(item => (
           <Pressable key={item} onPress={() => setFormat(item)} style={[styles.formatButton, format === item && styles.formatButtonActive]}>
-            <Gauge size={18} color={format === item ? '#050705' : paper} />
+            <Gauge size={18} color={format === item ? accent : paper} />
             <Text style={[styles.formatText, format === item && styles.formatTextActive]}>{item}</Text>
           </Pressable>
         ))}
@@ -544,7 +671,7 @@ function RaceScreen() {
         <Text style={styles.speedUnit}>MPH</Text>
         <View style={styles.speedMetaRow}><Text style={styles.speedMeta}>MAX {Math.round(maxSpeed)} MPH</Text><Text style={styles.speedMeta}>FORMAT {format}</Text></View>
         <Pressable onPress={toggleTracking} style={[styles.startRunButton, tracking && styles.stopRunButton]}>
-          {tracking ? <X size={18} color={paper} /> : <Play size={18} color="#050705" fill="#050705" />}
+          {tracking ? <X size={18} color={paper} /> : <Play size={18} color={accent} fill={accent} />}
           <Text style={[styles.startRunText, tracking && { color: paper }]}>{tracking ? 'END GPS RUN' : 'START GPS RUN'}</Text>
         </Pressable>
       </GlassPanel>
@@ -561,7 +688,7 @@ function VaultScreen({ credits, onClaim }: { credits: number; onClaim: () => voi
   };
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
-      <LinearGradient colors={['rgba(182,255,74,.19)', 'rgba(15,18,15,.90)', 'rgba(4,5,4,.96)']} style={styles.vaultCard}>
+      <LinearGradient colors={['rgba(145,185,133,.15)', 'rgba(9,12,10,.94)', 'rgba(2,3,2,.98)']} style={styles.vaultCard}>
         <View style={styles.vaultTop}><Text style={styles.eyebrow}>ENCRYPTED BALANCE</Text><ShieldCheck size={20} color={accent} /></View>
         <CreditsToken value={credits} />
         <View style={styles.vaultCodeRow}><Text style={styles.vaultCode}>AC / 88–021–UGR</Text><Text style={styles.vaultCode}>PILOT VERIFIED</Text></View>
@@ -575,7 +702,7 @@ function VaultScreen({ credits, onClaim }: { credits: number; onClaim: () => voi
 
       <SectionTitle label="REWARD DROP" />
       <Pressable onPress={claim} style={({ pressed }) => [styles.rewardDrop, claimed && styles.rewardDropClaimed, pressed && styles.pressed]}>
-        <View style={styles.dropIcon}>{claimed ? <BadgeCheck size={25} color={accent} /> : <Gift size={25} color="#050705" />}</View>
+        <View style={styles.dropIcon}>{claimed ? <BadgeCheck size={25} color={accent} /> : <Gift size={25} color={paper} />}</View>
         <View style={styles.commandCopy}><Text style={styles.commandTitle}>{claimed ? 'DROP CLAIMED' : 'DAILY SIGNAL DROP'}</Text><Text style={styles.commandMeta}>{claimed ? '+250 AC added to encrypted balance' : 'Encrypted reward · expires in 04:18:22'}</Text></View>
         <Text style={styles.dropValue}>{claimed ? 'LOCKED' : '+250'}</Text>
       </Pressable>
@@ -621,10 +748,30 @@ function LedgerRow({ icon: Icon, title, meta, value }: { icon: IconType; title: 
   );
 }
 
+function NotificationCenter({ onClose, onOpen }: { onClose: () => void; onOpen: (tab: TabKey) => void }) {
+  const [unread, setUnread] = useState(['race', 'meet']);
+  const notices = [
+    { id: 'race', title: 'CHALLENGE ACCEPTED', meta: 'VOIDRUNNER locked the 60–130 contract', tab: 'race' as TabKey, icon: Swords },
+    { id: 'meet', title: 'LOCATION WINDOW OPEN', meta: 'Midnight Assembly released checkpoint one', tab: 'meets' as TabKey, icon: MapPin },
+    { id: 'reward', title: 'BADGE PROGRESS', meta: '2 verified runs until Quickdraw II', tab: 'vault' as TabKey, icon: Medal },
+  ];
+  return (
+    <View style={styles.notificationOverlay}>
+      <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
+      <GlassPanel style={styles.notificationPanel} glow>
+        <View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>SECURE INBOX</Text><Text style={styles.notificationTitle}>NOTIFICATIONS</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>
+        <Pressable onPress={() => setUnread([])}><Text style={styles.markRead}>MARK ALL READ</Text></Pressable>
+        {notices.map(notice => { const Icon = notice.icon; const fresh = unread.includes(notice.id); return <Pressable key={notice.id} onPress={() => { setUnread(current => current.filter(id => id !== notice.id)); onClose(); onOpen(notice.tab); }} style={styles.notificationRow}><View style={styles.notificationIcon}><Icon size={17} color={fresh ? accent : muted} /></View><View style={styles.commandCopy}><Text style={styles.notificationRowTitle}>{notice.title}</Text><Text style={styles.notificationMeta}>{notice.meta}</Text></View>{fresh ? <View style={styles.unreadDot} /> : null}</Pressable>; })}
+      </GlassPanel>
+    </View>
+  );
+}
+
 export function ApexDesignPreview() {
   const [tab, setTab] = useState<TabKey>('command');
   const [credits, setCredits] = useState(12480);
   const [reward, setReward] = useState<string | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const entrance = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -640,9 +787,13 @@ export function ApexDesignPreview() {
 
   const content = useMemo(() => {
     if (tab === 'radar') return <RadarScreen />;
-    if (tab === 'garage') return <GarageScreen />;
+    if (tab === 'feed') return <FeedScreen />;
+    if (tab === 'garage') return <GarageScreen onTab={setTab} />;
+    if (tab === 'more') return <MoreScreen onTab={setTab} />;
     if (tab === 'race') return <RaceScreen />;
     if (tab === 'vault') return <VaultScreen credits={credits} onClaim={claimReward} />;
+    if (tab === 'shop') return <ShopScreen />;
+    if (tab === 'meets' || tab === 'messages' || tab === 'leaderboard') return <UtilityScreen kind={tab} />;
     return <CommandScreen credits={credits} onTab={setTab} />;
   }, [tab, credits]);
 
@@ -656,7 +807,7 @@ export function ApexDesignPreview() {
         </View>
         <View style={styles.headerRight}>
           <View style={styles.signal}><View style={styles.liveDot} /><Text style={styles.signalText}>ENCRYPTED</Text></View>
-          <Pressable style={styles.iconButton}><Bell size={18} color={paper} /></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={() => setNotificationsOpen(true)} style={styles.iconButton}><Bell size={18} color={paper} /><View style={styles.headerUnread} /></Pressable>
         </View>
       </View>
 
@@ -669,10 +820,10 @@ export function ApexDesignPreview() {
           <BlurView intensity={42} tint="dark" style={styles.tabBar}>
             {tabs.map(item => {
               const Icon = item.icon;
-              const activeTab = tab === item.key;
+              const activeTab = tab === item.key || (item.key === 'more' && ['race', 'vault', 'shop', 'meets', 'messages', 'leaderboard'].includes(tab));
               return (
                 <Pressable key={item.key} onPress={() => setTab(item.key)} style={styles.tabItem}>
-                  <View style={[styles.tabIcon, activeTab && styles.tabIconActive]}><Icon size={19} color={activeTab ? '#050705' : muted} strokeWidth={2.1} /></View>
+                  <View style={[styles.tabIcon, activeTab && styles.tabIconActive]}><Icon size={19} color={activeTab ? accent : muted} strokeWidth={2.1} /></View>
                   <Text style={[styles.tabLabel, activeTab && styles.tabLabelActive]}>{item.label}</Text>
                 </Pressable>
               );
@@ -684,6 +835,7 @@ export function ApexDesignPreview() {
       {reward ? (
         <Animated.View style={styles.rewardToast}><CircleDollarSign size={18} color="#050705" /><Text style={styles.rewardToastText}>{reward}</Text></Animated.View>
       ) : null}
+      {notificationsOpen ? <NotificationCenter onClose={() => setNotificationsOpen(false)} onOpen={setTab} /> : null}
     </SafeAreaView>
   );
 }
@@ -699,14 +851,14 @@ const darkMapStyle = [
 ];
 
 const styles = StyleSheet.create({
-  app: { flex: 1, backgroundColor: '#030403', overflow: 'hidden' },
+  app: { flex: 1, backgroundColor: '#010201', overflow: 'hidden' },
   main: { flex: 1 },
   gridVerticals: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', justifyContent: 'space-around', opacity: 0.18 },
-  gridVertical: { width: 1, height: '100%', backgroundColor: '#273027' },
+  gridVertical: { width: 1, height: '100%', backgroundColor: '#182019' },
   gridHorizontals: { ...StyleSheet.absoluteFillObject, justifyContent: 'space-around', opacity: 0.14 },
-  gridHorizontal: { width: '100%', height: 1, backgroundColor: '#273027' },
-  scanline: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: accent, shadowColor: accent, shadowRadius: 12, shadowOpacity: 0.8 },
-  header: { height: 66, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: border, backgroundColor: 'rgba(3,4,3,.92)', zIndex: 20 },
+  gridHorizontal: { width: '100%', height: 1, backgroundColor: '#182019' },
+  scanline: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: accent, shadowColor: accent, shadowRadius: 10, shadowOpacity: 0.35 },
+  header: { height: 66, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: border, backgroundColor: 'rgba(1,3,2,.95)', zIndex: 20 },
   brandLockup: { flexDirection: 'row', alignItems: 'center' },
   brandMark: { width: 34, height: 34, borderWidth: 1, borderColor: accent, alignItems: 'center', justifyContent: 'center', marginRight: 10, transform: [{ rotate: '45deg' }] },
   brandMarkText: { color: accent, fontSize: 18, fontWeight: '900', transform: [{ rotate: '-45deg' }] },
@@ -717,16 +869,18 @@ const styles = StyleSheet.create({
   signalText: { color: muted, fontSize: 7, fontWeight: '900', letterSpacing: 0.8 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: accent, shadowColor: accent, shadowOpacity: 1, shadowRadius: 7 },
   liveDotBright: { width: 8, height: 8, borderRadius: 4 },
-  iconButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.04)' },
+  iconButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,.22)', backgroundColor: 'rgba(255,255,255,.07)', shadowColor: '#000', shadowOpacity: .45, shadowRadius: 12 },
   screenContent: { padding: 14, paddingBottom: 116, width: '100%', maxWidth: 720, alignSelf: 'center' },
-  glassShell: { borderRadius: 12, borderWidth: 1, borderColor: border, overflow: 'hidden', backgroundColor: surface },
-  glassGlow: { borderColor: 'rgba(182,255,74,.36)', shadowColor: accent, shadowOpacity: 0.14, shadowRadius: 18, elevation: 4 },
-  glassBlur: { padding: 14, backgroundColor: 'rgba(10,13,11,.56)' },
-  glassButton: { minHeight: 43, paddingHorizontal: 14, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.055)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  glassButtonActive: { backgroundColor: accent, borderColor: accent },
-  glassButtonCompact: { minHeight: 36, paddingHorizontal: 10 },
+  glassShell: { borderRadius: 12, borderWidth: 1, borderColor: border, overflow: 'hidden', backgroundColor: surface, shadowColor: '#000', shadowOpacity: .36, shadowRadius: 18 },
+  glassGlow: { borderColor: 'rgba(145,185,133,.42)', shadowColor: accent, shadowOpacity: 0.12, shadowRadius: 20, elevation: 4 },
+  glassBlur: { padding: 14, backgroundColor: 'rgba(4,7,5,.58)' },
+  glassButtonShell: { minHeight: 43, borderRadius: 13, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.22)', backgroundColor: 'rgba(255,255,255,.05)', shadowColor: '#000', shadowOpacity: .45, shadowRadius: 12 },
+  glassButton: { minHeight: 41, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,.065)', position: 'relative', overflow: 'hidden' },
+  glassButtonShine: { position: 'absolute', left: 10, right: 10, top: 1, height: 1, backgroundColor: 'rgba(255,255,255,.38)' },
+  glassButtonActive: { backgroundColor: 'rgba(145,185,133,.16)' },
+  glassButtonCompact: { minHeight: 36 },
   glassButtonText: { color: paper, fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
-  glassButtonTextActive: { color: '#050705' },
+  glassButtonTextActive: { color: paper },
   pressed: { opacity: 0.75, transform: [{ scale: 0.985 }] },
   hero: { height: 330, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.16)', justifyContent: 'space-between' },
   heroImage: { resizeMode: 'cover', objectPosition: '50% 62%' } as any,
@@ -756,7 +910,7 @@ const styles = StyleSheet.create({
   progressText: { color: muted, fontSize: 7, fontWeight: '900', letterSpacing: 0.5 },
   tokenWrap: { flexDirection: 'row', alignItems: 'center', gap: 12, position: 'relative' },
   tokenWrapCompact: { gap: 8 },
-  tokenAura: { position: 'absolute', width: 58, height: 58, borderRadius: 29, backgroundColor: 'rgba(182,255,74,.14)' },
+  tokenAura: { position: 'absolute', width: 58, height: 58, borderRadius: 29, backgroundColor: 'rgba(145,185,133,.12)' },
   token: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,.7)' },
   tokenCompact: { width: 36, height: 36, borderRadius: 18 },
   tokenLetter: { color: '#081006', fontSize: 22, fontWeight: '900', fontStyle: 'italic' },
@@ -770,7 +924,7 @@ const styles = StyleSheet.create({
   commandMeta: { color: muted, fontSize: 8, fontWeight: '700', marginTop: 4, letterSpacing: 0.3 },
   badgeRail: { gap: 8, paddingRight: 14 },
   rewardBadge: { width: 145 },
-  rewardIcon: { width: 42, height: 42, borderRadius: 21, borderWidth: 1, borderColor: 'rgba(182,255,74,.28)', backgroundColor: 'rgba(182,255,74,.07)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  rewardIcon: { width: 42, height: 42, borderRadius: 21, borderWidth: 1, borderColor: 'rgba(145,185,133,.28)', backgroundColor: 'rgba(145,185,133,.07)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   rewardLabel: { color: paper, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
   rewardDetail: { color: accent, fontSize: 7, fontWeight: '900', letterSpacing: 0.8, marginTop: 4 },
   radarScreen: { flex: 1, backgroundColor: '#080A08' },
@@ -778,10 +932,10 @@ const styles = StyleSheet.create({
   radarTopControls: { position: 'absolute', top: 14, left: 14, right: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   segmentedControl: { flexDirection: 'row', padding: 3, borderRadius: 10, backgroundColor: 'rgba(3,4,3,.85)', borderWidth: 1, borderColor: border },
   segment: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 7 },
-  segmentActive: { backgroundColor: paper },
+  segmentActive: { backgroundColor: 'rgba(255,255,255,.13)', borderWidth: 1, borderColor: 'rgba(255,255,255,.25)' },
   segmentText: { color: muted, fontSize: 8, fontWeight: '900', letterSpacing: 0.7 },
-  segmentTextActive: { color: '#050705' },
-  locateButton: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: 'rgba(3,4,3,.87)', borderWidth: 1, borderColor: 'rgba(182,255,74,.4)', paddingHorizontal: 11, paddingVertical: 9, borderRadius: 10 },
+  segmentTextActive: { color: paper },
+  locateButton: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: 'rgba(3,4,3,.87)', borderWidth: 1, borderColor: 'rgba(145,185,133,.4)', paddingHorizontal: 11, paddingVertical: 9, borderRadius: 10 },
   locateText: { color: paper, fontSize: 8, fontWeight: '900', letterSpacing: 0.7 },
   networkPill: { position: 'absolute', top: 66, left: 14, flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: 'rgba(3,4,3,.84)', borderRadius: 20, borderWidth: 1, borderColor: border, paddingHorizontal: 10, paddingVertical: 7 },
   networkPillText: { color: paper, fontSize: 8, fontWeight: '900', letterSpacing: 0.7 },
@@ -811,10 +965,10 @@ const styles = StyleSheet.create({
   radarDockMeta: { color: muted, fontSize: 9, fontWeight: '700', marginTop: 4 },
   garageSwitcher: { flexDirection: 'row', gap: 7, marginBottom: 10 },
   carChip: { flex: 1, minHeight: 42, borderWidth: 1, borderColor: border, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: 'rgba(255,255,255,.04)' },
-  carChipActive: { backgroundColor: accent, borderColor: accent },
+  carChipActive: { backgroundColor: 'rgba(145,185,133,.13)', borderColor: 'rgba(145,185,133,.4)' },
   carChipText: { color: paper, fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },
-  carChipTextActive: { color: '#050705' },
-  addCarButton: { width: 42, height: 42, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(182,255,74,.3)', alignItems: 'center', justifyContent: 'center' },
+  carChipTextActive: { color: paper },
+  addCarButton: { width: 42, height: 42, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(145,185,133,.3)', alignItems: 'center', justifyContent: 'center' },
   garageHero: { height: 315, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: border },
   garageImage: { width: '100%', height: '100%', resizeMode: 'cover', objectPosition: '68% 50%' } as any,
   garageHeroCopy: { position: 'absolute', left: 16, right: 16, bottom: 16, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
@@ -828,19 +982,19 @@ const styles = StyleSheet.create({
   identityLabel: { color: muted, fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
   identityValue: { color: paper, fontSize: 9, fontWeight: '900', letterSpacing: 0.4 },
   identityDivider: { height: 1, backgroundColor: border, marginVertical: 10 },
-  fitmentCard: { minHeight: 78, borderWidth: 1, borderColor: 'rgba(182,255,74,.36)', borderRadius: 11, backgroundColor: 'rgba(182,255,74,.07)', flexDirection: 'row', alignItems: 'center', padding: 12 },
-  fitmentIcon: { width: 45, height: 45, borderRadius: 10, backgroundColor: 'rgba(182,255,74,.1)', alignItems: 'center', justifyContent: 'center', marginRight: 11 },
+  fitmentCard: { minHeight: 78, borderWidth: 1, borderColor: 'rgba(145,185,133,.36)', borderRadius: 11, backgroundColor: 'rgba(145,185,133,.07)', flexDirection: 'row', alignItems: 'center', padding: 12 },
+  fitmentIcon: { width: 45, height: 45, borderRadius: 10, backgroundColor: 'rgba(145,185,133,.1)', alignItems: 'center', justifyContent: 'center', marginRight: 11 },
   raceHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
   raceTitle: { color: paper, fontSize: 29, fontWeight: '900', letterSpacing: 1, marginTop: 3 },
-  secureMark: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(182,255,74,.3)', backgroundColor: 'rgba(182,255,74,.07)', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
+  secureMark: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(145,185,133,.3)', backgroundColor: 'rgba(145,185,133,.07)', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
   secureText: { color: accent, fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
   formatGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   formatButton: { width: '48.7%', minHeight: 58, borderRadius: 10, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.035)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  formatButtonActive: { backgroundColor: accent, borderColor: accent },
+  formatButtonActive: { backgroundColor: 'rgba(145,185,133,.12)', borderColor: 'rgba(145,185,133,.4)' },
   formatText: { color: paper, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
-  formatTextActive: { color: '#050705' },
+  formatTextActive: { color: paper },
   opponentRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: border, borderRadius: 10, padding: 9, marginBottom: 7, backgroundColor: 'rgba(255,255,255,.025)' },
-  opponentRowActive: { borderColor: 'rgba(182,255,74,.42)', backgroundColor: 'rgba(182,255,74,.055)' },
+  opponentRowActive: { borderColor: 'rgba(145,185,133,.42)', backgroundColor: 'rgba(145,185,133,.055)' },
   opponentAvatar: { width: 42, height: 42, borderRadius: 9, backgroundColor: '#1D231D', borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
   opponentAvatarText: { color: accent, fontSize: 14, fontWeight: '900' },
   checkRing: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: muted, alignItems: 'center', justifyContent: 'center' },
@@ -857,18 +1011,18 @@ const styles = StyleSheet.create({
   speedUnit: { color: accent, fontSize: 10, fontWeight: '900', letterSpacing: 2, textAlign: 'center' },
   speedMetaRow: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: border, marginTop: 18, paddingTop: 11 },
   speedMeta: { color: muted, fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },
-  startRunButton: { minHeight: 48, borderRadius: 10, backgroundColor: accent, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14 },
+  startRunButton: { minHeight: 48, borderRadius: 11, backgroundColor: 'rgba(145,185,133,.15)', borderWidth: 1, borderColor: 'rgba(145,185,133,.44)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14 },
   stopRunButton: { backgroundColor: 'rgba(255,255,255,.06)', borderWidth: 1, borderColor: paper },
-  startRunText: { color: '#050705', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-  vaultCard: { minHeight: 230, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(182,255,74,.42)', padding: 18, justifyContent: 'space-between', overflow: 'hidden' },
+  startRunText: { color: paper, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  vaultCard: { minHeight: 230, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(145,185,133,.42)', padding: 18, justifyContent: 'space-between', overflow: 'hidden' },
   vaultTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   vaultCodeRow: { flexDirection: 'row', justifyContent: 'space-between' },
   vaultCode: { color: muted, fontSize: 7, fontWeight: '900', letterSpacing: 0.7 },
   vaultActions: { flexDirection: 'row', gap: 7, marginTop: 9 },
-  rewardDrop: { minHeight: 78, borderRadius: 11, backgroundColor: accent, padding: 12, flexDirection: 'row', alignItems: 'center' },
-  rewardDropClaimed: { backgroundColor: 'rgba(182,255,74,.07)', borderWidth: 1, borderColor: 'rgba(182,255,74,.34)' },
+  rewardDrop: { minHeight: 78, borderRadius: 11, backgroundColor: 'rgba(145,185,133,.12)', borderWidth: 1, borderColor: 'rgba(145,185,133,.34)', padding: 12, flexDirection: 'row', alignItems: 'center' },
+  rewardDropClaimed: { backgroundColor: 'rgba(145,185,133,.07)', borderWidth: 1, borderColor: 'rgba(145,185,133,.34)' },
   dropIcon: { width: 46, height: 46, borderRadius: 23, backgroundColor: 'rgba(5,7,5,.13)', alignItems: 'center', justifyContent: 'center', marginRight: 11 },
-  dropValue: { color: '#050705', fontSize: 13, fontWeight: '900', letterSpacing: 0.6 },
+  dropValue: { color: accent, fontSize: 13, fontWeight: '900', letterSpacing: 0.6 },
   badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   vaultBadge: { width: '48.7%' },
   vaultBadgeTitle: { color: paper, fontSize: 10, fontWeight: '900', letterSpacing: 0.7, marginTop: 14 },
@@ -879,13 +1033,112 @@ const styles = StyleSheet.create({
   ledgerMeta: { color: muted, fontSize: 7, fontWeight: '800', marginTop: 3 },
   ledgerValue: { color: paper, fontSize: 11, fontWeight: '900' },
   tabBarPositioner: { position: 'absolute', left: 0, right: 0, bottom: 10, alignItems: 'center', zIndex: 50 },
-  tabBarShell: { width: '95%', maxWidth: 700, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.16)', backgroundColor: 'rgba(4,5,4,.88)' },
-  tabBar: { height: 68, flexDirection: 'row', backgroundColor: 'rgba(4,5,4,.72)', paddingHorizontal: 5 },
+  tabBarShell: { width: '95%', maxWidth: 700, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.20)', backgroundColor: 'rgba(2,4,3,.86)', shadowColor: '#000', shadowOpacity: .55, shadowRadius: 20 },
+  tabBar: { height: 68, flexDirection: 'row', backgroundColor: 'rgba(3,6,4,.67)', paddingHorizontal: 5 },
   tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   tabIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  tabIconActive: { backgroundColor: accent },
+  tabIconActive: { backgroundColor: 'rgba(145,185,133,.14)', borderWidth: 1, borderColor: 'rgba(145,185,133,.32)' },
   tabLabel: { color: muted, fontSize: 6, fontWeight: '900', letterSpacing: 0.5, marginTop: 3 },
   tabLabelActive: { color: paper },
   rewardToast: { position: 'absolute', top: 78, alignSelf: 'center', backgroundColor: accent, borderRadius: 22, paddingHorizontal: 15, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 7, zIndex: 100, shadowColor: accent, shadowOpacity: 0.4, shadowRadius: 18 },
   rewardToastText: { color: '#050705', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
+  headerUnread: { position: 'absolute', width: 7, height: 7, borderRadius: 4, backgroundColor: accent, right: 3, top: 2, borderWidth: 1, borderColor: '#020302' },
+  scannerField: { position: 'absolute', width: 260, height: 260, left: '50%', top: '50%', marginLeft: -130, marginTop: -130, alignItems: 'center', justifyContent: 'center', opacity: .82 },
+  scannerRing: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: 'rgba(145,185,133,.28)' },
+  scannerRingOuter: { width: 250, height: 250 },
+  scannerRingMiddle: { width: 166, height: 166 },
+  scannerRingInner: { width: 82, height: 82 },
+  scannerAxisHorizontal: { position: 'absolute', width: 250, height: 1, backgroundColor: 'rgba(145,185,133,.18)' },
+  scannerAxisVertical: { position: 'absolute', width: 1, height: 250, backgroundColor: 'rgba(145,185,133,.18)' },
+  scannerSweep: { width: 250, height: 250, position: 'absolute' },
+  scannerBeam: { position: 'absolute', left: 125, top: 0, width: 125, height: 125, borderTopRightRadius: 125 },
+  radarFilters: { position: 'absolute', top: 103, left: 14, flexDirection: 'row', gap: 5 },
+  radarFilter: { paddingHorizontal: 9, paddingVertical: 7, borderRadius: 9, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(2,4,3,.82)' },
+  radarFilterActive: { borderColor: 'rgba(145,185,133,.40)', backgroundColor: 'rgba(145,185,133,.12)' },
+  radarFilterText: { color: muted, fontSize: 7, fontWeight: '900', letterSpacing: .6 },
+  radarFilterTextActive: { color: paper },
+  radarReadout: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
+  feedContent: { paddingBottom: 116, width: '100%', maxWidth: 720, alignSelf: 'center' },
+  feedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: 16, paddingBottom: 12 },
+  feedTitle: { color: paper, fontSize: 27, fontWeight: '900', marginTop: 3 },
+  storyRail: { paddingHorizontal: 14, gap: 14, paddingBottom: 14 },
+  storyItem: { alignItems: 'center', width: 52 },
+  storyRing: { width: 48, height: 48, borderRadius: 24, borderWidth: 1, borderColor: accent, backgroundColor: 'rgba(145,185,133,.10)', alignItems: 'center', justifyContent: 'center' },
+  storyRingMuted: { borderColor: border, borderStyle: 'dashed' },
+  storyInitial: { color: paper, fontSize: 13, fontWeight: '900' },
+  storyLabel: { color: muted, fontSize: 6, fontWeight: '900', marginTop: 5 },
+  postCard: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: border, backgroundColor: 'rgba(3,6,4,.72)', marginBottom: 12 },
+  postHeader: { flexDirection: 'row', alignItems: 'center', padding: 12 },
+  postAvatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: accent, backgroundColor: '#0B0E0C', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  postAvatarText: { color: accent, fontWeight: '900' },
+  postAlias: { color: paper, fontSize: 10, fontWeight: '900' },
+  postMeta: { color: muted, fontSize: 7, fontWeight: '800', marginTop: 3 },
+  followButton: { borderWidth: 1, borderColor: 'rgba(255,255,255,.22)', borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: 'rgba(255,255,255,.05)' },
+  followButtonActive: { borderColor: 'rgba(145,185,133,.36)', backgroundColor: 'rgba(145,185,133,.12)' },
+  followText: { color: paper, fontSize: 7, fontWeight: '900' },
+  postMedia: { width: '100%', aspectRatio: 1.08, backgroundColor: '#030403', overflow: 'hidden' },
+  postImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  proofPill: { position: 'absolute', left: 12, top: 12, flexDirection: 'row', gap: 6, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(145,185,133,.38)', borderRadius: 14, backgroundColor: 'rgba(2,4,3,.76)', paddingHorizontal: 9, paddingVertical: 6 },
+  proofText: { color: paper, fontSize: 7, fontWeight: '900' },
+  playDisc: { position: 'absolute', left: '50%', top: '50%', marginLeft: -25, marginTop: -25, width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: 'rgba(255,255,255,.35)', backgroundColor: 'rgba(4,6,5,.48)', alignItems: 'center', justifyContent: 'center' },
+  postActions: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 13, paddingTop: 12 },
+  postActionsLeft: { flexDirection: 'row', gap: 17 },
+  postAction: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 25, minHeight: 28 },
+  postActionText: { color: muted, fontSize: 8, fontWeight: '900' },
+  postCaption: { color: '#B9C0BA', fontSize: 10, lineHeight: 16, paddingHorizontal: 13, paddingBottom: 15, paddingTop: 7 },
+  shopHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 13 },
+  cartButton: { width: 45, height: 45, borderRadius: 14, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.06)', alignItems: 'center', justifyContent: 'center' },
+  cartCount: { position: 'absolute', right: 4, top: 2, minWidth: 15, height: 15, borderRadius: 8, backgroundColor: accent, color: '#050705', fontSize: 8, fontWeight: '900', textAlign: 'center', lineHeight: 15 },
+  vehicleSelector: { flexDirection: 'row', gap: 7 },
+  vehicleOption: { flex: 1, minHeight: 58, borderWidth: 1, borderColor: border, borderRadius: 11, backgroundColor: 'rgba(255,255,255,.035)', padding: 9, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  vehicleOptionActive: { borderColor: 'rgba(145,185,133,.42)', backgroundColor: 'rgba(145,185,133,.09)' },
+  vehicleName: { color: paper, fontSize: 8, fontWeight: '900' },
+  vehicleMeta: { color: muted, fontSize: 6, fontWeight: '800', marginTop: 3 },
+  fitmentBanner: { minHeight: 63, borderWidth: 1, borderColor: 'rgba(145,185,133,.33)', borderRadius: 11, backgroundColor: 'rgba(8,13,9,.84)', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, marginTop: 9 },
+  categoryRail: { gap: 6, paddingVertical: 12 },
+  categoryChip: { borderWidth: 1, borderColor: border, borderRadius: 10, backgroundColor: 'rgba(255,255,255,.035)', paddingHorizontal: 12, paddingVertical: 8 },
+  categoryChipActive: { borderColor: 'rgba(255,255,255,.28)', backgroundColor: 'rgba(255,255,255,.12)' },
+  categoryText: { color: muted, fontSize: 7, fontWeight: '900' },
+  categoryTextActive: { color: paper },
+  productCard: { borderWidth: 1, borderColor: border, borderRadius: 12, overflow: 'hidden', backgroundColor: 'rgba(4,7,5,.85)', marginBottom: 11 },
+  productImage: { width: '100%', height: 226, resizeMode: 'cover', backgroundColor: '#030403' },
+  productBody: { padding: 12 },
+  confirmedFit: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  confirmedFitText: { color: accent, fontSize: 7, fontWeight: '900' },
+  productName: { color: paper, fontSize: 14, fontWeight: '900', marginTop: 8 },
+  productMeta: { color: muted, fontSize: 7, fontWeight: '800', marginTop: 5 },
+  productBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 13 },
+  productPrice: { color: paper, fontSize: 18, fontWeight: '900' },
+  productActions: { flexDirection: 'row', gap: 6 },
+  productIconButton: { width: 39, height: 39, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.05)', alignItems: 'center', justifyContent: 'center' },
+  addToCart: { height: 39, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(255,255,255,.08)', paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  addToCartDone: { borderColor: 'rgba(145,185,133,.4)', backgroundColor: 'rgba(145,185,133,.10)' },
+  addToCartText: { color: paper, fontSize: 8, fontWeight: '900' },
+  emptyFitment: { alignItems: 'center', gap: 11, paddingVertical: 28 },
+  emptyTitle: { color: paper, fontSize: 14, fontWeight: '900' },
+  emptyCopy: { color: muted, fontSize: 9, lineHeight: 15, textAlign: 'center', maxWidth: 320 },
+  moreHeader: { paddingTop: 8, paddingBottom: 16 },
+  moreCopy: { color: muted, fontSize: 9, marginTop: 5 },
+  moduleGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  moduleCard: { width: '48.7%', minHeight: 142, borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(5,8,6,.78)', padding: 13, position: 'relative' },
+  moduleIcon: { width: 43, height: 43, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(145,185,133,.3)', backgroundColor: 'rgba(145,185,133,.08)', alignItems: 'center', justifyContent: 'center' },
+  moduleTitle: { color: paper, fontSize: 10, fontWeight: '900', marginTop: 15 },
+  moduleMeta: { color: muted, fontSize: 7, lineHeight: 11, marginTop: 4, paddingRight: 16 },
+  moduleChevron: { position: 'absolute', right: 11, bottom: 12 },
+  healthRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  healthGood: { color: accent, fontSize: 8, fontWeight: '900' },
+  utilityHero: { paddingTop: 10, paddingBottom: 20, gap: 10 },
+  utilityRow: { minHeight: 66, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center' },
+  utilityIndex: { color: accent, fontSize: 9, fontWeight: '900', width: 34 },
+  utilityText: { color: paper, fontSize: 9, fontWeight: '900', flex: 1 },
+  notificationOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 120, backgroundColor: 'rgba(0,0,0,.56)', alignItems: 'flex-end', paddingTop: 58, paddingRight: 10 },
+  notificationPanel: { width: '94%', maxWidth: 410 },
+  notificationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  notificationTitle: { color: paper, fontSize: 18, fontWeight: '900', marginTop: 3 },
+  markRead: { color: accent, fontSize: 7, fontWeight: '900', textAlign: 'right', paddingVertical: 12 },
+  notificationRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: border },
+  notificationIcon: { width: 37, height: 37, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.04)', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  notificationRowTitle: { color: paper, fontSize: 9, fontWeight: '900' },
+  notificationMeta: { color: muted, fontSize: 7, lineHeight: 11, marginTop: 4 },
+  unreadDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: accent, marginLeft: 7 },
 });
