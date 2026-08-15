@@ -17,9 +17,5 @@
       "binding": "MEDIA",
       "bucket_name": "apex-ugr-media"
     }
-  ],
-  "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1
-  }
+  ]
 }
