@@ -253,4 +253,3 @@ CREATE OR REPLACE TRIGGER on_race_finish
 ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.driver_locations;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.race_challenges;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;

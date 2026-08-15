@@ -112,16 +112,17 @@ $$;
 
 
 -- Views for Telemetry History
-CREATE OR REPLACE VIEW public.vw_telemetry_lifetime AS
+CREATE OR REPLACE VIEW public.vw_telemetry_lifetime
+WITH (security_invoker = true) AS
 SELECT 
-    driver_id,
+    user_id AS driver_id,
     COUNT(id) as total_runs,
-    MAX(speed_mph) as top_speed,
-    AVG(speed_mph) as avg_speed,
-    MIN(zero_to_sixty_sec) as best_0_60,
-    MIN(quarter_mile_sec) as best_1_4_mile
+    MAX(max_speed_mph) as top_speed,
+    AVG(max_speed_mph) as avg_speed,
+    MIN(result_value) FILTER (WHERE run_type = 'zero_to_60') as best_0_60,
+    MIN(result_value) FILTER (WHERE run_type = 'quarter_mile') as best_1_4_mile
 FROM public.telemetry_runs
-GROUP BY driver_id;
+GROUP BY user_id;
 
 -- Ensure roles can read the view
 GRANT SELECT ON public.vw_telemetry_lifetime TO authenticated;

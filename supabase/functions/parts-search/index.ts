@@ -23,10 +23,40 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function vendorSearchUrl(vendor: "autozone" | "americanmuscle", vehicle: Vehicle, query: string) {
-  const terms = encodeURIComponent(`${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ""} ${query}`.trim());
-  if (vendor === "autozone") return `https://www.autozone.com/searchresult?searchText=${terms}`;
-  return `https://www.americanmuscle.com/search?keywords=${terms}`;
+function providerSearches(vehicle: Vehicle, query: string) {
+  const rawTerms = `${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ""} ${query}`.replace(/\s+/g, " ").trim();
+  const terms = encodeURIComponent(rawTerms);
+  const make = vehicle.make.toLowerCase();
+  const providers = [
+    { name: "AutoZone", mode: "direct_search", url: `https://www.autozone.com/searchresult?searchText=${terms}` },
+    { name: "Summit Racing", mode: "direct_search", url: `https://www.summitracing.com/search?keyword=${terms}` },
+    { name: "Vivid Racing", mode: "direct_search", url: `https://www.vividracing.com/catalogsearch/result/?q=${terms}` },
+  ];
+
+  const jdmMakes = new Set(["acura", "honda", "infiniti", "lexus", "mazda", "mitsubishi", "nissan", "scion", "subaru", "suzuki", "toyota"]);
+  const americanMakes = new Set(["buick", "cadillac", "chevrolet", "chrysler", "dodge", "ford", "gmc", "jeep", "lincoln", "pontiac", "ram"]);
+  const europeanMakes = new Set(["alfa romeo", "audi", "bentley", "bmw", "fiat", "jaguar", "land rover", "mercedes-benz", "mini", "porsche", "saab", "volkswagen", "volvo"]);
+
+  if (jdmMakes.has(make)) {
+    providers.push(
+      { name: "Enjuku Racing", mode: "direct_search", url: `https://www.enjukuracing.com/search.php?search_query=${terms}` },
+      { name: "MAPerformance", mode: "direct_search", url: `https://www.maperformance.com/search?type=product&q=${terms}` },
+      { name: "Nengun Performance", mode: "direct_search", url: `https://www.nengun.com/search?q=${terms}` },
+    );
+  }
+  if (americanMakes.has(make)) {
+    providers.push(
+      { name: "AmericanMuscle", mode: "direct_search", url: `https://www.americanmuscle.com/search?keywords=${terms}` },
+      { name: "JEGS", mode: "direct_search", url: `https://www.jegs.com/webapp/wcs/stores/servlet/SearchResultsPageCmd?Ntt=${terms}` },
+    );
+  }
+  if (europeanMakes.has(make)) {
+    providers.push(
+      { name: "ECS Tuning", mode: "direct_search", url: `https://www.ecstuning.com/Search/SiteSearch/${terms}/` },
+      { name: "FCP Euro", mode: "direct_search", url: `https://www.fcpeuro.com/page/search?query=${terms}` },
+    );
+  }
+  return providers;
 }
 
 async function getEbayToken() {
@@ -117,8 +147,7 @@ Deno.serve(async (request) => {
       products: ebayItems,
       providers: [
         { name: "eBay Motors", mode: ebayStatus },
-        { name: "AutoZone", mode: "vendor_search", url: vendorSearchUrl("autozone", vehicle, cleanQuery) },
-        { name: "AmericanMuscle", mode: "vendor_search", url: vendorSearchUrl("americanmuscle", vehicle, cleanQuery) },
+        ...providerSearches(vehicle, cleanQuery),
       ],
     });
   } catch {
