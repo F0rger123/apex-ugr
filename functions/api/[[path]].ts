@@ -140,18 +140,20 @@ function providerSearches(vehicle: Record<string, string | number>, query: strin
   return providers;
 }
 
-async function geocode(destination: string) {
+async function geocode(destination: string, origin?: {latitude:number;longitude:number}) {
   const geoUrl=new URL('https://nominatim.openstreetmap.org/search');
   geoUrl.searchParams.set('q',destination.trim()); geoUrl.searchParams.set('format','jsonv2'); geoUrl.searchParams.set('limit','1');
+  if(origin){geoUrl.searchParams.set('viewbox',`${origin.longitude-.35},${origin.latitude+.28},${origin.longitude+.35},${origin.latitude-.28}`);geoUrl.searchParams.set('bounded','0');}
   const geo=await fetch(geoUrl,{headers:{'User-Agent':'ApexUGR/1.0 (https://apex-ugr.pages.dev)'}});
   const places=await geo.json<Array<{lat:string;lon:string;display_name:string}>>();
   if(!places[0]) return null;
   return {latitude:Number(places[0].lat),longitude:Number(places[0].lon),name:places[0].display_name};
 }
 
-async function addressSuggestions(query: string) {
+async function addressSuggestions(query: string, origin?: {latitude:number;longitude:number}) {
   const geoUrl=new URL('https://nominatim.openstreetmap.org/search');
   geoUrl.searchParams.set('q',query.trim()); geoUrl.searchParams.set('format','jsonv2'); geoUrl.searchParams.set('limit','6'); geoUrl.searchParams.set('addressdetails','1');
+  if(origin){geoUrl.searchParams.set('viewbox',`${origin.longitude-.35},${origin.latitude+.28},${origin.longitude+.35},${origin.latitude-.28}`);geoUrl.searchParams.set('bounded','0');}
   const response=await fetch(geoUrl,{headers:{'User-Agent':'ApexUGR/1.0 (https://apex-ugr.pages.dev)','Accept-Language':'en'}});
   const places=await response.json<Array<{place_id:number;lat:string;lon:string;display_name:string;type?:string}>>();
   const unique=new Map<string,{id:string;name:string;latitude:number;longitude:number;type:string}>();
@@ -343,8 +345,9 @@ async function handle(request: Request, env: Env, path: string) {
   if(path==='location'&&method==='DELETE'){await env.DB.prepare('DELETE FROM driver_locations WHERE user_id=?').bind(user.id).run();return json({hidden:true});}
 
   if(path==='world'&&method==='GET'){
-    const [discoveries,territories,drops,reports,crews,seasons,requests,safeHouses,badges,contracts,heatRow,rewards,tracePoints,journeys]=await Promise.all([
+    const [discoveries,crewDiscoveries,territories,drops,reports,crews,seasons,requests,safeHouses,badges,contracts,heatRow,rewards,tracePoints,journeys]=await Promise.all([
       env.DB.prepare('SELECT latitude,longitude,discovered_at FROM map_discoveries WHERE user_id=? ORDER BY discovered_at DESC LIMIT 1200').bind(user.id).all(),
+      env.DB.prepare(`SELECT DISTINCT d.latitude,d.longitude,d.discovered_at,u.username FROM map_discoveries d JOIN crew_members teammate ON teammate.user_id=d.user_id AND teammate.status='approved' JOIN crew_members mine ON mine.crew_id=teammate.crew_id AND mine.user_id=? AND mine.status='approved' JOIN users u ON u.id=d.user_id WHERE d.user_id<>? ORDER BY d.discovered_at DESC LIMIT 1200`).bind(user.id,user.id).all(),
       env.DB.prepare(`SELECT t.*,c.name crew_name,c.tag,EXISTS(SELECT 1 FROM territory_unlocks u WHERE u.territory_id=t.id AND u.user_id=?) unlocked FROM territories t JOIN crews c ON c.id=t.crew_id`).bind(user.id).all(),
       env.DB.prepare(`SELECT d.*,EXISTS(SELECT 1 FROM dead_drop_claims c WHERE c.drop_id=d.id AND c.user_id=?) claimed FROM dead_drops d WHERE d.is_active=1`).bind(user.id).all(),
       env.DB.prepare(`SELECT r.*,u.username FROM road_reports r JOIN users u ON u.id=r.user_id WHERE r.is_active=1 ORDER BY r.created_at DESC LIMIT 500`).all(),
@@ -359,9 +362,11 @@ async function handle(request: Request, env: Env, path: string) {
       env.DB.prepare(`SELECT session_id,latitude,longitude,speed_kph,heading,captured_at FROM drive_trace_points WHERE user_id=? AND captured_at>datetime('now','-7 days') ORDER BY captured_at DESC LIMIT 1800`).bind(user.id).all<{session_id:string;latitude:number;longitude:number;speed_kph:number;heading:number;captured_at:string}>(),
       env.DB.prepare(`SELECT j.*,p.current_checkpoint,p.status progress_status,p.completed_at,CASE WHEN p.user_id IS NULL THEN 0 ELSE 1 END joined FROM season_journeys j LEFT JOIN journey_progress p ON p.journey_id=j.id AND p.user_id=? WHERE j.ends_at>? ORDER BY j.starts_at`).bind(user.id,new Date().toISOString()).all<Record<string,unknown>>(),
     ]);
+    const territoryProgress=territories.results.map((territory:any)=>{const discoveredCells=discoveries.results.filter((cell:any)=>distanceMeters(Number(cell.latitude),Number(cell.longitude),Number(territory.latitude),Number(territory.longitude))<=Number(territory.radius_m)).length;return{...territory,discovered_cells:discoveredCells,completion:territory.unlocked?100:Math.min(100,Math.round(discoveredCells/Math.max(1,Number(territory.required_cells))*100))};});
+    const orderedDiscoveries=[...discoveries.results].reverse() as Array<{discovered_at:string}>;let currentChain=0,bestChain=0,previous=0;for(const cell of orderedDiscoveries){const timestamp=Date.parse(cell.discovered_at);currentChain=previous&&timestamp-previous<=10*60_000?currentChain+1:1;bestChain=Math.max(bestChain,currentChain);previous=timestamp;}if(previous&&Date.now()-previous>10*60_000)currentChain=0;
     const replayMap=new Map<string,typeof tracePoints.results>();for(const point of tracePoints.results){const points=replayMap.get(point.session_id)||[];points.push(point);replayMap.set(point.session_id,points);}
     const ghostReplays=[...replayMap.entries()].map(([sessionId,points])=>{const ordered=[...points].reverse();let distanceKm=0;for(let index=1;index<ordered.length;index++)distanceKm+=distanceMeters(ordered[index-1].latitude,ordered[index-1].longitude,ordered[index].latitude,ordered[index].longitude)/1000;return{sessionId,startedAt:ordered[0]?.captured_at,endedAt:ordered[ordered.length-1]?.captured_at,distanceKm,maxSpeedKph:Math.max(0,...ordered.map(point=>Number(point.speed_kph)||0)),points:ordered};}).filter(replay=>replay.points.length>1).slice(0,12);
-    return json({discoveries:discoveries.results,territories:territories.results,drops:drops.results,reports:reports.results,crews:crews.results,seasons:seasons.results,journeys:journeys.results.map((row:any)=>({...row,route:JSON.parse(row.route_json||'[]')})),crewRequests:requests.results,safeHouses:safeHouses.results,badges:badges.results,contracts:contracts.results,heat:heatRow?.heat||0,rewards:rewards.results,ghostReplays});
+    return json({discoveries:discoveries.results,crewDiscoveries:crewDiscoveries.results,discoveryChain:{current:currentChain,best:bestChain},territories:territoryProgress,drops:drops.results,reports:reports.results,crews:crews.results,seasons:seasons.results,journeys:journeys.results.map((row:any)=>({...row,route:JSON.parse(row.route_json||'[]')})),crewRequests:requests.results,safeHouses:safeHouses.results,badges:badges.results,contracts:contracts.results,heat:heatRow?.heat||0,rewards:rewards.results,ghostReplays});
   }
   if(path==='safe-houses'&&method==='POST'){
     const body=await request.json<{name?:string;latitude?:number;longitude?:number;vehicleId?:string|null}>();if(!body.name?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Safe-house name and current GPS point are required.'},400);
@@ -665,9 +670,9 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   if(path==='address-suggestions'&&method==='GET'){
-    const query=new URL(request.url).searchParams.get('q')?.trim()||'';
+    const params=new URL(request.url).searchParams,query=params.get('q')?.trim()||'',latitudeText=params.get('latitude'),longitudeText=params.get('longitude'),latitude=latitudeText===null?NaN:Number(latitudeText),longitude=longitudeText===null?NaN:Number(longitudeText);
     if(query.length<3)return json({suggestions:[]});
-    return json({suggestions:await addressSuggestions(query.slice(0,120))});
+    return json({suggestions:await addressSuggestions(query.slice(0,120),Number.isFinite(latitude)&&Number.isFinite(longitude)?{latitude,longitude}:undefined)});
   }
 
   if(path==='vehicle-catalog'&&method==='GET'){
@@ -698,7 +703,7 @@ async function handle(request: Request, env: Env, path: string) {
     const route=body.route;
     if(!route?.destination||!Number.isFinite(route.destinationLatitude)||!Number.isFinite(route.destinationLongitude)||!Array.isArray(route.coordinates)||route.coordinates.length<2)return json({error:'Create a route before saving it.'},400);
     const id=crypto.randomUUID();
-    await env.DB.prepare('INSERT INTO saved_routes(id,user_id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,stops_json) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id,user.id,(body.name||route.destination).trim().slice(0,80),route.destination.slice(0,300),route.destinationLatitude,route.destinationLongitude,route.distanceKm,route.durationMinutes,JSON.stringify(route.coordinates),JSON.stringify((route.stops||[]).slice(0,8))).run();
+    await env.DB.prepare('INSERT INTO saved_routes(id,user_id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,stops_json) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id,user.id,(body.name||route.destination).trim().slice(0,80),route.destination.slice(0,300),route.destinationLatitude,route.destinationLongitude,route.distanceKm,route.durationMinutes,JSON.stringify(route.coordinates),JSON.stringify(route.stops||[])).run();
     return json({id},201);
   }
   const deleteRoute=path.match(/^routes\/([^/]+)$/);
@@ -707,14 +712,12 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === 'routes' && method === 'POST') {
     const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string;target?:{latitude:number;longitude:number};stops?:Array<{name?:string;latitude?:number;longitude?:number}>}>();// Exact coordinates are used for pins and queued route stops.
     if(!body.origin) return json({error:'Current location is required.'},400);
-    const requested=(body.stops||[]).slice(0,8);let stops:Array<{name:string;latitude:number;longitude:number}>=[];
+    const requested=body.stops||[];let stops:Array<{name:string;latitude:number;longitude:number}>=[];
     if(requested.length){stops=requested.filter(stop=>stop.name&&Number.isFinite(stop.latitude)&&Number.isFinite(stop.longitude)).map(stop=>({name:String(stop.name).slice(0,300),latitude:Number(stop.latitude),longitude:Number(stop.longitude)}));if(stops.length!==requested.length)return json({error:'Every route stop needs a name and valid coordinates.'},400);}
-    else {if(!body.destination?.trim())return json({error:'Add at least one route stop.'},400);const target=Number.isFinite(body.target?.latitude)&&Number.isFinite(body.target?.longitude)?{latitude:Number(body.target!.latitude),longitude:Number(body.target!.longitude),name:body.destination.trim()}:await geocode(body.destination);if(!target)return json({error:'Destination not found.'},404);stops=[target];}
-    const target=stops[stops.length-1];const routePath=[body.origin,...stops].map(point=>`${point.longitude},${point.latitude}`).join(';');
-    const routeUrl=`https://router.project-osrm.org/route/v1/driving/${routePath}?overview=full&geometries=geojson&steps=false`;
-    const routed=await fetch(routeUrl); const route=await routed.json<{routes?:Array<{distance:number;duration:number;geometry:{coordinates:number[][]}}>}>();
-    if(!route.routes?.[0]) return json({error:'No drivable route found.'},404);
-    return json({destination:target,stops,distanceKm:route.routes[0].distance/1000,durationMinutes:route.routes[0].duration/60,coordinates:route.routes[0].geometry.coordinates.map(([longitude,latitude])=>({latitude,longitude}))});
+    else {if(!body.destination?.trim())return json({error:'Add at least one route stop.'},400);const target=Number.isFinite(body.target?.latitude)&&Number.isFinite(body.target?.longitude)?{latitude:Number(body.target!.latitude),longitude:Number(body.target!.longitude),name:body.destination.trim()}:await geocode(body.destination,body.origin);if(!target)return json({error:'Destination not found.'},404);stops=[target];}
+    const target=stops[stops.length-1],coordinates:Array<{latitude:number;longitude:number}>=[];let distance=0,duration=0,start=body.origin;
+    for(let index=0;index<stops.length;index+=20){const segmentStops=stops.slice(index,index+20),routePath=[start,...segmentStops].map(point=>`${point.longitude},${point.latitude}`).join(';');const routeUrl=`https://router.project-osrm.org/route/v1/driving/${routePath}?overview=full&geometries=geojson&steps=false`;const routed=await fetch(routeUrl);const data=await routed.json<{routes?:Array<{distance:number;duration:number;geometry:{coordinates:number[][]}}>}>();const segment=data.routes?.[0];if(!segment)return json({error:`No drivable route found near stop ${index+1}.`},404);distance+=segment.distance;duration+=segment.duration;const points=segment.geometry.coordinates.map(([longitude,latitude])=>({latitude,longitude}));coordinates.push(...(coordinates.length?points.slice(1):points));start=segmentStops[segmentStops.length-1];}
+    return json({destination:target,stops,distanceKm:distance/1000,durationMinutes:duration/60,coordinates});
   }
 
   if(path==='route-places'&&method==='POST'){
