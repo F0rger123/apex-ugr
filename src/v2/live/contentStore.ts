@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { cloudflareApi } from '../../config/cloudflareApi';
 
-export type LivePost = { id:string; userId:string; alias:string; avatarUrl:string|null; mediaUrl:string; videoUrl:string|null; caption:string; likes:number; comments:number; liked:boolean; saved:boolean; createdAt:string };
+export type LivePost = { id:string; userId:string; alias:string; avatarUrl:string|null; mediaUrl:string; videoUrl:string|null; caption:string; likes:number; comments:number; liked:boolean; saved:boolean; following:boolean; createdAt:string };
 export type Ranking = { id:string; alias:string; avatarUrl:string|null; tier:string; points:number; wins:number; losses:number; entered:number; topSpeed:number; reputation:number; credits:number };
 export type ActiveVehicle = { id:string; nickname:string; year:number; make:string; model:string; trim:string|null; engine:string; drivetrain:string; horsepower:number; color:string; photoUrl:string|null };
 export type ProviderProduct = { id:string; provider:string; title:string; imageUrl:string|null; price:number; currency:string; condition:string|null; seller:string|null; shipping:string|null; purchaseUrl:string; compatibility:string };
@@ -12,15 +12,15 @@ export type RaceContract={id:string;challengerId:string;challengerName:string;ra
 interface ContentState {
   userId:string|null;
   profile:{alias:string;displayName:string;credits:number;points:number;tier:string;wins:number;entered:number;reputation:number}|null;
-  posts:LivePost[]; rankings:Ranking[]; pilots:PilotDirectoryEntry[]; races:RaceContract[]; vehicles:ActiveVehicle[]; activeVehicleId:string|null; challengeTargetId:string|null;
+  posts:LivePost[]; rankings:Ranking[]; pilots:PilotDirectoryEntry[]; races:RaceContract[]; vehicles:ActiveVehicle[]; activeVehicleId:string|null; challengeTargetId:string|null; radarTargetId:string|null;
   products:ProviderProduct[]; providers:ProviderLink[]; loading:boolean; error:string|null;
-  initialize:()=>Promise<void>; loadFeed:()=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>;
+  initialize:()=>Promise<void>; loadFeed:()=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>; toggleFollow:(userId:string)=>Promise<void>;
   addComment:(id:string,text:string)=>Promise<boolean>; createPost:(uri:string,caption:string,type:'photo'|'video')=>Promise<boolean>;
-  loadRankings:()=>Promise<void>; loadPilots:()=>Promise<void>; loadRaces:()=>Promise<void>; respondToRace:(id:string,action:'accept'|'decline'|'reschedule',startsAt?:string)=>Promise<string>; setChallengeTarget:(id:string|null)=>void; loadVehicles:()=>Promise<void>; addVehicle:(vehicle:{nickname:string;year:number;make:string;model:string;trim:string;engine:string;drivetrain:string;horsepower:number;color:string},photoUri:string|null)=>Promise<boolean>; setActiveVehicle:(id:string)=>void; searchParts:(query:string)=>Promise<void>;
+  loadRankings:()=>Promise<void>; loadPilots:()=>Promise<void>; loadRaces:()=>Promise<void>; respondToRace:(id:string,action:'accept'|'decline'|'reschedule',startsAt?:string)=>Promise<string>; setChallengeTarget:(id:string|null)=>void; setRadarTarget:(id:string|null)=>void; loadVehicles:()=>Promise<void>; addVehicle:(vehicle:{nickname:string;year:number;make:string;model:string;trim:string;engine:string;drivetrain:string;horsepower:number;color:string},photoUri:string|null)=>Promise<boolean>; setActiveVehicle:(id:string)=>void; searchParts:(query:string)=>Promise<void>;
 }
 
 export const useContentStore=create<ContentState>((set,get)=>({
-  userId:null,profile:null,posts:[],rankings:[],pilots:[],races:[],vehicles:[],activeVehicleId:null,challengeTargetId:null,products:[],providers:[],loading:false,error:null,
+  userId:null,profile:null,posts:[],rankings:[],pilots:[],races:[],vehicles:[],activeVehicleId:null,challengeTargetId:null,radarTargetId:null,products:[],providers:[],loading:false,error:null,
   initialize:async()=>{
     const session=await cloudflareApi.session();
     if(!session){set({userId:null,profile:null,posts:[],rankings:[],vehicles:[]});return;}
@@ -32,7 +32,7 @@ export const useContentStore=create<ContentState>((set,get)=>({
     if(!get().userId)return;
     try{
       const data=await cloudflareApi.request<{posts:any[]}>('/api/feed');
-      set({posts:data.posts.map(row=>({id:row.id,userId:row.user_id,alias:row.username,avatarUrl:row.avatar_url||null,mediaUrl:row.media_url,videoUrl:row.media_type==='video'?row.media_url:null,caption:row.caption||'',likes:Number(row.likes||0),comments:Number(row.comments||0),liked:Boolean(row.liked),saved:Boolean(row.saved),createdAt:row.created_at}))});
+      set({posts:data.posts.map(row=>({id:row.id,userId:row.user_id,alias:row.username,avatarUrl:row.avatar_url||null,mediaUrl:row.media_url,videoUrl:row.media_type==='video'?row.media_url:null,caption:row.caption||'',likes:Number(row.likes||0),comments:Number(row.comments||0),liked:Boolean(row.liked),saved:Boolean(row.saved),following:Boolean(row.following),createdAt:row.created_at}))});
     }catch(error){set({error:error instanceof Error?error.message:'Feed failed'});}
   },
   toggleLike:async id=>{
@@ -41,6 +41,7 @@ export const useContentStore=create<ContentState>((set,get)=>({
   toggleSave:async id=>{
     try{const data=await cloudflareApi.request<{active:boolean}>(`/api/posts/${id}/save`,{method:'POST'});set(state=>({posts:state.posts.map(post=>post.id===id?{...post,saved:data.active}:post)}));}catch(error){set({error:error instanceof Error?error.message:'Save failed'});}
   },
+  toggleFollow:async userId=>{try{const data=await cloudflareApi.request<{following:boolean}>(`/api/users/${userId}/follow`,{method:'POST'});set(state=>({posts:state.posts.map(post=>post.userId===userId?{...post,following:data.following}:post)}));}catch(error){set({error:error instanceof Error?error.message:'Follow failed'});}},
   addComment:async(id,text)=>{
     try{await cloudflareApi.request(`/api/posts/${id}/comment`,{method:'POST',body:JSON.stringify({body:text})});set(state=>({posts:state.posts.map(post=>post.id===id?{...post,comments:post.comments+1}:post)}));return true;}catch(error){set({error:error instanceof Error?error.message:'Comment failed'});return false;}
   },
@@ -62,6 +63,7 @@ export const useContentStore=create<ContentState>((set,get)=>({
   },
   respondToRace:async(id,action,startsAt)=>{try{const data=await cloudflareApi.request<{status:string;reputationPenalty?:number}>(`/api/races/${id}/${action}`,{method:'POST',body:JSON.stringify(startsAt?{startsAt}:{})});await Promise.all([get().loadRaces(),get().loadRankings()]);return data.reputationPenalty?`${data.status} · -${data.reputationPenalty} reputation`:data.status;}catch(error){const message=error instanceof Error?error.message:'Race update failed';set({error:message});return message;}},
   setChallengeTarget:id=>set({challengeTargetId:id}),
+  setRadarTarget:id=>set({radarTargetId:id}),
   loadVehicles:async()=>{
     if(!get().userId)return;
     try{const data=await cloudflareApi.request<{vehicles:any[]}>('/api/vehicles');const vehicles=data.vehicles.map(row=>({id:row.id,nickname:row.nickname,year:Number(row.year),make:row.make,model:row.model,trim:row.trim||null,engine:row.engine||'',drivetrain:row.drivetrain||'',horsepower:Number(row.horsepower||0),color:row.color||'',photoUrl:row.photo_url||null}));const activeRow=data.vehicles.find(row=>Boolean(row.is_active));set({vehicles,activeVehicleId:activeRow?.id||vehicles[0]?.id||null});}catch(error){set({error:error instanceof Error?error.message:'Garage failed'});}

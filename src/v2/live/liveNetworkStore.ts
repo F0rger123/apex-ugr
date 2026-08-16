@@ -7,7 +7,7 @@ const LOCATION_KEY='apex.last-location';
 
 export type LiveCoordinate={latitude:number;longitude:number;accuracy:number|null;altitude:number|null;heading:number;speedKph:number;timestamp:number};
 export type LiveDriver={id:string;userId:string;alias:string;avatarUrl:string|null;vehicle:string|null;latitude:number;longitude:number;heading:number;speedKph:number;driveMode:boolean;cruiseId:string|null;updatedAt:string;mystery:boolean;isLive:boolean;tier:'Bronze'|'Silver'|'Master'|'Platinum';record:string};
-export type LiveEvent={id:string;title:string;latitude:number;longitude:number;radiusM:number;attendees:number;startTime:string;locationName:string};
+export type LiveEvent={id:string;hostId:string;title:string;latitude:number;longitude:number;radiusM:number;attendees:number;startTime:string;locationName:string};
 export type LiveCruise={id:string;title:string;status:string;memberCount:number};
 export type LiveRoute={destination:string;destinationLatitude:number;destinationLongitude:number;distanceKm:number;durationMinutes:number;coordinates:Array<{latitude:number;longitude:number}>};
 export type AddressSuggestion={id:string;name:string;latitude:number;longitude:number;type:string};
@@ -16,17 +16,17 @@ export type SavedRoute={id:string;name:string;destination_name:string;destinatio
 type NetworkStatus='offline'|'gps_required'|'gps_locked'|'auth_required'|'live'|'error';
 
 interface LiveNetworkState{
-  location:LiveCoordinate|null;drivers:LiveDriver[];events:LiveEvent[];cruises:LiveCruise[];route:LiveRoute|null;savedPlaces:SavedPlace[];savedRoutes:SavedRoute[];suggestions:AddressSuggestion[];networkStatus:NetworkStatus;error:string|null;isDriving:boolean;unit:'mph'|'kph';distanceKm:number;maxSpeedKph:number;startedAt:number|null;
+  location:LiveCoordinate|null;drivers:LiveDriver[];events:LiveEvent[];cruises:LiveCruise[];route:LiveRoute|null;savedPlaces:SavedPlace[];savedRoutes:SavedRoute[];suggestions:AddressSuggestion[];networkStatus:NetworkStatus;error:string|null;isDriving:boolean;unit:'mph'|'kph';distanceKm:number;maxSpeedKph:number;startedAt:number|null;shareMinutes:number;shareExpiresAt:number|null;
   _watch:Location.LocationSubscription|null;_poll:ReturnType<typeof setInterval>|null;_userId:string|null;
-  initialize:()=>Promise<void>;lockLocation:()=>Promise<void>;startDrive:()=>Promise<void>;stopDrive:()=>Promise<void>;toggleUnit:()=>void;refreshNetwork:()=>Promise<void>;loadNavigation:()=>Promise<void>;suggestAddresses:(query:string)=>Promise<void>;setRoute:(destination:string)=>Promise<boolean>;restoreRoute:(route:SavedRoute)=>void;saveCurrentRoute:(name?:string)=>Promise<boolean>;savePlace:(place:{label:string;locationName:string;latitude:number;longitude:number})=>Promise<boolean>;deletePlace:(id:string)=>Promise<void>;deleteSavedRoute:(id:string)=>Promise<void>;clearRoute:()=>void;dispose:()=>void;
+  initialize:()=>Promise<void>;lockLocation:()=>Promise<void>;startDrive:()=>Promise<void>;stopDrive:()=>Promise<void>;toggleUnit:()=>void;setShareMinutes:(minutes:number)=>void;hideLocation:()=>Promise<void>;refreshNetwork:()=>Promise<void>;loadNavigation:()=>Promise<void>;suggestAddresses:(query:string)=>Promise<void>;setRoute:(destination:string)=>Promise<boolean>;setRouteToPoint:(name:string,latitude:number,longitude:number)=>Promise<boolean>;restoreRoute:(route:SavedRoute)=>void;saveCurrentRoute:(name?:string)=>Promise<boolean>;savePlace:(place:{label:string;locationName:string;latitude:number;longitude:number})=>Promise<boolean>;deletePlace:(id:string)=>Promise<void>;deleteSavedRoute:(id:string)=>Promise<void>;clearRoute:()=>void;dispose:()=>void;
 }
 
 function segmentKm(a:LiveCoordinate,b:LiveCoordinate){const rad=Math.PI/180;const dLat=(b.latitude-a.latitude)*rad;const dLng=(b.longitude-a.longitude)*rad;const h=Math.sin(dLat/2)**2+Math.cos(a.latitude*rad)*Math.cos(b.latitude*rad)*Math.sin(dLng/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}
 function coordinate(position:Location.LocationObject):LiveCoordinate{return{latitude:position.coords.latitude,longitude:position.coords.longitude,accuracy:position.coords.accuracy,altitude:position.coords.altitude,heading:Math.max(0,position.coords.heading||0),speedKph:Math.max(0,(position.coords.speed||0)*3.6),timestamp:position.timestamp};}
-async function publish(location:LiveCoordinate,driveMode:boolean){await cloudflareApi.request('/api/location',{method:'POST',body:JSON.stringify({latitude:location.latitude,longitude:location.longitude,accuracy:location.accuracy,altitude:location.altitude,speedKph:driveMode?location.speedKph:0,heading:location.heading,driveMode})});}
+async function publish(location:LiveCoordinate,driveMode:boolean,shareMinutes:number,shareExpiresAt:number){await cloudflareApi.request('/api/location',{method:'POST',body:JSON.stringify({latitude:location.latitude,longitude:location.longitude,accuracy:location.accuracy,altitude:location.altitude,speedKph:driveMode?location.speedKph:0,heading:location.heading,driveMode,shareMinutes,expiresAt:new Date(shareExpiresAt).toISOString()})});}
 
 export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
-  location:null,drivers:[],events:[],cruises:[],route:null,savedPlaces:[],savedRoutes:[],suggestions:[],networkStatus:'offline',error:null,isDriving:false,unit:'mph',distanceKm:0,maxSpeedKph:0,startedAt:null,_watch:null,_poll:null,_userId:null,
+  location:null,drivers:[],events:[],cruises:[],route:null,savedPlaces:[],savedRoutes:[],suggestions:[],networkStatus:'offline',error:null,isDriving:false,unit:'mph',distanceKm:0,maxSpeedKph:0,startedAt:null,shareMinutes:15,shareExpiresAt:null,_watch:null,_poll:null,_userId:null,
   initialize:async()=>{
     get()._poll&&clearInterval(get()._poll!);
     const [session,cached]=await Promise.all([cloudflareApi.session(),AsyncStorage.getItem(LOCATION_KEY)]);
@@ -38,27 +38,30 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
   lockLocation:async()=>{
     set({error:null});const permission=await Location.requestForegroundPermissionsAsync();
     if(permission.status!=='granted'){set({networkStatus:'gps_required',error:'Precise location permission is required for Radar and Drive Mode.'});return;}
-    const next=coordinate(await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.BestForNavigation}));set({location:next,networkStatus:get()._userId?'live':'gps_locked'});await AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(next));
-    if(get()._userId) await publish(next,false).catch(error=>set({error:error instanceof Error?error.message:'Location publish failed'}));
+    const next=coordinate(await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.BestForNavigation}));const shareExpiresAt=Date.now()+get().shareMinutes*60_000;set({location:next,shareExpiresAt,networkStatus:get()._userId?'live':'gps_locked'});await AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(next));
+    if(get()._userId) await publish(next,false,get().shareMinutes,shareExpiresAt).catch(error=>set({error:error instanceof Error?error.message:'Location publish failed'}));
   },
   startDrive:async()=>{
     if(get().isDriving)return;const permission=await Location.requestForegroundPermissionsAsync();
     if(permission.status!=='granted'){set({networkStatus:'gps_required',error:'Drive Mode cannot start without precise location access.'});return;}
-    get()._watch?.remove();set({isDriving:true,distanceKm:0,maxSpeedKph:0,startedAt:Date.now(),error:null});
+    get()._watch?.remove();const shareExpiresAt=Date.now()+get().shareMinutes*60_000;set({isDriving:true,distanceKm:0,maxSpeedKph:0,startedAt:Date.now(),shareExpiresAt,error:null});
     const watch=await Location.watchPositionAsync({accuracy:Location.Accuracy.BestForNavigation,timeInterval:500,distanceInterval:1},position=>{
       const next=coordinate(position);const previous=get().location;const distance=previous&&next.accuracy!==null&&next.accuracy<=65?segmentKm(previous,next):0;
       set(state=>({location:next,distanceKm:state.distanceKm+Math.min(distance,.5),maxSpeedKph:Math.max(state.maxSpeedKph,next.speedKph),networkStatus:state._userId?'live':'gps_locked'}));
       void AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(next));
-      if(get()._userId) void publish(next,true).catch(error=>set({error:error instanceof Error?error.message:'Live position failed'}));
+      if(Date.now()>shareExpiresAt){get()._watch?.remove();set({_watch:null,isDriving:false,shareExpiresAt:null,networkStatus:'gps_locked'});if(get()._userId)void cloudflareApi.request('/api/location',{method:'DELETE'});return;}
+      if(get()._userId) void publish(next,true,get().shareMinutes,shareExpiresAt).catch(error=>set({error:error instanceof Error?error.message:'Live position failed'}));
     });set({_watch:watch});
   },
-  stopDrive:async()=>{get()._watch?.remove();set({_watch:null,isDriving:false});const current=get().location;if(current&&get()._userId)await publish(current,false).catch(()=>undefined);},
+  stopDrive:async()=>{get()._watch?.remove();set({_watch:null,isDriving:false});const current=get().location,expires=get().shareExpiresAt;if(current&&expires&&get()._userId)await publish(current,false,get().shareMinutes,expires).catch(()=>undefined);},
   toggleUnit:()=>set(state=>({unit:state.unit==='mph'?'kph':'mph'})),
+  setShareMinutes:minutes=>set({shareMinutes:Math.min(120,Math.max(5,minutes))}),
+  hideLocation:async()=>{get()._watch?.remove();if(get()._userId)await cloudflareApi.request('/api/location',{method:'DELETE'});set({_watch:null,isDriving:false,shareExpiresAt:null,networkStatus:'gps_locked',error:null});},
   refreshNetwork:async()=>{
     if(!get()._userId)return;
     try{const data=await cloudflareApi.request<{drivers:any[];events:any[];cruises:any[]}>('/api/network');set({
       drivers:data.drivers.map(row=>({id:row.user_id,userId:row.user_id,alias:row.username||'UNKNOWN',avatarUrl:row.avatar_url||null,vehicle:row.make?`${row.year} ${row.make} ${row.model}`:null,latitude:Number(row.latitude),longitude:Number(row.longitude),heading:Number(row.heading||0),speedKph:Number(row.speed_kph||0),driveMode:Boolean(row.drive_mode),cruiseId:row.cruise_id||null,updatedAt:row.updated_at,mystery:row.privacy_mode==='meet_only',isLive:Boolean(row.is_live),tier:['Bronze','Silver','Master','Platinum'].includes(row.tier)?row.tier:'Bronze',record:`${Number(row.wins||0)}–${Number(row.losses||0)}`})),
-      events:data.events.map(row=>({id:row.id,title:row.title,latitude:Number(row.latitude),longitude:Number(row.longitude),radiusM:Number(row.radius_m||250),attendees:Number(row.attendees||0),startTime:row.starts_at,locationName:row.location_name})),
+      events:data.events.map(row=>({id:row.id,hostId:row.host_id,title:row.title,latitude:Number(row.latitude),longitude:Number(row.longitude),radiusM:Number(row.radius_m||250),attendees:Number(row.attendees||0),startTime:row.starts_at,locationName:row.location_name})),
       cruises:data.cruises.map(row=>({id:row.id,title:row.title,status:row.status,memberCount:Number(row.member_count||0)})),error:null});
     }catch(error){set({networkStatus:'error',error:error instanceof Error?error.message:'Network refresh failed'});}
   },
@@ -68,6 +71,7 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
     const origin=get().location;if(!origin){set({error:'Lock GPS before setting a route.'});return false;}
     try{const data=await cloudflareApi.request<{destination:{name:string;latitude:number;longitude:number};distanceKm:number;durationMinutes:number;coordinates:LiveRoute['coordinates']}>('/api/routes',{method:'POST',body:JSON.stringify({origin,destination})});set({route:{destination:data.destination.name,destinationLatitude:data.destination.latitude,destinationLongitude:data.destination.longitude,distanceKm:data.distanceKm,durationMinutes:data.durationMinutes,coordinates:data.coordinates},suggestions:[],error:null});return true;}catch(error){set({error:error instanceof Error?error.message:'Route failed'});return false;}
   },
+  setRouteToPoint:async(name,latitude,longitude)=>{const origin=get().location;if(!origin){set({error:'Lock GPS before routing to a pilot.'});return false;}try{const data=await cloudflareApi.request<{destination:{name:string;latitude:number;longitude:number};distanceKm:number;durationMinutes:number;coordinates:LiveRoute['coordinates']}>('/api/routes',{method:'POST',body:JSON.stringify({origin,destination:name,target:{latitude,longitude}})});set({route:{destination:data.destination.name,destinationLatitude:data.destination.latitude,destinationLongitude:data.destination.longitude,distanceKm:data.distanceKm,durationMinutes:data.durationMinutes,coordinates:data.coordinates},error:null});return true;}catch(error){set({error:error instanceof Error?error.message:'Pilot route failed'});return false;}},
   restoreRoute:route=>set({route:{destination:route.destination_name,destinationLatitude:Number(route.destination_latitude),destinationLongitude:Number(route.destination_longitude),distanceKm:Number(route.distance_km),durationMinutes:Number(route.duration_minutes),coordinates:route.coordinates},suggestions:[],error:null}),
   saveCurrentRoute:async name=>{const route=get().route;if(!route)return false;try{await cloudflareApi.request('/api/routes/save',{method:'POST',body:JSON.stringify({name:name||route.destination.split(',')[0],route})});await get().loadNavigation();return true;}catch(error){set({error:error instanceof Error?error.message:'Route save failed'});return false;}},
   savePlace:async place=>{try{await cloudflareApi.request('/api/places',{method:'POST',body:JSON.stringify({...place,isFavorite:true})});await get().loadNavigation();return true;}catch(error){set({error:error instanceof Error?error.message:'Favorite save failed'});return false;}},

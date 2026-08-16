@@ -16,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
+import { ResizeMode, Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
@@ -68,15 +69,17 @@ import {
   Trophy,
   UserRound,
   Users,
+  Volume2,
+  VolumeX,
   WalletCards,
   X,
   Zap,
 } from 'lucide-react-native';
 
-const accent = '#91B985';
-const paper = '#F3F5F3';
-const muted = '#858E87';
-const surface = 'rgba(6, 9, 7, 0.78)';
+const accent = '#A7E59A';
+const paper = '#F7F9F7';
+const muted = '#929B95';
+const surface = 'rgba(4, 8, 5, 0.86)';
 const border = 'rgba(255, 255, 255, 0.16)';
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -429,7 +432,8 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [routeOpen, setRouteOpen] = useState(false);
   const [destination, setDestination] = useState('');
   const [routeLoading, setRouteLoading] = useState(false);
-  const { location, drivers: liveDrivers, events, cruises, route, savedPlaces, savedRoutes, suggestions, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, lockLocation, startDrive, stopDrive, toggleUnit, setRoute, restoreRoute, saveCurrentRoute, savePlace, deletePlace, deleteSavedRoute, suggestAddresses, clearRoute } = useLiveNetworkStore();
+  const { location, drivers: liveDrivers, events, cruises, route, savedPlaces, savedRoutes, suggestions, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, shareMinutes, shareExpiresAt, lockLocation, startDrive, stopDrive, toggleUnit, setShareMinutes, hideLocation, setRoute, setRouteToPoint, restoreRoute, saveCurrentRoute, savePlace, deletePlace, deleteSavedRoute, suggestAddresses, clearRoute } = useLiveNetworkStore();
+  const {radarTargetId,setRadarTarget}=useContentStore();
   const drivers = liveDrivers.map((driver: LiveDriver): Driver => ({
     id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record,
     rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery,
@@ -437,6 +441,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   }));
   useEffect(() => { if (!location) lockLocation(); }, []);
   useEffect(() => { const timer=setTimeout(()=>void suggestAddresses(destination),280); return()=>clearTimeout(timer); }, [destination]);
+  useEffect(()=>{if(!radarTargetId)return;const target=drivers.find(item=>item.id===radarTargetId);if(target){setSelected(target);setFitAll(false);setFollowRevision(value=>value+1);setRadarTarget(null);}},[radarTargetId,drivers.length]);
 
   const recenter = async () => {
     await lockLocation();
@@ -461,6 +466,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
       Alert.alert('RSVP failed', error instanceof Error ? error.message : 'Could not update RSVP.');
     }
   };
+  const inviteToMeet=async()=>{if(!selected)return;const currentUserId=useContentStore.getState().userId;const meet=events.find(event=>event.hostId===currentUserId);if(!meet){Alert.alert('No hosted meet','Create a meet first, then you can invite this pilot directly from Radar.');return;}try{const result=await cloudflareApi.request<{pilot:string;event:string}>(`/api/events/${meet.id}/invite`,{method:'POST',body:JSON.stringify({userId:selected.id})});Alert.alert('Invitation sent',`${result.pilot} was invited to ${result.event}.`);}catch(error){Alert.alert('Invite failed',error instanceof Error?error.message:'Could not invite this pilot.');}};
   const shownDrivers = filter === 'events' ? [] : filter === 'crews' ? drivers.filter(driver => driver.cruiseId) : drivers;
   const shownEvents = events;
 
@@ -501,8 +507,8 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           </View>
           <View style={styles.sheetActions}>
             <GlassButton label="CHALLENGE" icon={Swords} onPress={() => { useContentStore.getState().setChallengeTarget(selected.id); onTab('race'); }} active grow />
-            <GlassButton label="FOLLOW" icon={Crosshair} onPress={() => setFollowRevision(value => value + 1)} grow />
-            <GlassButton label="STATS" icon={UserRound} onPress={() => Alert.alert(selected.alias, selected.mystery ? 'This pilot is running in mystery mode.' : `${selected.car}\n${selected.record} career record`)} grow />
+            <GlassButton label="ROUTE" icon={Navigation} onPress={() => void setRouteToPoint(selected.alias,selected.latitude,selected.longitude)} grow />
+            <GlassButton label="INVITE" icon={CalendarDays} onPress={() => void inviteToMeet()} grow />
           </View>
         </GlassPanel>
       ) : selectedEvent ? (
@@ -516,6 +522,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           <Text style={styles.radarDockTitle}>RADAR ACTIVE</Text>
           <View style={styles.radarReadout}><Text style={styles.radarDockMeta}>{networkStatus.replace('_', ' ').toUpperCase()}</Text><Text style={styles.radarDockMeta}>{filter.toUpperCase()} CHANNEL</Text></View>
           {error ? <Text style={styles.networkError}>{error}</Text> : null}
+          <View style={styles.shareTimer}><View style={styles.shareTimerTitle}><Text style={styles.eyebrow}>LOCATION VISIBILITY</Text><Text style={styles.shareTimerMeta}>{shareExpiresAt?`EXPIRES ${new Date(shareExpiresAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`:'NOT SHARING'}</Text></View><View style={styles.shareTimerOptions}>{[5,15,30,60].map(minutes=><Pressable key={minutes} onPress={()=>setShareMinutes(minutes)} style={[styles.shareTimerOption,shareMinutes===minutes&&styles.shareTimerOptionActive]}><Text style={[styles.shareTimerOptionText,shareMinutes===minutes&&styles.shareTimerOptionTextActive]}>{minutes}M</Text></Pressable>)}<Pressable onPress={()=>void hideLocation()} style={styles.ghostButton}><LockKeyhole size={12} color={paper}/><Text style={styles.ghostButtonText}>GHOST</Text></Pressable></View></View>
           {route ? <View style={styles.activeRoute}><Navigation size={15} color={accent} /><View style={styles.commandCopy}><Text numberOfLines={1} style={styles.activeRouteTitle}>{route.destination.toUpperCase()}</Text><Text style={styles.activeRouteMeta}>{route.distanceKm.toFixed(1)} KM · {Math.round(route.durationMinutes)} MIN</Text></View><Pressable accessibilityLabel="Save route" onPress={()=>void saveCurrentRoute()} style={styles.routeClose}><Save size={14} color={accent}/></Pressable><Pressable onPress={clearRoute} style={styles.routeClose}><X size={14} color={paper} /></Pressable></View> : null}
           <View style={styles.driveDock}>
             <Pressable onPress={isDriving ? stopDrive : startDrive} style={[styles.driveEnter, isDriving && styles.driveEnterActive]}><Play size={16} color={isDriving ? accent : paper} /><Text style={styles.driveEnterText}>{isDriving ? 'END DRIVE' : 'ENTER DRIVE MODE'}</Text></Pressable>
@@ -536,14 +543,17 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   );
 }
 
-function FeedScreen() {
-  const { posts, loading, error, userId, toggleLike, toggleSave, addComment, createPost, loadFeed } = useContentStore();
+function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
+  const { posts, loading, error, userId, toggleLike, toggleSave, toggleFollow, addComment, createPost, loadFeed, setRadarTarget } = useContentStore();
   const [composerOpen, setComposerOpen] = useState(false);
   const [draftUri, setDraftUri] = useState<string | null>(null);
   const [draftType, setDraftType] = useState<'photo' | 'video'>('photo');
   const [caption, setCaption] = useState('');
   const [commenting, setCommenting] = useState<string | null>(null);
   const [comment, setComment] = useState('');
+  const [activeIndex,setActiveIndex]=useState(0);
+  const [videoMuted,setVideoMuted]=useState(true);
+  const feedPageHeight=Math.max(540,Dimensions.get('window').height-132);
 
   const pickMedia = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: .88, allowsEditing: false });
@@ -559,28 +569,23 @@ function FeedScreen() {
     }
   };
   return (
-    <ScrollView contentContainerStyle={styles.feedContent} showsVerticalScrollIndicator={false} decelerationRate="fast">
-      <View style={styles.feedHeader}>
+    <View style={styles.feedScreen}>
+      <View style={styles.feedFloatingHeader}>
         <View><Text style={styles.eyebrow}>ENCRYPTED SOCIAL</Text><Text style={styles.feedTitle}>THE CURRENT</Text></View>
         <GlassButton label="POST" icon={Plus} compact onPress={() => setComposerOpen(value => !value)} active />
       </View>
-      {composerOpen ? <GlassPanel style={styles.composerPanel} glow><Pressable onPress={pickMedia} style={styles.mediaPicker}>{draftUri ? <Image source={{ uri: draftUri }} style={styles.composerPreview} /> : <><Plus size={24} color={accent} /><Text style={styles.composerHint}>SELECT PHOTO OR VIDEO</Text></>}</Pressable><TextInput value={caption} onChangeText={setCaption} placeholder="Write a caption" placeholderTextColor={muted} style={styles.composerInput} multiline maxLength={1200} /><View style={styles.composerActions}><GlassButton label="CANCEL" icon={X} compact onPress={() => setComposerOpen(false)} /><GlassButton label={loading ? 'UPLOADING' : 'PUBLISH'} icon={Send} compact onPress={publish} active /></View></GlassPanel> : null}
-      {!userId ? <GlassPanel style={styles.emptyState}><LockKeyhole size={28} color={accent} /><Text style={styles.emptyTitle}>LIVE FEED REQUIRES SIGN-IN</Text><Text style={styles.emptyCopy}>Connect the Apex backend and sign in. No demonstration posts are injected.</Text></GlassPanel> : null}
+      {composerOpen ? <View style={styles.feedComposerOverlay}><GlassPanel style={styles.composerPanel} glow><Pressable onPress={pickMedia} style={styles.mediaPicker}>{draftUri ? <Image source={{ uri: draftUri }} style={styles.composerPreview} /> : <><Plus size={24} color={accent} /><Text style={styles.composerHint}>SELECT PHOTO OR VIDEO</Text></>}</Pressable><TextInput value={caption} onChangeText={setCaption} placeholder="Caption your run, build, or meet" placeholderTextColor={muted} style={styles.composerInput} multiline maxLength={1200} /><View style={styles.composerActions}><GlassButton label="CANCEL" icon={X} compact onPress={() => setComposerOpen(false)} /><GlassButton label={loading ? 'UPLOADING' : 'PUBLISH'} icon={Send} compact onPress={publish} active /></View></GlassPanel></View> : null}
+      {!userId ? <GlassPanel style={styles.emptyState}><LockKeyhole size={28} color={accent} /><Text style={styles.emptyTitle}>LIVE FEED REQUIRES SIGN-IN</Text></GlassPanel> : null}
       {error ? <Pressable onPress={loadFeed} style={styles.inlineError}><Text style={styles.networkError}>{error}</Text><Text style={styles.sectionAction}>RETRY</Text></Pressable> : null}
-      {userId && !loading && posts.length === 0 ? <GlassPanel style={styles.emptyState}><Radio size={28} color={accent} /><Text style={styles.emptyTitle}>NO TRANSMISSIONS YET</Text><Text style={styles.emptyCopy}>Your feed will contain only posts uploaded by real pilots.</Text></GlassPanel> : null}
-      {posts.map(post => (
-          <View key={post.id} style={styles.postCard}>
-            <View style={styles.postHeader}>{post.avatarUrl ? <Image source={{ uri: post.avatarUrl }} style={styles.postAvatar} /> : <View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0, 1)}</Text></View>}<View style={styles.commandCopy}><Text style={styles.postAlias}>{post.alias}</Text><Text style={styles.postMeta}>{new Date(post.createdAt).toLocaleString()}</Text></View></View>
-            <Pressable onPress={() => post.videoUrl && Linking.openURL(post.videoUrl)} style={styles.postMedia}><Image source={{ uri: post.mediaUrl }} style={styles.postImage} /><LinearGradient colors={['transparent', 'rgba(1,2,1,.38)']} style={StyleSheet.absoluteFill} />{post.videoUrl ? <View style={styles.playDisc}><Play size={22} color={paper} fill={paper} /></View> : null}</Pressable>
-            <View style={styles.postActions}>
-              <View style={styles.postActionsLeft}><Pressable onPress={() => toggleLike(post.id)} style={styles.postAction}><Heart size={21} color={post.liked ? accent : paper} fill={post.liked ? accent : 'transparent'} /><Text style={styles.postActionText}>{post.likes}</Text></Pressable><Pressable onPress={() => setCommenting(commenting === post.id ? null : post.id)} style={styles.postAction}><MessageCircle size={21} color={paper} /><Text style={styles.postActionText}>{post.comments}</Text></Pressable><Pressable onPress={() => Linking.openURL(post.mediaUrl)} style={styles.postAction}><Send size={20} color={paper} /></Pressable></View>
-              <Pressable onPress={() => toggleSave(post.id)} style={styles.postAction}><Bookmark size={21} color={post.saved ? accent : paper} fill={post.saved ? accent : 'transparent'} /></Pressable>
-            </View>
-            <Text style={styles.postCaption}><Text style={styles.postAlias}>{post.alias} </Text>{post.caption}</Text>
-            {commenting === post.id ? <View style={styles.commentComposer}><TextInput value={comment} onChangeText={setComment} placeholder="Add a comment" placeholderTextColor={muted} style={styles.commentInput} maxLength={500} /><Pressable onPress={async () => { if (await addComment(post.id, comment)) { setComment(''); setCommenting(null); } }}><Send size={18} color={accent} /></Pressable></View> : null}
-          </View>
-      ))}
-    </ScrollView>
+      {userId&&posts.length?<ScrollView showsVerticalScrollIndicator={false} pagingEnabled snapToInterval={feedPageHeight} decelerationRate="fast" onMomentumScrollEnd={event=>setActiveIndex(Math.round(event.nativeEvent.contentOffset.y/feedPageHeight))}>{posts.map((post,index)=><View key={post.id} style={[styles.feedPage,{height:feedPageHeight}]}>
+        <View style={styles.feedMedia}>{post.videoUrl?<Video source={{uri:post.videoUrl}} style={StyleSheet.absoluteFill} resizeMode={ResizeMode.COVER} shouldPlay={activeIndex===index} isLooping isMuted={videoMuted}/>:<Image source={{uri:post.mediaUrl}} style={StyleSheet.absoluteFill} resizeMode="cover"/>}<LinearGradient colors={['rgba(0,0,0,.05)','rgba(0,0,0,.08)','rgba(0,0,0,.88)']} style={StyleSheet.absoluteFill}/></View>
+        <View style={styles.feedCreator}>{post.avatarUrl?<Image source={{uri:post.avatarUrl}} style={styles.postAvatar}/>:<View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0,1)}</Text></View>}<View style={styles.commandCopy}><Text style={styles.postAlias}>@{post.alias}</Text><Text style={styles.postMeta}>{new Date(post.createdAt).toLocaleString()}</Text></View>{post.userId!==userId?<Pressable onPress={()=>void toggleFollow(post.userId)} style={[styles.followButton,post.following&&styles.followButtonActive]}><Text style={styles.followText}>{post.following?'FOLLOWING':'FOLLOW'}</Text></Pressable>:null}</View>
+        <Text style={styles.feedCaption}>{post.caption||'Untitled transmission'}</Text>
+        <View style={styles.feedActionRail}><Pressable onPress={()=>void toggleLike(post.id)} style={styles.feedAction}><Heart size={25} color={post.liked?accent:paper} fill={post.liked?accent:'transparent'}/><Text style={styles.feedActionCount}>{post.likes}</Text></Pressable><Pressable onPress={()=>setCommenting(commenting===post.id?null:post.id)} style={styles.feedAction}><MessageCircle size={25} color={paper}/><Text style={styles.feedActionCount}>{post.comments}</Text></Pressable><Pressable onPress={()=>void toggleSave(post.id)} style={styles.feedAction}><Bookmark size={24} color={post.saved?accent:paper} fill={post.saved?accent:'transparent'}/></Pressable><Pressable onPress={()=>{setRadarTarget(post.userId);onTab('radar');}} style={styles.feedAction}><MapPin size={24} color={paper}/><Text style={styles.feedActionLabel}>RADAR</Text></Pressable>{post.videoUrl?<Pressable onPress={()=>setVideoMuted(value=>!value)} style={styles.feedAction}>{videoMuted?<VolumeX size={23} color={paper}/>:<Volume2 size={23} color={accent}/>}</Pressable>:null}</View>
+        {commenting===post.id?<View style={styles.feedCommentComposer}><TextInput value={comment} onChangeText={setComment} placeholder="Add a comment" placeholderTextColor={muted} style={styles.commentInput} maxLength={500}/><Pressable onPress={async()=>{if(await addComment(post.id,comment)){setComment('');setCommenting(null);}}}><Send size={19} color={accent}/></Pressable></View>:null}
+      </View>)}</ScrollView>:null}
+      {userId&&!loading&&!posts.length?<GlassPanel style={styles.emptyState}><Radio size={28} color={accent}/><Text style={styles.emptyTitle}>NO TRANSMISSIONS YET</Text><Text style={styles.emptyCopy}>Post the first photo or video to this network.</Text></GlassPanel>:null}
+    </View>
   );
 }
 
@@ -769,8 +774,13 @@ function RaceScreen() {
   const [gpsStatus, setGpsStatus] = useState('GPS STANDBY');
   const [schedule, setSchedule] = useState<'now' | 'later'>('now');
   const [contractStatus, setContractStatus] = useState('STAGE CONTRACT');
+  const [inboxFilter,setInboxFilter]=useState<'pending'|'accepted'|'history'>('pending');
   const subscription = useRef<Location.LocationSubscription | null>(null);
-  const { pilots, races, challengeTargetId, loadPilots, loadRaces, respondToRace, setChallengeTarget } = useContentStore();
+  const { pilots, races, profile, challengeTargetId, loadPilots, loadRaces, respondToRace, setChallengeTarget } = useContentStore();
+  const creditBalance=profile?.credits||0;
+  const visibleRaces=races.filter(race=>inboxFilter==='pending'?['pending','rescheduled'].includes(race.status):inboxFilter==='accepted'?['accepted','scheduled'].includes(race.status):!['pending','rescheduled','accepted','scheduled'].includes(race.status));
+
+  useEffect(()=>{if(wager>creditBalance)setWager(creditBalance);},[creditBalance,wager]);
 
   useEffect(() => {
     if (challengeTargetId) {
@@ -838,7 +848,7 @@ function RaceScreen() {
       </View>
       <View style={styles.raceViewTabs}><Pressable onPress={() => setView('stage')} style={[styles.raceViewTab,view==='stage'&&styles.raceViewTabActive]}><Swords size={15} color={view==='stage'?accent:muted}/><Text style={[styles.segmentText,view==='stage'&&styles.segmentTextActive]}>NEW CHALLENGE</Text></Pressable><Pressable onPress={() => setView('inbox')} style={[styles.raceViewTab,view==='inbox'&&styles.raceViewTabActive]}><Bell size={15} color={view==='inbox'?accent:muted}/><Text style={[styles.segmentText,view==='inbox'&&styles.segmentTextActive]}>RACE INBOX · {races.length}</Text></Pressable></View>
 
-      {view === 'inbox' ? <>{races.map(race => { const myEntry=race.participants.find(item=>item.userId===useContentStore.getState().userId); const canRespond=!race.isChallenger&&myEntry?.status==='invited'; return <GlassPanel key={race.id} style={styles.raceContractCard} glow={canRespond}><View style={styles.raceContractTop}><View><Text style={styles.eyebrow}>{race.status.toUpperCase()}</Text><Text style={styles.raceContractTitle}>{race.raceType.toUpperCase()} / {race.routeName}</Text></View><CreditsToken value={race.wagerCredits} compact /></View><Text style={styles.raceContractMeta}>{race.challengerName.toUpperCase()} · {new Date(race.startsAt).toLocaleString()} · {race.participants.length+1} PILOTS</Text><View style={styles.raceParticipantRail}>{race.participants.map(pilot=><View key={pilot.userId} style={styles.raceParticipant}><Text style={styles.raceParticipantName}>{pilot.username.toUpperCase()}</Text><Text style={styles.raceParticipantStatus}>{pilot.status.toUpperCase()} · REP {pilot.reputation}</Text></View>)}</View><View style={styles.sheetActions}>{canRespond?<><GlassButton label="ACCEPT" icon={Check} onPress={async()=>Alert.alert('Race updated',(await respondToRace(race.id,'accept')).toUpperCase())} active grow/><GlassButton label="DECLINE" icon={X} onPress={async()=>Alert.alert('Race updated',(await respondToRace(race.id,'decline')).toUpperCase())} grow/></>:null}<GlassButton label="+1H" icon={CalendarDays} onPress={async()=>Alert.alert('Race rescheduled',(await respondToRace(race.id,'reschedule',new Date(Date.parse(race.startsAt)+3600000).toISOString())).toUpperCase())} grow/></View></GlassPanel>;})}{races.length===0?<GlassPanel style={styles.emptyState}><Swords size={28} color={accent}/><Text style={styles.emptyTitle}>NO RACE CONTRACTS</Text><Text style={styles.emptyCopy}>Stage a GPS-verified challenge and it will appear here for every invited pilot.</Text></GlassPanel>:null}</> : <>
+      {view === 'inbox' ? <><View style={styles.inboxFilters}>{(['pending','accepted','history'] as const).map(item=><Pressable key={item} onPress={()=>setInboxFilter(item)} style={[styles.inboxFilter,inboxFilter===item&&styles.inboxFilterActive]}><Text style={[styles.segmentText,inboxFilter===item&&styles.segmentTextActive]}>{item.toUpperCase()} · {races.filter(race=>item==='pending'?['pending','rescheduled'].includes(race.status):item==='accepted'?['accepted','scheduled'].includes(race.status):!['pending','rescheduled','accepted','scheduled'].includes(race.status)).length}</Text></Pressable>)}</View>{visibleRaces.map(race => { const myEntry=race.participants.find(item=>item.userId===useContentStore.getState().userId); const canRespond=!race.isChallenger&&myEntry?.status==='invited'; return <GlassPanel key={race.id} style={styles.raceContractCard} glow={canRespond}><View style={styles.raceContractTop}><View><Text style={styles.eyebrow}>{race.status.toUpperCase()}</Text><Text style={styles.raceContractTitle}>{race.raceType.toUpperCase()} / {race.routeName}</Text></View><CreditsToken value={race.wagerCredits} compact /></View><Text style={styles.raceContractMeta}>{race.challengerName.toUpperCase()} · {new Date(race.startsAt).toLocaleString()} · {race.participants.length+1} PILOTS</Text><View style={styles.raceParticipantRail}>{race.participants.map(pilot=><View key={pilot.userId} style={styles.raceParticipant}><Text style={styles.raceParticipantName}>{pilot.username.toUpperCase()}</Text><Text style={styles.raceParticipantStatus}>{pilot.status.toUpperCase()} · REP {pilot.reputation}</Text></View>)}</View><View style={styles.sheetActions}>{canRespond?<><GlassButton label="ACCEPT" icon={Check} onPress={async()=>Alert.alert('Race updated',(await respondToRace(race.id,'accept')).toUpperCase())} active grow/><GlassButton label="DECLINE" icon={X} onPress={async()=>Alert.alert('Race updated',(await respondToRace(race.id,'decline')).toUpperCase())} grow/></>:null}<GlassButton label="+1H" icon={CalendarDays} onPress={async()=>Alert.alert('Race rescheduled',(await respondToRace(race.id,'reschedule',new Date(Date.parse(race.startsAt)+3600000).toISOString())).toUpperCase())} grow/></View></GlassPanel>;})}{visibleRaces.length===0?<GlassPanel style={styles.emptyState}><Swords size={28} color={accent}/><Text style={styles.emptyTitle}>NO {inboxFilter.toUpperCase()} CHALLENGES</Text><Text style={styles.emptyCopy}>Race contracts are separated by their current status.</Text></GlassPanel>:null}</> : <>
 
       <SectionTitle label="FORMAT" />
       <View style={styles.formatGrid}>
@@ -867,9 +877,9 @@ function RaceScreen() {
         <View style={styles.wagerRow}>
           <Pressable onPress={() => setWager(Math.max(0, wager - 100))} style={styles.wagerControl}><Text style={styles.wagerControlText}>−</Text></Pressable>
           <CreditsToken value={wager} compact />
-          <Pressable onPress={() => setWager(wager + 100)} style={styles.wagerControl}><Plus size={19} color={paper} /></Pressable>
+          <Pressable onPress={() => setWager(Math.min(creditBalance,wager + 100))} style={styles.wagerControl}><Plus size={19} color={paper} /></Pressable>
         </View>
-        <Text style={styles.wagerFootnote}>VIRTUAL CREDITS · HELD WHEN ALL PILOTS ACCEPT</Text>
+        <View style={styles.wagerBalanceRow}><Text style={styles.wagerFootnote}>BALANCE {creditBalance.toLocaleString()} · HELD WHEN ALL ACCEPT</Text><Pressable onPress={()=>setWager(creditBalance)}><Text style={styles.sectionAction}>MAX</Text></Pressable></View>
       </GlassPanel>
 
       <SectionTitle label="LIVE SPEED PROOF" />
@@ -1009,7 +1019,7 @@ export function ApexDesignPreview() {
 
   const content = useMemo(() => {
     if (tab === 'radar') return <RadarScreen onTab={setTab} />;
-    if (tab === 'feed') return <FeedScreen />;
+    if (tab === 'feed') return <FeedScreen onTab={setTab} />;
     if (tab === 'garage') return <GarageScreen onTab={setTab} />;
     if (tab === 'more') return <MoreScreen onTab={setTab} />;
     if (tab === 'race') return <RaceScreen />;
@@ -1292,6 +1302,9 @@ const styles = StyleSheet.create({
   raceViewTabs: { flexDirection: 'row', gap: 7, marginBottom: 10 },
   raceViewTab: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: border, borderRadius: 10, backgroundColor: 'rgba(255,255,255,.035)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   raceViewTabActive: { borderColor: 'rgba(145,185,133,.4)', backgroundColor: 'rgba(145,185,133,.10)' },
+  inboxFilters: { flexDirection: 'row', gap: 7, marginBottom: 10 },
+  inboxFilter: { flex: 1, minHeight: 38, borderRadius: 9, borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.03)' },
+  inboxFilterActive: { borderColor: 'rgba(167,229,154,.48)', backgroundColor: 'rgba(167,229,154,.1)' },
   raceContractCard: { marginBottom: 10 },
   raceContractTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   raceContractTitle: { color: paper, fontSize: 15, fontWeight: '900', marginTop: 5 },
@@ -1319,6 +1332,7 @@ const styles = StyleSheet.create({
   wagerControl: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.04)' },
   wagerControlText: { color: paper, fontSize: 22, fontWeight: '700', marginTop: -2 },
   wagerFootnote: { color: muted, fontSize: 7, fontWeight: '900', letterSpacing: 0.7, textAlign: 'center', marginTop: 14 },
+  wagerBalanceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   speedPanel: { marginBottom: 10 },
   speedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   speedStatus: { color: muted, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
@@ -1503,6 +1517,28 @@ const styles = StyleSheet.create({
   driveSpeed: { color: paper, fontSize: 48, lineHeight: 52, fontWeight: '300' },
   driveUnit: { color: accent, fontSize: 8, fontWeight: '900', letterSpacing: 1.5 },
   driveMeta: { color: muted, fontSize: 6, fontWeight: '900', marginTop: 8 },
+  shareTimer: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: border },
+  shareTimerTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  shareTimerMeta: { color: muted, fontSize: 6, fontWeight: '900' },
+  shareTimerOptions: { flexDirection: 'row', gap: 6, marginTop: 8 },
+  shareTimerOption: { flex: 1, minHeight: 32, borderRadius: 8, borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.035)' },
+  shareTimerOptionActive: { borderColor: 'rgba(167,229,154,.55)', backgroundColor: 'rgba(167,229,154,.12)' },
+  shareTimerOptionText: { color: muted, fontSize: 7, fontWeight: '900' },
+  shareTimerOptionTextActive: { color: paper },
+  ghostButton: { flex: 1.5, minHeight: 32, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center' },
+  ghostButtonText: { color: paper, fontSize: 7, fontWeight: '900' },
+  feedScreen: { flex: 1, backgroundColor: '#020403' },
+  feedFloatingHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30, minHeight: 72, paddingHorizontal: 15, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(1,3,2,.62)', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.10)' },
+  feedComposerOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 45, paddingTop: 78, backgroundColor: 'rgba(0,0,0,.78)' },
+  feedPage: { width: '100%', position: 'relative', backgroundColor: '#020302', overflow: 'hidden' },
+  feedMedia: { ...StyleSheet.absoluteFillObject, backgroundColor: '#050705' },
+  feedCreator: { position: 'absolute', left: 15, right: 70, bottom: 122, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  feedCaption: { position: 'absolute', left: 15, right: 74, bottom: 78, color: paper, fontSize: 11, lineHeight: 16, fontWeight: '700' },
+  feedActionRail: { position: 'absolute', right: 10, bottom: 72, width: 50, alignItems: 'center', gap: 15 },
+  feedAction: { minWidth: 45, minHeight: 42, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  feedActionCount: { color: paper, fontSize: 8, fontWeight: '900' },
+  feedActionLabel: { color: paper, fontSize: 6, fontWeight: '900' },
+  feedCommentComposer: { position: 'absolute', left: 12, right: 12, bottom: 18, minHeight: 48, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(3,6,4,.9)' },
   composerPanel: { marginHorizontal: 14, marginBottom: 12 },
   mediaPicker: { minHeight: 150, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(145,185,133,.4)', backgroundColor: 'rgba(145,185,133,.05)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   composerPreview: { width: '100%', height: 210, resizeMode: 'cover' },

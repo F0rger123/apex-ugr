@@ -203,7 +203,7 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === 'network' && method === 'GET') {
     const now = new Date().toISOString();
     const [drivers, events, cruises] = await Promise.all([
-      env.DB.prepare(`SELECT l.*,u.username,u.avatar_url,u.privacy_mode,u.tier,u.wins,u.losses,v.year,v.make,v.model,CASE WHEN l.expires_at>? THEN 1 ELSE 0 END is_live FROM driver_locations l JOIN users u ON u.id=l.user_id LEFT JOIN vehicles v ON v.id=l.vehicle_id WHERE l.user_id<>? ORDER BY is_live DESC,l.updated_at DESC LIMIT 500`).bind(now,user.id).all(),
+      env.DB.prepare(`SELECT l.*,u.username,u.avatar_url,u.privacy_mode,u.tier,u.wins,u.losses,v.year,v.make,v.model,1 is_live FROM driver_locations l JOIN users u ON u.id=l.user_id LEFT JOIN vehicles v ON v.id=l.vehicle_id WHERE l.expires_at>? AND l.user_id<>? ORDER BY l.updated_at DESC LIMIT 500`).bind(now,user.id).all(),
       env.DB.prepare('SELECT * FROM events WHERE ends_at IS NULL OR ends_at>? ORDER BY starts_at').bind(now).all(),
       env.DB.prepare("SELECT * FROM cruises WHERE status IN ('scheduled','live') ORDER BY starts_at").all(),
     ]);
@@ -217,21 +217,26 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === 'location' && method === 'POST') {
     const body = await request.json<Record<string, number | string | boolean | null>>();
     if(!Number.isFinite(Number(body.latitude))||!Number.isFinite(Number(body.longitude)))return json({error:'Valid latitude and longitude are required.'},400);
-    const expires = new Date(Date.now()+15*60_000).toISOString();
+    const shareMinutes=Math.min(120,Math.max(5,Math.floor(Number(body.shareMinutes)||15)));
+    const requestedExpiry=typeof body.expiresAt==='string'?Date.parse(body.expiresAt):NaN;
+    const expiryMs=Number.isFinite(requestedExpiry)?Math.min(Date.now()+120*60_000,Math.max(Date.now()+60_000,requestedExpiry)):Date.now()+shareMinutes*60_000;
+    const expires = new Date(expiryMs).toISOString();
     await env.DB.prepare(`INSERT INTO driver_locations(user_id,vehicle_id,latitude,longitude,accuracy_m,altitude_m,speed_kph,heading,drive_mode,cruise_id,expires_at,updated_at)
       VALUES(?,COALESCE(?,(SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1)),?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,altitude_m=excluded.altitude_m,speed_kph=excluded.speed_kph,heading=excluded.heading,drive_mode=excluded.drive_mode,cruise_id=excluded.cruise_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`)
       .bind(user.id,body.vehicleId||null,user.id,Number(body.latitude),Number(body.longitude),body.accuracy??null,body.altitude??null,body.speedKph||0,body.heading||0,body.driveMode?1:0,body.cruiseId||null,expires).run();
     await env.DB.prepare('UPDATE users SET top_speed_kph=MAX(top_speed_kph,?) WHERE id=?').bind(Math.max(0,Number(body.speedKph)||0),user.id).run();
-    return json({ success: true });
+    return json({ success: true,expiresAt:expires,shareMinutes });
   }
+  if(path==='location'&&method==='DELETE'){await env.DB.prepare('DELETE FROM driver_locations WHERE user_id=?').bind(user.id).run();return json({hidden:true});}
 
   if (path === 'feed' && method === 'GET') {
     const posts = await env.DB.prepare(`SELECT p.id,p.user_id,p.media_url,p.media_type,p.caption,p.created_at,u.username,u.avatar_url,
       (SELECT COUNT(*) FROM post_likes l WHERE l.post_id=p.id) likes,
       (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id) comments,
       EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=?) liked,
-      EXISTS(SELECT 1 FROM post_saves s WHERE s.post_id=p.id AND s.user_id=?) saved
-      FROM posts p JOIN users u ON u.id=p.user_id ORDER BY p.created_at DESC LIMIT 50`).bind(user.id,user.id).all();
+      EXISTS(SELECT 1 FROM post_saves s WHERE s.post_id=p.id AND s.user_id=?) saved,
+      EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.following_id=p.user_id) following
+      FROM posts p JOIN users u ON u.id=p.user_id ORDER BY p.created_at DESC LIMIT 50`).bind(user.id,user.id,user.id).all();
     return json({ posts: posts.results });
   }
   if (path === 'posts' && method === 'POST') {
@@ -255,6 +260,16 @@ async function handle(request: Request, env: Env, path: string) {
     if(current) await env.DB.prepare(`DELETE FROM ${table} WHERE post_id=? AND user_id=?`).bind(postId,user.id).run();
     else await env.DB.prepare(`INSERT INTO ${table}(post_id,user_id) VALUES(?,?)`).bind(postId,user.id).run();
     return json({active:!current});
+  }
+
+  const followAction=path.match(/^users\/([^/]+)\/follow$/);
+  if(followAction&&method==='POST'){
+    const targetId=followAction[1]; if(targetId===user.id)return json({error:'You already follow your own build.'},400);
+    const target=await env.DB.prepare('SELECT username FROM users WHERE id=?').bind(targetId).first<{username:string}>();if(!target)return json({error:'Pilot not found.'},404);
+    const current=await env.DB.prepare('SELECT 1 found FROM follows WHERE follower_id=? AND following_id=?').bind(user.id,targetId).first();
+    if(current)await env.DB.prepare('DELETE FROM follows WHERE follower_id=? AND following_id=?').bind(user.id,targetId).run();
+    else await env.DB.batch([env.DB.prepare('INSERT INTO follows(follower_id,following_id) VALUES(?,?)').bind(user.id,targetId),env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(),targetId,'new_follower','NEW FOLLOWER',`${user.username} followed your build`,JSON.stringify({userId:user.id}))]);
+    return json({following:!current});
   }
 
   if (path === 'leaderboard' && method === 'GET') {
@@ -306,6 +321,7 @@ async function handle(request: Request, env: Env, path: string) {
       return json({status:'rescheduled',startsAt:body.startsAt});
     }
     if(!opponent)return json({error:'Challenge is already accepted by the host.'},400);
+    if(Number(race.wager_credits||0)>user.credits)return json({error:'You do not have enough credits to accept this wager.'},409);
     await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='accepted' WHERE race_id=? AND user_id=?").bind(raceId,user.id),env.DB.prepare('UPDATE users SET decline_streak=0 WHERE id=?').bind(user.id)]);
     const pending=await env.DB.prepare("SELECT COUNT(*) count FROM race_opponents WHERE race_id=? AND status<>'accepted'").bind(raceId).first<{count:number}>();
     if((pending?.count||0)===0){
@@ -393,6 +409,14 @@ async function handle(request: Request, env: Env, path: string) {
     const [locations,registrations]=await Promise.all([env.DB.prepare('SELECT * FROM event_locations WHERE event_id=? ORDER BY stop_order').bind(eventDetails[1]).all(),env.DB.prepare(`SELECT r.role,r.sponsor_name,r.vehicle_id,u.id user_id,u.username,u.avatar_url,v.year,v.make,v.model,v.trim,v.photo_url FROM event_registrations r JOIN users u ON u.id=r.user_id LEFT JOIN vehicles v ON v.id=r.vehicle_id WHERE r.event_id=? ORDER BY r.created_at`).bind(eventDetails[1]).all()]);
     return json({event,locations:locations.results,registrations:registrations.results});
   }
+  const eventInvite=path.match(/^events\/([^/]+)\/invite$/);
+  if(eventInvite&&method==='POST'){
+    const body=await request.json<{userId?:string}>(); if(!body.userId||body.userId===user.id)return json({error:'Choose another pilot to invite.'},400);
+    const event=await env.DB.prepare('SELECT title FROM events WHERE id=? AND host_id=?').bind(eventInvite[1],user.id).first<{title:string}>();if(!event)return json({error:'Only the meet host can invite pilots.'},403);
+    const invited=await env.DB.prepare('SELECT username FROM users WHERE id=?').bind(body.userId).first<{username:string}>();if(!invited)return json({error:'Pilot not found.'},404);
+    await env.DB.batch([env.DB.prepare(`INSERT INTO event_invites(event_id,user_id,invited_by,status) VALUES(?,?,?,'invited') ON CONFLICT(event_id,user_id) DO UPDATE SET invited_by=excluded.invited_by,status='invited',created_at=CURRENT_TIMESTAMP`).bind(eventInvite[1],body.userId,user.id),env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(),body.userId,'meet_rsvp','MEET INVITATION',`${user.username} invited you to ${event.title}`,JSON.stringify({eventId:eventInvite[1]}))]);
+    return json({invited:true,pilot:invited.username,event:event.title});
+  }
   const eventJoin=path.match(/^events\/([^/]+)\/join$/);
   if(eventJoin&&method==='POST'){
     const body=await request.json<{role?:string;vehicleId?:string;sponsorName?:string}>(); const role=body.role||'attendee';
@@ -462,9 +486,9 @@ async function handle(request: Request, env: Env, path: string) {
   if(deleteRoute&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_routes WHERE id=? AND user_id=?').bind(deleteRoute[1],user.id).run();return json({deleted:true});}
 
   if (path === 'routes' && method === 'POST') {
-    const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string}>();
+    const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string;target?:{latitude:number;longitude:number}}>();// Exact coordinates are used for pilot pins; text destinations are geocoded.
     if(!body.origin||!body.destination?.trim()) return json({error:'Current location and destination are required.'},400);
-    const target=await geocode(body.destination);
+    const target=Number.isFinite(body.target?.latitude)&&Number.isFinite(body.target?.longitude)?{latitude:Number(body.target!.latitude),longitude:Number(body.target!.longitude),name:body.destination.trim()}:await geocode(body.destination);
     if(!target) return json({error:'Destination not found.'},404);
     const routeUrl=`https://router.project-osrm.org/route/v1/driving/${body.origin.longitude},${body.origin.latitude};${target.longitude},${target.latitude}?overview=full&geometries=geojson`;
     const routed=await fetch(routeUrl); const route=await routed.json<{routes?:Array<{distance:number;duration:number;geometry:{coordinates:number[][]}}>}>();
