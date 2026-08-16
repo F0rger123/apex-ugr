@@ -104,6 +104,27 @@ async function geocode(destination: string) {
   return {latitude:Number(places[0].lat),longitude:Number(places[0].lon),name:places[0].display_name};
 }
 
+async function addressSuggestions(query: string) {
+  const geoUrl=new URL('https://nominatim.openstreetmap.org/search');
+  geoUrl.searchParams.set('q',query.trim()); geoUrl.searchParams.set('format','jsonv2'); geoUrl.searchParams.set('limit','6'); geoUrl.searchParams.set('addressdetails','1');
+  const response=await fetch(geoUrl,{headers:{'User-Agent':'ApexUGR/1.0 (https://apex-ugr.pages.dev)','Accept-Language':'en'}});
+  const places=await response.json<Array<{place_id:number;lat:string;lon:string;display_name:string;type?:string}>>();
+  const unique=new Map<string,{id:string;name:string;latitude:number;longitude:number;type:string}>();
+  for(const place of places){if(!unique.has(place.display_name))unique.set(place.display_name,{id:String(place.place_id),name:place.display_name,latitude:Number(place.lat),longitude:Number(place.lon),type:place.type||'place'});}
+  return [...unique.values()];
+}
+
+async function vehicleCatalog(year: string | null, make: string | null) {
+  if(make){
+    const url=`https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMakeYear/make/${encodeURIComponent(make)}/modelyear/${encodeURIComponent(year||String(new Date().getFullYear()))}?format=json`;
+    const response=await fetch(url); const data=await response.json<{Results?:Array<{Model_Name:string}>}>();
+    return {models:[...new Set((data.Results||[]).map(row=>row.Model_Name).filter(Boolean))].sort()};
+  }
+  const response=await fetch('https://vpic.nhtsa.dot.gov/api/vehicles/GetAllMakes?format=json');
+  const data=await response.json<{Results?:Array<{Make_Name:string}>}>();
+  return {makes:[...new Set((data.Results||[]).map(row=>row.Make_Name).filter(Boolean))].sort()};
+}
+
 async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === 'OPTIONS') return new Response(null, { headers: cors });
@@ -396,6 +417,46 @@ async function handle(request: Request, env: Env, path: string) {
     const query=(body.query||'performance parts').slice(0,80);
     return json({products:[],providers:[{name:'eBay Motors',mode:env.EBAY_CLIENT_ID&&env.EBAY_CLIENT_SECRET?'live':'pending_approval'},...providerSearches(body.vehicle,query)]});
   }
+
+  if(path==='address-suggestions'&&method==='GET'){
+    const query=new URL(request.url).searchParams.get('q')?.trim()||'';
+    if(query.length<3)return json({suggestions:[]});
+    return json({suggestions:await addressSuggestions(query.slice(0,120))});
+  }
+
+  if(path==='vehicle-catalog'&&method==='GET'){
+    const params=new URL(request.url).searchParams;
+    return json(await vehicleCatalog(params.get('year'),params.get('make')));
+  }
+
+  if(path==='navigation'&&method==='GET'){
+    const [places,routes]=await Promise.all([
+      env.DB.prepare('SELECT * FROM saved_places WHERE user_id=? ORDER BY is_favorite DESC,created_at DESC').bind(user.id).all(),
+      env.DB.prepare('SELECT id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,created_at FROM saved_routes WHERE user_id=? ORDER BY created_at DESC').bind(user.id).all(),
+    ]);
+    return json({places:places.results,routes:routes.results.map((row:any)=>({...row,coordinates:JSON.parse(row.coordinates_json||'[]')}))});
+  }
+
+  if(path==='places'&&method==='POST'){
+    const body=await request.json<{label?:string;locationName?:string;latitude?:number;longitude?:number;isFavorite?:boolean}>();
+    if(!body.label?.trim()||!body.locationName?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'A label and valid location are required.'},400);
+    const id=crypto.randomUUID();
+    await env.DB.prepare('INSERT INTO saved_places(id,user_id,label,location_name,latitude,longitude,is_favorite) VALUES(?,?,?,?,?,?,?)').bind(id,user.id,body.label.trim().slice(0,60),body.locationName.trim().slice(0,300),body.latitude,body.longitude,body.isFavorite===false?0:1).run();
+    return json({id},201);
+  }
+  const deletePlace=path.match(/^places\/([^/]+)$/);
+  if(deletePlace&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_places WHERE id=? AND user_id=?').bind(deletePlace[1],user.id).run();return json({deleted:true});}
+
+  if(path==='routes/save'&&method==='POST'){
+    const body=await request.json<{name?:string;route?:{destination:string;destinationLatitude:number;destinationLongitude:number;distanceKm:number;durationMinutes:number;coordinates:Array<{latitude:number;longitude:number}>}}>();
+    const route=body.route;
+    if(!route?.destination||!Number.isFinite(route.destinationLatitude)||!Number.isFinite(route.destinationLongitude)||!Array.isArray(route.coordinates)||route.coordinates.length<2)return json({error:'Create a route before saving it.'},400);
+    const id=crypto.randomUUID();
+    await env.DB.prepare('INSERT INTO saved_routes(id,user_id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json) VALUES(?,?,?,?,?,?,?,?,?)').bind(id,user.id,(body.name||route.destination).trim().slice(0,80),route.destination.slice(0,300),route.destinationLatitude,route.destinationLongitude,route.distanceKm,route.durationMinutes,JSON.stringify(route.coordinates)).run();
+    return json({id},201);
+  }
+  const deleteRoute=path.match(/^routes\/([^/]+)$/);
+  if(deleteRoute&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_routes WHERE id=? AND user_id=?').bind(deleteRoute[1],user.id).run();return json({deleted:true});}
 
   if (path === 'routes' && method === 'POST') {
     const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string}>();

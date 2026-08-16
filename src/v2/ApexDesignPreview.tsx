@@ -19,6 +19,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import Slider from '@react-native-community/slider';
 import { useLiveNetworkStore, LiveDriver, LiveEvent } from './live/liveNetworkStore';
 import { useContentStore } from './live/contentStore';
 import { useNotificationStore } from '../stores/notificationStore';
@@ -54,11 +55,14 @@ import {
   Play,
   Plus,
   Radio,
+  Route,
+  Save,
   ScanLine,
   Send,
   ShieldCheck,
   ShoppingBag,
   Sparkles,
+  Star,
   Swords,
   Trophy,
   UserRound,
@@ -229,7 +233,7 @@ function CommandScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const liveCredits = profile?.credits ?? 0;
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.hero}>{vehicle?.photoUrl ? <Image source={{ uri: vehicle.photoUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : <View style={[StyleSheet.absoluteFill, styles.commandEmptyHero]}><CarFront size={68} color="rgba(255,255,255,.18)" /></View>}
+      <View style={[styles.hero,!vehicle&&styles.heroEmpty]}>{vehicle?.photoUrl ? <Image source={{ uri: vehicle.photoUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : <View style={[StyleSheet.absoluteFill, styles.commandEmptyHero]}><View style={styles.emptyVehicleMark}><CarFront size={44} color="rgba(255,255,255,.32)" /></View></View>}
         <LinearGradient colors={['rgba(3,4,3,0.05)', 'rgba(3,4,3,0.44)']} style={StyleSheet.absoluteFill} />
         <View style={styles.heroStatus}>
           <View style={styles.liveDot} />
@@ -240,8 +244,9 @@ function CommandScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           <Text style={styles.heroTitle}>{vehicle?.nickname.toUpperCase() || 'NO VEHICLE'}</Text>
           <Text style={styles.heroCarName}>{vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''}`.toUpperCase() : 'ADD A VEHICLE IN GARAGE'}</Text>
           <View style={styles.heroActions}>
-            <GlassButton label="OPEN GARAGE" icon={CarFront} onPress={() => onTab('garage')} active grow />
-            <GlassButton label="LOCATE" icon={MapPin} onPress={() => onTab('radar')} grow />
+            <GlassButton label="GARAGE" icon={CarFront} onPress={() => onTab('garage')} active grow />
+            <GlassButton label="RADAR" icon={MapPin} onPress={() => onTab('radar')} grow />
+            <GlassButton label="DRIVE" icon={Play} onPress={startDrive} grow />
           </View>
         </View>
       </View>
@@ -253,6 +258,8 @@ function CommandScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
         <View style={styles.metricDivider} />
         <View style={styles.metric}><Text style={styles.metricValue}>{rankIndex >= 0 ? `#${String(rankIndex + 1).padStart(3, '0')}` : '—'}</Text><Text style={styles.metricLabel}>GLOBAL</Text></View>
       </View>
+
+      <View style={styles.commandPulse}><View style={styles.commandPulseLive}><View style={styles.liveDot}/><Text style={styles.commandPulseLabel}>NETWORK PULSE</Text></View><View style={styles.commandPulseMetric}><Text style={styles.commandPulseValue}>{drivers.length}</Text><Text style={styles.commandPulseMeta}>PILOTS</Text></View><View style={styles.commandPulseMetric}><Text style={styles.commandPulseValue}>{events.length}</Text><Text style={styles.commandPulseMeta}>MEETS</Text></View><View style={styles.commandPulseMetric}><Text style={styles.commandPulseValue}>{cruises.length}</Text><Text style={styles.commandPulseMeta}>CRUISES</Text></View></View>
 
       <SectionTitle label="PILOT STATUS" action={profile ? 'LIVE RECORD' : 'OFFLINE'} />
       <GlassPanel glow>
@@ -267,22 +274,16 @@ function CommandScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
         <View style={styles.progressLabels}><Text style={styles.progressText}>{(profile?.points || 0).toLocaleString()} RP</Text><Text style={styles.progressText}>{profile?.tier?.toUpperCase() || 'UNRANKED'}</Text></View>
       </GlassPanel>
 
+      <SectionTitle label="OPERATIONS" action={`${drivers.length} PILOTS LIVE`} />
+      <View style={styles.operationGrid}>{[
+        {label:'RACE',meta:`${drivers.length} available`,icon:Swords,tab:'race' as TabKey},
+        {label:'RADAR',meta:`${events.length} meet zones`,icon:Radio,tab:'radar' as TabKey},
+        {label:'ROUTES',meta:'Favorites + saved',icon:Route,tab:'radar' as TabKey},
+        {label:'MEETS',meta:'Host or join',icon:Users,tab:'meets' as TabKey},
+      ].map(item=><Pressable key={item.label} onPress={()=>onTab(item.tab)} style={({pressed})=>[styles.operationTile,pressed&&styles.pressed]}><View style={styles.operationIcon}><item.icon size={20} color={item.label==='RACE'?accent:paper}/></View><Text style={styles.operationTitle}>{item.label}</Text><Text style={styles.operationMeta}>{item.meta.toUpperCase()}</Text><ChevronRight size={15} color={muted}/></Pressable>)}</View>
+
       <SectionTitle label="SEASON LEADERS" action="VIEW ALL" />
       <Pressable onPress={() => onTab('leaderboard')} style={styles.leaderPreview}>{rankings.slice(0,3).map((row,index)=><View key={row.id} style={styles.leaderPreviewRow}><Text style={styles.leaderPreviewRank}>{index+1}</Text><View style={styles.commandCopy}><Text style={styles.commandTitle}>{row.alias.toUpperCase()}</Text><Text style={styles.commandMeta}>{row.tier.toUpperCase()} · {row.points} RP · {row.wins} WINS</Text></View><Trophy size={17} color={index===0?accent:muted}/></View>)}{rankings.length===0?<View style={styles.leaderPreviewRow}><Trophy size={18} color={accent}/><Text style={styles.commandMeta}>THE FIRST VERIFIED RUN TAKES THE BOARD</Text></View>:null}<View style={styles.leaderPreviewOpen}><Text style={styles.sectionAction}>OPEN FULL LEADERBOARD</Text><ChevronRight size={16} color={accent}/></View></Pressable>
-
-      <SectionTitle label="LIVE NETWORK" action={`${drivers.length} ONLINE`} />
-      <Pressable onPress={() => onTab('race')} style={({ pressed }) => [styles.commandRow, pressed && styles.pressed]}>
-        <View style={styles.commandIcon}><Swords size={20} color={accent} /></View>
-        <View style={styles.commandCopy}><Text style={styles.commandTitle}>RACE CONTROL</Text><Text style={styles.commandMeta}>{drivers.length} nearby pilots available</Text></View>
-        <ChevronRight size={18} color={muted} />
-      </Pressable>
-      <Pressable onPress={() => onTab('radar')} style={({ pressed }) => [styles.commandRow, pressed && styles.pressed]}>
-        <View style={styles.commandIcon}><Radio size={20} color={paper} /></View>
-        <View style={styles.commandCopy}><Text style={styles.commandTitle}>LIVE RADAR</Text><Text style={styles.commandMeta}>{events.length} events · {cruises.length} cruises</Text></View>
-        <ChevronRight size={18} color={muted} />
-      </Pressable>
-      <Pressable onPress={startDrive} style={({ pressed }) => [styles.commandRow, styles.commandDriveRow, pressed && styles.pressed]}><View style={styles.commandIcon}><Navigation size={20} color={accent} /></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>ENTER DRIVE MODE</Text><Text style={styles.commandMeta}>Press Enter anywhere on web · live GPS speed and distance</Text></View><Play size={18} color={paper} /></Pressable>
-      <Pressable onPress={() => onTab('leaderboard')} style={({ pressed }) => [styles.commandRow, pressed && styles.pressed]}><View style={styles.commandIcon}><Trophy size={20} color={paper} /></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>SEASON LEADERBOARD</Text><Text style={styles.commandMeta}>{rankings.length ? `${rankings.length} ranked pilots · ${rankings[0]?.alias || 'season live'} leads` : 'Verified results and rank progression'}</Text></View><ChevronRight size={18} color={muted} /></Pressable>
 
     </ScrollView>
   );
@@ -416,13 +417,14 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [routeOpen, setRouteOpen] = useState(false);
   const [destination, setDestination] = useState('');
   const [routeLoading, setRouteLoading] = useState(false);
-  const { location, drivers: liveDrivers, events, cruises, route, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, lockLocation, startDrive, stopDrive, toggleUnit, setRoute, clearRoute } = useLiveNetworkStore();
+  const { location, drivers: liveDrivers, events, cruises, route, savedPlaces, savedRoutes, suggestions, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, lockLocation, startDrive, stopDrive, toggleUnit, setRoute, restoreRoute, saveCurrentRoute, savePlace, deletePlace, deleteSavedRoute, suggestAddresses, clearRoute } = useLiveNetworkStore();
   const drivers = liveDrivers.map((driver: LiveDriver): Driver => ({
     id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record,
     rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery,
     latitude: driver.latitude, longitude: driver.longitude, speedKph: driver.speedKph, cruiseId: driver.cruiseId,
   }));
   useEffect(() => { if (!location) lockLocation(); }, []);
+  useEffect(() => { const timer=setTimeout(()=>void suggestAddresses(destination),280); return()=>clearTimeout(timer); }, [destination]);
 
   const recenter = async () => {
     await lockLocation();
@@ -501,7 +503,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           <Text style={styles.radarDockTitle}>RADAR ACTIVE</Text>
           <View style={styles.radarReadout}><Text style={styles.radarDockMeta}>{networkStatus.replace('_', ' ').toUpperCase()}</Text><Text style={styles.radarDockMeta}>{filter.toUpperCase()} CHANNEL</Text></View>
           {error ? <Text style={styles.networkError}>{error}</Text> : null}
-          {route ? <View style={styles.activeRoute}><Navigation size={15} color={accent} /><View style={styles.commandCopy}><Text style={styles.activeRouteTitle}>{route.destination.toUpperCase()}</Text><Text style={styles.activeRouteMeta}>{route.distanceKm.toFixed(1)} KM · {Math.round(route.durationMinutes)} MIN</Text></View><Pressable onPress={clearRoute} style={styles.routeClose}><X size={14} color={paper} /></Pressable></View> : null}
+          {route ? <View style={styles.activeRoute}><Navigation size={15} color={accent} /><View style={styles.commandCopy}><Text numberOfLines={1} style={styles.activeRouteTitle}>{route.destination.toUpperCase()}</Text><Text style={styles.activeRouteMeta}>{route.distanceKm.toFixed(1)} KM · {Math.round(route.durationMinutes)} MIN</Text></View><Pressable accessibilityLabel="Save route" onPress={()=>void saveCurrentRoute()} style={styles.routeClose}><Save size={14} color={accent}/></Pressable><Pressable onPress={clearRoute} style={styles.routeClose}><X size={14} color={paper} /></Pressable></View> : null}
           <View style={styles.driveDock}>
             <Pressable onPress={isDriving ? stopDrive : startDrive} style={[styles.driveEnter, isDriving && styles.driveEnterActive]}><Play size={16} color={isDriving ? accent : paper} /><Text style={styles.driveEnterText}>{isDriving ? 'END DRIVE' : 'ENTER DRIVE MODE'}</Text></Pressable>
             <Pressable onPress={() => setRouteOpen(value => !value)} style={styles.routeButton}><Navigation size={16} color={route ? accent : paper} /><Text style={styles.routeButtonText}>SET ROUTE</Text></Pressable>
@@ -509,7 +511,13 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           </View>
         </GlassPanel>
       )}
-      {routeOpen && !selected && !selectedEvent ? <GlassPanel style={styles.routePanel} glow><View style={styles.routeComposer}><TextInput value={destination} onChangeText={setDestination} onSubmitEditing={() => void submitRoute()} placeholder="Destination or address" placeholderTextColor={muted} style={styles.routeInput} autoFocus /><Pressable onPress={() => void submitRoute()} style={styles.routeSubmit}><Navigation size={17} color={accent} /><Text style={styles.routeSubmitText}>{routeLoading ? 'ROUTING' : 'GO'}</Text></Pressable></View></GlassPanel> : null}
+      {routeOpen && !selected && !selectedEvent ? <GlassPanel style={styles.routePanel} glow>
+        <View style={styles.routeComposer}><TextInput value={destination} onChangeText={setDestination} onSubmitEditing={() => void submitRoute()} placeholder="Search address or destination" placeholderTextColor={muted} style={styles.routeInput} autoFocus /><Pressable onPress={() => void submitRoute()} style={styles.routeSubmit}><Navigation size={17} color={accent} /><Text style={styles.routeSubmitText}>{routeLoading ? 'ROUTING' : 'GO'}</Text></Pressable></View>
+        {suggestions.length>0?<View style={styles.suggestionList}>{suggestions.slice(0,4).map(place=><View key={place.id} style={styles.suggestionRow}><Pressable style={styles.suggestionMain} onPress={()=>{setDestination(place.name);void submitRoute(place.name);}}><MapPin size={14} color={accent}/><Text numberOfLines={2} style={styles.suggestionText}>{place.name}</Text></Pressable><Pressable accessibilityLabel="Favorite location" onPress={()=>void savePlace({label:place.name.split(',')[0],locationName:place.name,latitude:place.latitude,longitude:place.longitude})} style={styles.favoriteButton}><Star size={15} color={accent}/></Pressable></View>)}</View>:null}
+        <View style={styles.savedNavHeader}><Text style={styles.eyebrow}>FAVORITES</Text>{location?<Pressable onPress={()=>void savePlace({label:'CURRENT POSITION',locationName:`${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`,latitude:location.latitude,longitude:location.longitude})}><Text style={styles.sectionAction}>SAVE CURRENT</Text></Pressable>:null}</View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.savedNavRail}>{savedPlaces.map(place=><View key={place.id} style={styles.savedNavChip}><Pressable style={styles.savedNavMain} onPress={()=>{setDestination(place.location_name);void submitRoute(place.location_name);}}><Star size={13} color={accent}/><Text numberOfLines={1} style={styles.savedNavText}>{place.label.toUpperCase()}</Text></Pressable><Pressable onPress={()=>void deletePlace(place.id)}><X size={12} color={muted}/></Pressable></View>)}{!savedPlaces.length?<Text style={styles.savedNavEmpty}>STAR A RESULT TO SAVE IT</Text>:null}</ScrollView>
+        {savedRoutes.length?<><View style={styles.savedNavHeader}><Text style={styles.eyebrow}>SAVED ROUTES</Text><Text style={styles.sectionAction}>{savedRoutes.length}</Text></View><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.savedNavRail}>{savedRoutes.map(item=><View key={item.id} style={styles.savedNavChip}><Pressable style={styles.savedNavMain} onPress={()=>{restoreRoute(item);setRouteOpen(false);setFollowRevision(value=>value+1);}}><Route size={13} color={paper}/><View><Text numberOfLines={1} style={styles.savedNavText}>{item.name.toUpperCase()}</Text><Text style={styles.savedNavMeta}>{Number(item.distance_km).toFixed(1)} KM</Text></View></Pressable><Pressable onPress={()=>void deleteSavedRoute(item.id)}><X size={12} color={muted}/></Pressable></View>)}</ScrollView></>:null}
+      </GlassPanel> : null}
       {isDriving ? <View pointerEvents="none" style={styles.driveHud}><Text style={styles.driveSpeed}>{Math.round(unit === 'mph' ? (location?.speedKph || 0) * .621371 : location?.speedKph || 0)}</Text><Text style={styles.driveUnit}>{unit.toUpperCase()}</Text><Text style={styles.driveMeta}>{distanceKm.toFixed(2)} KM · MAX {Math.round(maxSpeedKph * (unit === 'mph' ? .621371 : 1))}</Text></View> : null}
     </View>
   );
@@ -627,20 +635,30 @@ function UtilityScreen({ kind }: { kind: 'meets' | 'messages' | 'leaderboard' })
   return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.utilityHero}><Icon size={28} color={accent} /><Text style={styles.feedTitle}>{title}</Text></View>{conversations.map(conversation => <Pressable key={conversation.id} onPress={async () => { await fetchMessages(conversation.id); subscribeToConversation(conversation.id); setConversationId(conversation.id); }} style={styles.utilityRow}><View style={styles.commandCopy}><Text style={styles.utilityText}>{(conversation.group_name || conversation.other_profile?.username || 'SECURE CHANNEL').toUpperCase()}</Text><Text style={styles.commandMeta}>{conversation.last_message || 'No messages yet'}</Text></View><ChevronRight size={17} color={muted} /></Pressable>)}{conversations.length === 0 ? <GlassPanel style={styles.emptyState}><MessagesSquare size={28} color={accent} /><Text style={styles.emptyTitle}>NO CONVERSATIONS</Text><Text style={styles.emptyCopy}>Challenge or follow a real pilot to start a secure channel.</Text></GlassPanel> : null}</ScrollView>;
 }
 
+function CatalogField({label,value,options,onChange,placeholder}: {label:string;value:string;options:string[];onChange:(value:string)=>void;placeholder?:string}) {
+  const [focused,setFocused]=useState(false);
+  const matches=options.filter(option=>!value.trim()||option.toLowerCase().includes(value.toLowerCase())).slice(0,7);
+  return <View style={styles.catalogField}><Text style={styles.identityLabel}>{label}</Text><TextInput value={value} onFocus={()=>setFocused(true)} onChangeText={onChange} placeholder={placeholder||label} placeholderTextColor={muted} style={styles.authInput}/>{focused&&matches.length?<View style={styles.catalogOptions}>{matches.map(option=><Pressable key={option} onPress={()=>{onChange(option);setFocused(false);}} style={styles.catalogOption}><Text style={styles.catalogOptionText}>{option.toUpperCase()}</Text><ChevronRight size={13} color={accent}/></Pressable>)}</View>:null}</View>;
+}
+
 function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const { vehicles, activeVehicleId, loading, error, setActiveVehicle, addVehicle } = useContentStore();
   const [showAdd, setShowAdd] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [vehicleDraft, setVehicleDraft] = useState({ nickname: '', year: '', make: '', model: '', trim: '', engine: '', drivetrain: '', horsepower: '', color: '' });
+  const [vehicleDraft, setVehicleDraft] = useState({ nickname: '', year: String(new Date().getFullYear()), make: '', model: '', trim: 'Base', engine: 'Stock', drivetrain: 'AWD', horsepower: '300', color: 'Black' });
+  const [makes,setMakes]=useState<string[]>(['Acura','Audi','BMW','Chevrolet','Dodge','Ford','Honda','Hyundai','Lexus','Mercedes-Benz','Mitsubishi','Nissan','Porsche','Subaru','Toyota','Volkswagen']);
+  const [models,setModels]=useState<string[]>([]);
   const car = vehicles.find(vehicle => vehicle.id === activeVehicleId);
   const updateVehicle = (key: keyof typeof vehicleDraft, value: string) => setVehicleDraft(current => ({ ...current, [key]: value }));
+  useEffect(()=>{void cloudflareApi.request<{makes:string[]}>('/api/vehicle-catalog').then(data=>setMakes(data.makes||[])).catch(()=>undefined);},[]);
+  useEffect(()=>{if(!vehicleDraft.make)return;const timer=setTimeout(()=>void cloudflareApi.request<{models:string[]}>(`/api/vehicle-catalog?year=${encodeURIComponent(vehicleDraft.year)}&make=${encodeURIComponent(vehicleDraft.make)}`).then(data=>setModels(data.models||[])).catch(()=>setModels([])),250);return()=>clearTimeout(timer);},[vehicleDraft.make,vehicleDraft.year]);
   const pickVehiclePhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: .9, allowsEditing: false });
     if (!result.canceled && result.assets[0]) setPhotoUri(result.assets[0].uri);
   };
   const saveVehicle = async () => {
     const ready = await addVehicle({ ...vehicleDraft, nickname: vehicleDraft.nickname || `${vehicleDraft.make} ${vehicleDraft.model}`, year: Number(vehicleDraft.year), horsepower: Number(vehicleDraft.horsepower) || 0 }, photoUri);
-    if (ready) { setShowAdd(false); setPhotoUri(null); setVehicleDraft({ nickname: '', year: '', make: '', model: '', trim: '', engine: '', drivetrain: '', horsepower: '', color: '' }); }
+    if (ready) { setShowAdd(false); setPhotoUri(null); setVehicleDraft({ nickname: '', year: String(new Date().getFullYear()), make: '', model: '', trim: 'Base', engine: 'Stock', drivetrain: 'AWD', horsepower: '300', color: 'Black' }); }
   };
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
@@ -653,7 +671,15 @@ function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
         ))}
         <Pressable onPress={() => setShowAdd(value => !value)} style={styles.addCarButton}><Plus size={18} color={accent} /></Pressable>
       </View>
-      {(showAdd || !car) ? <GlassPanel style={styles.vehicleForm} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>FITMENT IDENTITY</Text><Text style={styles.notificationTitle}>ADD VEHICLE</Text></View>{car ? <Pressable onPress={() => setShowAdd(false)} style={styles.closeButton}><X size={17} color={paper} /></Pressable> : null}</View><Pressable onPress={pickVehiclePhoto} style={styles.vehiclePhotoPicker}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.vehiclePhotoPreview} /> : <><CarFront size={32} color={accent} /><Text style={styles.composerHint}>UPLOAD YOUR ACTUAL CAR PHOTO</Text></>}</Pressable><View style={styles.vehicleFormGrid}>{(['year','make','model','trim','engine','drivetrain','horsepower','color','nickname'] as const).map(field => <TextInput key={field} value={vehicleDraft[field]} onChangeText={value => updateVehicle(field, value)} placeholder={field.toUpperCase()} placeholderTextColor={muted} keyboardType={field === 'year' || field === 'horsepower' ? 'numeric' : 'default'} style={[styles.authInput, styles.vehicleFormInput]} />)}</View>{error ? <Text style={styles.networkError}>{error}</Text> : null}<GlassButton label={loading ? 'UPLOADING BUILD' : 'ADD TO GARAGE'} icon={Plus} onPress={() => void saveVehicle()} active /></GlassPanel> : <>
+      {(showAdd || !car) ? <GlassPanel style={styles.vehicleForm} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>VERIFIED FITMENT IDENTITY</Text><Text style={styles.notificationTitle}>ADD VEHICLE</Text></View>{car ? <Pressable onPress={() => setShowAdd(false)} style={styles.closeButton}><X size={17} color={paper} /></Pressable> : null}</View><Pressable onPress={pickVehiclePhoto} style={styles.vehiclePhotoPicker}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.vehiclePhotoPreview} /> : <><CarFront size={32} color={accent} /><Text style={styles.composerHint}>UPLOAD YOUR ACTUAL CAR PHOTO</Text></>}</Pressable>
+        <View style={styles.fitmentStep}><Text style={styles.fitmentStepNo}>01</Text><View style={styles.commandCopy}><Text style={styles.commandTitle}>VEHICLE IDENTITY</Text><Text style={styles.commandMeta}>NHTSA make and model catalog</Text></View></View>
+        <View style={styles.vehicleFormGrid}><View style={styles.catalogField}><Text style={styles.identityLabel}>YEAR</Text><TextInput value={vehicleDraft.year} onChangeText={value=>updateVehicle('year',value.replace(/\D/g,'').slice(0,4))} keyboardType="numeric" placeholder="YEAR" placeholderTextColor={muted} style={styles.authInput}/></View><CatalogField label="MAKE" value={vehicleDraft.make} options={makes} onChange={value=>setVehicleDraft(current=>({...current,make:value,model:''}))}/><CatalogField label="MODEL" value={vehicleDraft.model} options={models} onChange={value=>updateVehicle('model',value)} placeholder={vehicleDraft.make?'SELECT MODEL':'SELECT MAKE FIRST'}/><CatalogField label="TRIM" value={vehicleDraft.trim} options={['Base','Premium','Sport','Touring','Limited','Performance','Track','NISMO','Type R','GT','S','SE','SEL']} onChange={value=>updateVehicle('trim',value)}/></View>
+        <View style={styles.fitmentStep}><Text style={styles.fitmentStepNo}>02</Text><View style={styles.commandCopy}><Text style={styles.commandTitle}>POWERTRAIN</Text><Text style={styles.commandMeta}>Used for marketplace fitment</Text></View></View>
+        <View style={styles.choiceSection}><Text style={styles.identityLabel}>ENGINE</Text><View style={styles.choiceRail}>{['Stock','I4','I6','V6','V8','Electric','Hybrid'].map(item=><Pressable key={item} onPress={()=>updateVehicle('engine',item)} style={[styles.choiceChip,vehicleDraft.engine===item&&styles.choiceChipActive]}><Text style={[styles.choiceChipText,vehicleDraft.engine===item&&styles.choiceChipTextActive]}>{item.toUpperCase()}</Text></Pressable>)}</View></View>
+        <View style={styles.choiceSection}><Text style={styles.identityLabel}>DRIVETRAIN</Text><View style={styles.choiceRail}>{['FWD','RWD','AWD','4WD'].map(item=><Pressable key={item} onPress={()=>updateVehicle('drivetrain',item)} style={[styles.choiceChip,vehicleDraft.drivetrain===item&&styles.choiceChipActive]}><Text style={[styles.choiceChipText,vehicleDraft.drivetrain===item&&styles.choiceChipTextActive]}>{item}</Text></Pressable>)}</View></View>
+        <View style={styles.horsepowerPanel}><View style={styles.horsepowerTop}><View><Text style={styles.identityLabel}>HORSEPOWER</Text><Text style={styles.horsepowerHint}>CURRENT WHEEL OR CRANK ESTIMATE</Text></View><Text style={styles.horsepowerValue}>{vehicleDraft.horsepower} HP</Text></View><Slider minimumValue={50} maximumValue={2000} step={10} value={Number(vehicleDraft.horsepower)||300} onValueChange={value=>updateVehicle('horsepower',String(value))} minimumTrackTintColor={accent} maximumTrackTintColor="rgba(255,255,255,.16)" thumbTintColor={paper}/><View style={styles.sliderLabels}><Text style={styles.commandMeta}>50</Text><Text style={styles.commandMeta}>2,000 HP</Text></View></View>
+        <View style={styles.vehicleFormGrid}><CatalogField label="COLOR" value={vehicleDraft.color} options={['Black','White','Silver','Gray','Red','Blue','Green','Yellow','Orange','Purple','Bronze']} onChange={value=>updateVehicle('color',value)}/><View style={styles.catalogField}><Text style={styles.identityLabel}>GARAGE NAME</Text><TextInput value={vehicleDraft.nickname} onChangeText={value=>updateVehicle('nickname',value)} placeholder="OPTIONAL NICKNAME" placeholderTextColor={muted} style={styles.authInput}/></View></View>
+        {error ? <Text style={styles.networkError}>{error}</Text> : null}<GlassButton label={loading ? 'UPLOADING BUILD' : 'ADD TO GARAGE'} icon={Plus} onPress={() => void saveVehicle()} active /></GlassPanel> : <>
       <View style={styles.garageHero}>{car.photoUrl ? <Image source={{ uri: car.photoUrl }} style={styles.garageImage} /> : <View style={[styles.garageImage, styles.productImageMissing]}><CarFront size={54} color={muted} /></View>}
         <LinearGradient colors={['transparent', 'rgba(2,3,2,0.95)']} style={StyleSheet.absoluteFill} />
         <View style={styles.garageHeroCopy}>
@@ -1039,7 +1065,9 @@ const styles = StyleSheet.create({
   glassButtonText: { color: paper, fontSize: 9, fontWeight: '900', letterSpacing: 0.8, flexShrink: 1 },
   glassButtonTextActive: { color: paper },
   pressed: { opacity: 0.75, transform: [{ scale: 0.985 }] },
-  hero: { height: 330, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.16)', justifyContent: 'space-between' },
+  hero: { height: 292, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.16)', justifyContent: 'space-between', backgroundColor: '#050705' },
+  heroEmpty: { height: 242 },
+  emptyVehicleMark: { width: 88, height: 88, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,.12)', backgroundColor: 'rgba(255,255,255,.035)', alignItems: 'center', justifyContent: 'center' },
   heroImage: { resizeMode: 'cover', objectPosition: '50% 62%' } as any,
   heroStatus: { margin: 14, alignSelf: 'flex-start', backgroundColor: 'rgba(2,3,2,.64)', borderWidth: 1, borderColor: border, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 7 },
   heroStatusText: { color: paper, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
@@ -1053,6 +1081,12 @@ const styles = StyleSheet.create({
   metricValue: { color: paper, fontSize: 17, fontWeight: '900' },
   metricLabel: { color: muted, fontSize: 7, fontWeight: '900', letterSpacing: 1, marginTop: 2 },
   metricDivider: { width: 1, height: 24, backgroundColor: border },
+  commandPulse: { minHeight: 58, marginTop: 8, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', borderRadius: 11, borderWidth: 1, borderColor: 'rgba(145,185,133,.26)', backgroundColor: 'rgba(145,185,133,.055)' },
+  commandPulseLive: { flex: 1.5, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  commandPulseLabel: { color: paper, fontSize: 8, fontWeight: '900', letterSpacing: .8 },
+  commandPulseMetric: { flex: 1, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,.1)' },
+  commandPulseValue: { color: paper, fontSize: 14, fontWeight: '900' },
+  commandPulseMeta: { color: muted, fontSize: 6, fontWeight: '900', marginTop: 2 },
   sectionTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 22, marginBottom: 9 },
   sectionTitle: { color: paper, fontSize: 10, fontWeight: '900', letterSpacing: 1.6 },
   sectionAction: { color: accent, fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
@@ -1081,6 +1115,11 @@ const styles = StyleSheet.create({
   commandCopy: { flex: 1, minWidth: 0 },
   commandTitle: { color: paper, fontSize: 11, fontWeight: '900', letterSpacing: 0.6 },
   commandMeta: { color: muted, fontSize: 8, fontWeight: '700', marginTop: 4, letterSpacing: 0.3 },
+  operationGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  operationTile: { width: '48.7%', minHeight: 112, padding: 12, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(9,12,10,.84)', position: 'relative' },
+  operationIcon: { width: 38, height: 38, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,.15)', backgroundColor: 'rgba(255,255,255,.045)', alignItems: 'center', justifyContent: 'center', marginBottom: 11 },
+  operationTitle: { color: paper, fontSize: 11, fontWeight: '900', letterSpacing: .6 },
+  operationMeta: { color: muted, fontSize: 7, fontWeight: '800', marginTop: 4 },
   leaderPreview: { borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', borderRadius: 11, backgroundColor: 'rgba(7,10,8,.82)', paddingHorizontal: 12 },
   leaderPreviewRow: { minHeight: 52, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.09)', flexDirection: 'row', alignItems: 'center', gap: 11 },
   leaderPreviewRank: { width: 22, color: accent, fontSize: 12, fontWeight: '900' },
@@ -1140,6 +1179,18 @@ const styles = StyleSheet.create({
   routeInput: { flex: 1, minWidth: 0, minHeight: 44, color: paper, borderRadius: 10, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.05)', paddingHorizontal: 12, fontSize: 10 },
   routeSubmit: { minWidth: 66, minHeight: 44, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(145,185,133,.42)', backgroundColor: 'rgba(145,185,133,.12)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   routeSubmitText: { color: paper, fontSize: 8, fontWeight: '900' },
+  suggestionList: { marginTop: 8, borderWidth: 1, borderColor: border, borderRadius: 9, overflow: 'hidden', backgroundColor: 'rgba(2,4,3,.94)' },
+  suggestionRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.08)' },
+  suggestionMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 10, paddingVertical: 8 },
+  suggestionText: { flex: 1, color: paper, fontSize: 8, lineHeight: 12, fontWeight: '700' },
+  favoriteButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  savedNavHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, marginBottom: 7 },
+  savedNavRail: { gap: 7, paddingRight: 8 },
+  savedNavChip: { minWidth: 118, maxWidth: 210, minHeight: 42, paddingHorizontal: 9, borderRadius: 9, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.045)', flexDirection: 'row', alignItems: 'center', gap: 7 },
+  savedNavMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  savedNavText: { color: paper, fontSize: 7, fontWeight: '900', maxWidth: 145 },
+  savedNavMeta: { color: accent, fontSize: 6, fontWeight: '800', marginTop: 2 },
+  savedNavEmpty: { color: muted, fontSize: 7, fontWeight: '800', paddingVertical: 9 },
   garageSwitcher: { flexDirection: 'row', gap: 7, marginBottom: 10 },
   carChip: { flex: 1, minHeight: 42, borderWidth: 1, borderColor: border, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: 'rgba(255,255,255,.04)' },
   carChipActive: { backgroundColor: 'rgba(145,185,133,.13)', borderColor: 'rgba(145,185,133,.4)' },
@@ -1151,6 +1202,23 @@ const styles = StyleSheet.create({
   vehiclePhotoPreview: { width: '100%', height: '100%', resizeMode: 'cover' },
   vehicleFormGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   vehicleFormInput: { width: screenWidth > 620 ? '31.8%' : '48.5%', flexGrow: 1 },
+  fitmentStep: { minHeight: 52, marginTop: 15, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: border },
+  fitmentStepNo: { color: accent, fontSize: 16, fontWeight: '900' },
+  catalogField: { width: screenWidth > 620 ? '48.8%' : '100%', flexGrow: 1, gap: 6, zIndex: 5 },
+  catalogOptions: { borderWidth: 1, borderColor: 'rgba(145,185,133,.32)', borderRadius: 9, overflow: 'hidden', backgroundColor: '#090C09', marginTop: -4 },
+  catalogOption: { minHeight: 38, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.07)' },
+  catalogOptionText: { color: paper, fontSize: 8, fontWeight: '800' },
+  choiceSection: { marginBottom: 12 },
+  choiceRail: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 },
+  choiceChip: { minHeight: 35, paddingHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.035)', alignItems: 'center', justifyContent: 'center' },
+  choiceChipActive: { borderColor: 'rgba(145,185,133,.5)', backgroundColor: 'rgba(145,185,133,.12)' },
+  choiceChipText: { color: muted, fontSize: 7, fontWeight: '900' },
+  choiceChipTextActive: { color: paper },
+  horsepowerPanel: { padding: 13, marginBottom: 12, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(145,185,133,.3)', backgroundColor: 'rgba(145,185,133,.055)' },
+  horsepowerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  horsepowerHint: { color: muted, fontSize: 6, fontWeight: '800', marginTop: 4 },
+  horsepowerValue: { color: paper, fontSize: 21, fontWeight: '900' },
+  sliderLabels: { flexDirection: 'row', justifyContent: 'space-between' },
   garageHero: { height: 315, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: border },
   garageImage: { width: '100%', height: '100%', resizeMode: 'cover', objectPosition: '68% 50%' } as any,
   garageHeroCopy: { position: 'absolute', left: 16, right: 16, bottom: 16, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
