@@ -1178,7 +1178,7 @@ export function ApexDesignPreview() {
       <View style={styles.header}>
         <View style={styles.brandLockup}>
           <ApexLogo />
-          <GlitchBrand subtitle="UNDERGROUND RACING NETWORK"/>
+          {screenWidth<360?<Text style={styles.compactHeaderBrand}>APEX</Text>:<GlitchBrand subtitle="UNDERGROUND RACING NETWORK"/>}
         </View>
         <View style={styles.headerRight}>
           <Pressable accessibilityLabel="Encrypted account" onPress={() => {playInterfaceSound();setAuthMode('signin');setAuthOpen(true);}} style={screenWidth<360?styles.signalCompact:styles.signal}><View style={styles.liveDot} />{screenWidth>=360?<Text style={styles.signalText}>ENCRYPTED</Text>:null}</Pressable>
@@ -1267,6 +1267,7 @@ const styles = StyleSheet.create({
   bootLabel: { color: muted, fontSize: 8, fontWeight: '900', letterSpacing: 1.5 },
   header: { height: 66, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: border, backgroundColor: 'rgba(1,3,2,.95)', zIndex: 20 },
   brandLockup: { flexDirection: 'row', alignItems: 'center' },
+  compactHeaderBrand: { color: paper, fontSize: 14, fontWeight: '900' },
   brandMark: { width: 34, height: 34, borderWidth: 1, borderColor: accent, alignItems: 'center', justifyContent: 'center', marginRight: 10, transform: [{ rotate: '45deg' }] },
   brandMarkText: { color: accent, fontSize: 18, fontWeight: '900', transform: [{ rotate: '-45deg' }] },
   apexLogo: { width: 42, height: 42, marginRight: 9, alignItems: 'center', justifyContent: 'center', position: 'relative' },
