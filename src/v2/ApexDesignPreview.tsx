@@ -1181,9 +1181,9 @@ export function ApexDesignPreview() {
           <GlitchBrand subtitle="UNDERGROUND RACING NETWORK"/>
         </View>
         <View style={styles.headerRight}>
-          <Pressable onPress={() => {setAuthMode('signin');setAuthOpen(true);}} style={styles.signal}><View style={styles.liveDot} /><Text style={styles.signalText}>ENCRYPTED</Text></Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Open leaderboard" onPress={() => setTab('leaderboard')} style={styles.iconButton}><Trophy size={17} color={paper} /></Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={() => setNotificationsOpen(true)} style={styles.iconButton}><Bell size={18} color={paper} />{unreadCount > 0 ? <View style={styles.headerUnread} /> : null}</Pressable>
+          <Pressable accessibilityLabel="Encrypted account" onPress={() => {playInterfaceSound();setAuthMode('signin');setAuthOpen(true);}} style={screenWidth<360?styles.signalCompact:styles.signal}><View style={styles.liveDot} />{screenWidth>=360?<Text style={styles.signalText}>ENCRYPTED</Text>:null}</Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Open leaderboard" onPress={() => {playInterfaceSound();setTab('leaderboard');}} style={styles.iconButton}><Trophy size={17} color={paper} /></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={() => {playInterfaceSound();setNotificationsOpen(true);}} style={styles.iconButton}><Bell size={18} color={paper} />{unreadCount > 0 ? <View style={styles.headerUnread} /> : null}</Pressable>
         </View>
       </View>
 
@@ -1283,6 +1283,7 @@ const styles = StyleSheet.create({
   brandSub: { color: muted, fontSize: 7, fontWeight: '800', letterSpacing: 1.1, marginTop: 2 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   signal: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  signalCompact: { width: 15, height: 36, alignItems: 'center', justifyContent: 'center' },
   signalText: { color: muted, fontSize: 7, fontWeight: '900', letterSpacing: 0.8 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: accent, shadowColor: accent, shadowOpacity: 1, shadowRadius: 7 },
   liveDotBright: { width: 8, height: 8, borderRadius: 4 },
