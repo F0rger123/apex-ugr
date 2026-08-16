@@ -31,6 +31,15 @@ function createInviteCode() {
   return `APEX-${value.slice(0,4)}-${value.slice(4)}`;
 }
 
+function distanceMeters(aLat:number,aLng:number,bLat:number,bLng:number){const rad=Math.PI/180;const dLat=(bLat-aLat)*rad,dLng=(bLng-aLng)*rad;const h=Math.sin(dLat/2)**2+Math.cos(aLat*rad)*Math.cos(bLat*rad)*Math.sin(dLng/2)**2;return 6371000*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}
+
+function generatedImageBlock(value:unknown):{data:string;mimeType:string}|null{
+  if(!value||typeof value!=='object')return null;const row=value as Record<string,unknown>;
+  if(row.type==='image'&&typeof row.data==='string')return{data:row.data,mimeType:typeof row.mime_type==='string'?row.mime_type:'image/png'};
+  for(const child of Object.values(row)){if(Array.isArray(child)){for(const item of child){const found=generatedImageBlock(item);if(found)return found;}}else{const found=generatedImageBlock(child);if(found)return found;}}
+  return null;
+}
+
 function json(body: unknown, status = 200) {
   return Response.json(body, { status, headers: cors });
 }
@@ -168,10 +177,10 @@ async function handle(request: Request, env: Env, path: string) {
     const username = `${usernameBase}_${crypto.randomUUID().slice(0, 5)}`;
     const existing=await env.DB.prepare('SELECT 1 found FROM users WHERE email=?').bind(email).first();
     if(existing)return json({error:'An account already exists for that email. Sign in instead or use another email.'},409);
-    let invite:{id:string}|null=null;
+    let invite:{id:string;burn_after_use:number}|null=null;
     if(email!==DEVELOPER_EMAIL){
       const code=normalizeInviteCode(body.inviteCode||'');
-      invite=await env.DB.prepare(`SELECT id FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{id:string}>();
+      invite=await env.DB.prepare(`SELECT id,burn_after_use FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{id:string;burn_after_use:number}>();
       if(!invite)return json({error:'A valid private access code is required.'},403);
       const reserved=await env.DB.prepare(`UPDATE invite_codes SET use_count=use_count+1 WHERE id=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(invite.id,new Date().toISOString()).run();
       if(!reserved.meta.changes)return json({error:'This access code has reached its limit.'},409);
@@ -182,6 +191,7 @@ async function handle(request: Request, env: Env, path: string) {
     try {
       const statements=[env.DB.prepare(`INSERT INTO users(id,email,username,display_name,password_hash,password_salt) VALUES(?,?,?,?,?,?)`).bind(id,email,username,usernameBase.toUpperCase(),hash,bytesToBase64(salt))];
       if(invite)statements.push(env.DB.prepare('INSERT INTO invite_redemptions(code_id,user_id,email) VALUES(?,?,?)').bind(invite.id,id,email));
+      if(invite?.burn_after_use)statements.push(env.DB.prepare('UPDATE invite_codes SET is_active=0 WHERE id=?').bind(invite.id));
       await env.DB.batch(statements);
     } catch(error) { if(invite)await env.DB.prepare('UPDATE invite_codes SET use_count=MAX(0,use_count-1) WHERE id=?').bind(invite.id).run();console.error('signup_insert_failed',error); return json({ error: 'Account creation failed. Please try again.' }, 500); }
     const user = await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?').bind(id).first<UserRow>();
@@ -213,10 +223,10 @@ async function handle(request: Request, env: Env, path: string) {
   }
   if(path==='admin/invites'&&method==='POST'){
     if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
-    const body=await request.json<{label?:string;maxUses?:number;expiresAt?:string|null}>();const maxUses=Math.min(500,Math.max(1,Math.floor(Number(body.maxUses)||1)));const expiresAt=body.expiresAt&&Number.isFinite(Date.parse(body.expiresAt))?new Date(body.expiresAt).toISOString():null;
+    const body=await request.json<{label?:string;maxUses?:number;expiresAt?:string|null;burnAfterUse?:boolean}>();const requestedUses=Math.min(500,Math.max(1,Math.floor(Number(body.maxUses)||1)));const burnAfterUse=Boolean(body.burnAfterUse)||requestedUses===1;const maxUses=burnAfterUse?1:requestedUses;const expiresAt=body.expiresAt&&Number.isFinite(Date.parse(body.expiresAt))?new Date(body.expiresAt).toISOString():null;
     let code=createInviteCode();while(await env.DB.prepare('SELECT 1 found FROM invite_codes WHERE code=?').bind(code).first())code=createInviteCode();
-    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by) VALUES(?,?,?,?,?,?)').bind(id,code,body.label?.trim().slice(0,60)||'PRIVATE ACCESS',maxUses,expiresAt,user.id).run();
-    return json({id,code,label:body.label?.trim()||'PRIVATE ACCESS',maxUses,expiresAt},201);
+    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by,burn_after_use) VALUES(?,?,?,?,?,?,?)').bind(id,code,body.label?.trim().slice(0,60)||'PRIVATE ACCESS',maxUses,expiresAt,user.id,burnAfterUse?1:0).run();
+    return json({id,code,label:body.label?.trim()||'PRIVATE ACCESS',maxUses,expiresAt,burnAfterUse},201);
   }
   const inviteToggle=path.match(/^admin\/invites\/([^/]+)\/toggle$/);
   if(inviteToggle&&method==='POST'){
@@ -274,9 +284,45 @@ async function handle(request: Request, env: Env, path: string) {
       VALUES(?,COALESCE(?,(SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1)),?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,altitude_m=excluded.altitude_m,speed_kph=excluded.speed_kph,heading=excluded.heading,drive_mode=excluded.drive_mode,cruise_id=excluded.cruise_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`)
       .bind(user.id,body.vehicleId||null,user.id,Number(body.latitude),Number(body.longitude),body.accuracy??null,body.altitude??null,body.speedKph||0,body.heading||0,body.driveMode?1:0,body.cruiseId||null,expires).run();
     await env.DB.prepare('UPDATE users SET top_speed_kph=MAX(top_speed_kph,?) WHERE id=?').bind(Math.max(0,Number(body.speedKph)||0),user.id).run();
-    return json({ success: true,expiresAt:expires,shareMinutes });
+    const latitude=Number(body.latitude),longitude=Number(body.longitude),cellLat=Math.round(latitude*500),cellLng=Math.round(longitude*500);
+    await env.DB.prepare('INSERT OR IGNORE INTO map_discoveries(user_id,cell_lat,cell_lng,latitude,longitude) VALUES(?,?,?,?,?)').bind(user.id,cellLat,cellLng,latitude,longitude).run();
+    const nearbyDrops=await env.DB.prepare(`SELECT d.* FROM dead_drops d LEFT JOIN dead_drop_claims c ON c.drop_id=d.id AND c.user_id=? WHERE d.is_active=1 AND c.drop_id IS NULL`).bind(user.id).all<Record<string,unknown>>();
+    const reachedDrops=nearbyDrops.results.filter(drop=>distanceMeters(latitude,longitude,Number(drop.latitude),Number(drop.longitude))<=Number(drop.radius_m));const claimed:Record<string,unknown>[]=[];
+    for(const drop of reachedDrops){const result=await env.DB.prepare('INSERT OR IGNORE INTO dead_drop_claims(drop_id,user_id) VALUES(?,?)').bind(drop.id,user.id).run();if(result.meta.changes){await env.DB.prepare('UPDATE users SET credits=credits+? WHERE id=?').bind(Number(drop.credits),user.id).run();claimed.push(drop);}}
+    const discoveryCount=await env.DB.prepare('SELECT COUNT(*) count FROM map_discoveries WHERE user_id=?').bind(user.id).first<{count:number}>();
+    const availableTerritories=await env.DB.prepare(`SELECT t.* FROM territories t JOIN crew_members m ON m.crew_id=t.crew_id AND m.user_id=? AND m.status='approved' LEFT JOIN territory_unlocks u ON u.territory_id=t.id AND u.user_id=? WHERE u.territory_id IS NULL`).bind(user.id,user.id).all<Record<string,unknown>>();
+    const unlocked=availableTerritories.results.filter(territory=>(discoveryCount?.count||0)>=Number(territory.required_cells)&&distanceMeters(latitude,longitude,Number(territory.latitude),Number(territory.longitude))<=Number(territory.radius_m));
+    if(unlocked.length)await env.DB.batch(unlocked.map(territory=>env.DB.prepare('INSERT OR IGNORE INTO territory_unlocks(territory_id,user_id) VALUES(?,?)').bind(territory.id,user.id)));
+    return json({ success: true,expiresAt:expires,shareMinutes,discoveredCells:discoveryCount?.count||1,claimedDrops:claimed.map(drop=>({id:drop.id,title:drop.title,credits:Number(drop.credits)})),unlockedTerritories:unlocked.map(territory=>({id:territory.id,name:territory.name})) });
   }
   if(path==='location'&&method==='DELETE'){await env.DB.prepare('DELETE FROM driver_locations WHERE user_id=?').bind(user.id).run();return json({hidden:true});}
+
+  if(path==='world'&&method==='GET'){
+    const [discoveries,territories,drops,reports,crews,seasons,requests]=await Promise.all([
+      env.DB.prepare('SELECT latitude,longitude,discovered_at FROM map_discoveries WHERE user_id=? ORDER BY discovered_at DESC LIMIT 1200').bind(user.id).all(),
+      env.DB.prepare(`SELECT t.*,c.name crew_name,c.tag,EXISTS(SELECT 1 FROM territory_unlocks u WHERE u.territory_id=t.id AND u.user_id=?) unlocked FROM territories t JOIN crews c ON c.id=t.crew_id`).bind(user.id).all(),
+      env.DB.prepare(`SELECT d.*,EXISTS(SELECT 1 FROM dead_drop_claims c WHERE c.drop_id=d.id AND c.user_id=?) claimed FROM dead_drops d WHERE d.is_active=1`).bind(user.id).all(),
+      env.DB.prepare(`SELECT r.*,u.username FROM road_reports r JOIN users u ON u.id=r.user_id WHERE r.is_active=1 ORDER BY r.created_at DESC LIMIT 500`).all(),
+      env.DB.prepare(`SELECT c.*,m.status member_status,m.role member_role,(SELECT COUNT(*) FROM crew_members x WHERE x.crew_id=c.id AND x.status='approved') member_count FROM crews c LEFT JOIN crew_members m ON m.crew_id=c.id AND m.user_id=? ORDER BY member_count DESC`).bind(user.id).all(),
+      env.DB.prepare(`SELECT s.*,e.points,CASE WHEN e.user_id IS NULL THEN 0 ELSE 1 END joined FROM seasons s LEFT JOIN season_entries e ON e.season_id=s.id AND e.user_id=? WHERE s.ends_at>? ORDER BY s.starts_at`).bind(user.id,new Date().toISOString()).all(),
+      env.DB.prepare(`SELECT m.crew_id,m.user_id,m.created_at,u.username,u.avatar_url FROM crew_members m JOIN crews c ON c.id=m.crew_id AND c.owner_id=? JOIN users u ON u.id=m.user_id WHERE m.status='pending' ORDER BY m.created_at`).bind(user.id).all(),
+    ]);
+    return json({discoveries:discoveries.results,territories:territories.results,drops:drops.results,reports:reports.results,crews:crews.results,seasons:seasons.results,crewRequests:requests.results});
+  }
+  if(path==='road-reports'&&method==='POST'){
+    const body=await request.json<{type?:string;note?:string;latitude?:number;longitude?:number}>();if(!['fixed_camera','hazard','closure','dangerous_road'].includes(body.type||'')||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Choose a supported safety report and valid map point.'},400);
+    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO road_reports(id,user_id,type,note,latitude,longitude) VALUES(?,?,?,?,?,?)').bind(id,user.id,body.type,body.note?.trim().slice(0,240)||'',body.latitude,body.longitude).run();return json({id},201);
+  }
+  if(path==='crews'&&method==='POST'){
+    const body=await request.json<{name?:string;tag?:string}>();const name=body.name?.trim().slice(0,50)||'',tag=body.tag?.trim().toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5)||'';if(name.length<3||tag.length<2)return json({error:'Crew name and 2-5 character tag are required.'},400);
+    const id=crypto.randomUUID();try{await env.DB.batch([env.DB.prepare('INSERT INTO crews(id,owner_id,name,tag) VALUES(?,?,?,?)').bind(id,user.id,name,tag),env.DB.prepare("INSERT INTO crew_members(crew_id,user_id,status,role) VALUES(?,?,'approved','owner')").bind(id,user.id)]);}catch{return json({error:'That crew tag is already claimed.'},409);}return json({id,name,tag},201);
+  }
+  const crewJoin=path.match(/^crews\/([^/]+)\/join$/);if(crewJoin&&method==='POST'){await env.DB.prepare(`INSERT INTO crew_members(crew_id,user_id,status) VALUES(?,?,'pending') ON CONFLICT(crew_id,user_id) DO UPDATE SET status='pending'`).bind(crewJoin[1],user.id).run();return json({status:'pending'});}
+  const crewApprove=path.match(/^crews\/([^/]+)\/members\/([^/]+)\/approve$/);if(crewApprove&&method==='POST'){const crew=await env.DB.prepare('SELECT 1 found FROM crews WHERE id=? AND owner_id=?').bind(crewApprove[1],user.id).first();if(!crew)return json({error:'Crew owner access required.'},403);await env.DB.prepare("UPDATE crew_members SET status='approved' WHERE crew_id=? AND user_id=?").bind(crewApprove[1],crewApprove[2]).run();return json({status:'approved'});}
+  const territoryCreate=path.match(/^crews\/([^/]+)\/territories$/);if(territoryCreate&&method==='POST'){const crew=await env.DB.prepare('SELECT 1 found FROM crews WHERE id=? AND owner_id=?').bind(territoryCreate[1],user.id).first();if(!crew)return json({error:'Crew owner access required.'},403);const body=await request.json<{name?:string;latitude?:number;longitude?:number;radiusM?:number;requiredCells?:number}>();if(!body.name?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Territory name and center point are required.'},400);const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO territories(id,crew_id,name,latitude,longitude,radius_m,required_cells) VALUES(?,?,?,?,?,?,?)').bind(id,territoryCreate[1],body.name.trim().slice(0,60),body.latitude,body.longitude,Math.min(10000,Math.max(200,Number(body.radiusM)||1000)),Math.min(100,Math.max(3,Number(body.requiredCells)||12))).run();return json({id},201);}
+  if(path==='admin/dead-drops'&&method==='POST'){if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);const body=await request.json<{title?:string;latitude?:number;longitude?:number;credits?:number;radiusM?:number}>();if(!body.title?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Drop title and location required.'},400);const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO dead_drops(id,title,latitude,longitude,radius_m,credits) VALUES(?,?,?,?,?,?)').bind(id,body.title.trim().slice(0,60),body.latitude,body.longitude,Math.min(500,Math.max(20,Number(body.radiusM)||60)),Math.min(10000,Math.max(10,Number(body.credits)||100))).run();return json({id},201);}
+  if(path==='admin/seasons'&&method==='POST'){if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);const body=await request.json<{name?:string;startsAt?:string;endsAt?:string;rewardCredits?:number}>();if(!body.name?.trim()||!body.startsAt||!body.endsAt)return json({error:'Season name and dates required.'},400);const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO seasons(id,name,starts_at,ends_at,status,reward_credits) VALUES(?,?,?,?,?,?)').bind(id,body.name.trim().slice(0,70),body.startsAt,body.endsAt,'live',Math.max(100,Number(body.rewardCredits)||5000)).run();return json({id},201);}
+  const seasonJoin=path.match(/^seasons\/([^/]+)\/join$/);if(seasonJoin&&method==='POST'){await env.DB.prepare('INSERT OR IGNORE INTO season_entries(season_id,user_id) VALUES(?,?)').bind(seasonJoin[1],user.id).run();return json({joined:true});}
 
   if (path === 'feed' && method === 'GET') {
     const posts = await env.DB.prepare(`SELECT p.id,p.user_id,p.media_url,p.media_type,p.caption,p.created_at,u.username,u.avatar_url,
@@ -486,6 +532,18 @@ async function handle(request: Request, env: Env, path: string) {
     const key=`${user.id}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
     await env.MEDIA.put(key,file.stream(),{httpMetadata:{contentType:file.type||'application/octet-stream'}});
     return json({url:`/api/media/${encodeURIComponent(key)}`},201);
+  }
+  if(path==='vehicle-digital-twin'&&method==='POST'){
+    const body=await request.json<{vehicleId?:string;angles?:Array<{angle:string;url:string}>;geminiApiKey?:string}>();const angles=(body.angles||[]).filter(item=>['front','rear','driver','passenger'].includes(item.angle)&&item.url.startsWith('/api/media/'));
+    const vehicle=await env.DB.prepare('SELECT id,year,make,model,trim,color FROM vehicles WHERE id=? AND user_id=?').bind(body.vehicleId||'',user.id).first<Record<string,unknown>>();
+    if(!vehicle||angles.length!==4)return json({error:'Four verified vehicle angles are required.'},400);if(!body.geminiApiKey?.trim())return json({error:'Connect a Gemini API key for this one-time generation request.'},400);
+    const input:Array<Record<string,unknown>>=[{type:'text',text:`Create one accurate photorealistic digital garage render of this exact ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim||''} in ${vehicle.color||'its photographed color'}. Reconcile the four reference angles into the same vehicle. Preserve its actual body kit, wheels, paint, lights, stance, badges, and visible modifications. Three-quarter front view in a dark neutral studio garage, full car visible, no text, no people, no invented parts.`}];let total=0;
+    for(const angle of angles){const key=decodeURIComponent(angle.url.slice('/api/media/'.length));const object=await env.MEDIA.get(key);if(!object)return json({error:`The ${angle.angle} image is unavailable.`},400);total+=object.size;if(total>22*1024*1024)return json({error:'Angle images must total less than 22 MB.'},400);const bytes=new Uint8Array(await object.arrayBuffer());input.push({type:'image',mime_type:object.httpMetadata?.contentType||'image/jpeg',data:bytesToBase64(bytes)});}
+    await env.DB.prepare("UPDATE vehicles SET digital_twin_status='generating' WHERE id=?").bind(vehicle.id).run();
+    const provider=await fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':body.geminiApiKey.trim()},body:JSON.stringify({model:'gemini-3.1-flash-image',input,response_format:{type:'image',mime_type:'image/png',aspect_ratio:'16:9',image_size:'1K'}})});
+    const generated=await provider.json<unknown>();const image=generatedImageBlock(generated);if(!provider.ok||!image){await env.DB.prepare("UPDATE vehicles SET digital_twin_status='failed' WHERE id=?").bind(vehicle.id).run();return json({error:'Gemini could not generate the digital vehicle. Check API access and try again.'},502);}
+    const bytes=base64ToBytes(image.data),key=`digital-twins/${user.id}/${vehicle.id}-${Date.now()}.png`;await env.MEDIA.put(key,bytes,{httpMetadata:{contentType:image.mimeType}});const url=`/api/media/${encodeURIComponent(key)}`;
+    const statements=angles.map(angle=>env.DB.prepare(`INSERT INTO vehicle_angles(vehicle_id,angle,media_url) VALUES(?,?,?) ON CONFLICT(vehicle_id,angle) DO UPDATE SET media_url=excluded.media_url,created_at=CURRENT_TIMESTAMP`).bind(vehicle.id,angle.angle,angle.url));statements.push(env.DB.prepare("UPDATE vehicles SET digital_twin_url=?,digital_twin_status='ready' WHERE id=?").bind(url,vehicle.id));await env.DB.batch(statements);return json({url,status:'ready'});
   }
   if (path === 'parts-search' && method === 'POST') {
     const body=await request.json<{vehicle?:Record<string,string|number>;query?:string}>();

@@ -7,6 +7,7 @@ import {
   ImageBackground,
   Linking,
   Platform,
+  PanResponder,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -23,9 +24,11 @@ import * as ImagePicker from 'expo-image-picker';
 import Slider from '@react-native-community/slider';
 import { useLiveNetworkStore, LiveDriver, LiveEvent } from './live/liveNetworkStore';
 import { useContentStore } from './live/contentStore';
+import {useWorldStore,DeadDrop,RoadReport,Territory} from './live/worldStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useMessageStore } from '../stores/messageStore';
 import { cloudflareApi, hasCloudflareBackend } from '../config/cloudflareApi';
+import {playEngineSound,playInterfaceSound} from '../utils/soundSynthesizer';
 import {
   Activity,
   BadgeCheck,
@@ -95,7 +98,7 @@ if (Platform.OS !== 'web') {
   NativePolyline = maps.Polyline;
 }
 
-type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard' | 'access';
+type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard' | 'access' | 'world';
 type IconType = any;
 
 interface Driver {
@@ -157,6 +160,14 @@ function ApexLogo(){
   return <View style={styles.apexLogo}><View style={styles.apexLogoOuter}><View style={styles.apexLogoInner}><Text style={styles.apexLogoLetter}>A</Text><View style={styles.apexLogoSlash}/></View></View><View style={styles.apexLogoSignal}/></View>;
 }
 
+function GameLobby({onEnter}:{onEnter:(tab:TabKey)=>void}){
+  const {vehicles,activeVehicleId,profile}=useContentStore();const car=vehicles.find(item=>item.id===activeVehicleId)||vehicles[0];const position=useRef(new Animated.ValueXY()).current;
+  const pan=useMemo(()=>PanResponder.create({onStartShouldSetPanResponder:()=>true,onMoveShouldSetPanResponder:()=>true,onPanResponderGrant:()=>position.setOffset({x:(position.x as any)._value,y:(position.y as any)._value}),onPanResponderMove:Animated.event([null,{dx:position.x,dy:position.y}],{useNativeDriver:false}),onPanResponderRelease:()=>{position.flattenOffset();Animated.spring(position,{toValue:{x:0,y:0},friction:6,useNativeDriver:false}).start();}}),[position]);
+  const enter=(tab:TabKey)=>{playEngineSound(car?.engine||'V6');onEnter(tab);};
+  const carImage=car?.digitalTwinUrl||car?.photoUrl;
+  return <View style={styles.gameLobby}><AtmosphereBackdrop/><LinearGradient colors={['rgba(0,0,0,.05)','rgba(0,0,0,.24)','rgba(0,0,0,.92)']} style={StyleSheet.absoluteFill}/><View style={styles.lobbyHeader}><View style={styles.accessTop}><ApexLogo/><View><Text style={styles.brand}>APEX UGR</Text><Text style={styles.brandSub}>UNDERGROUND RACING</Text></View></View><View style={styles.lobbyLevel}><Text style={styles.lobbyLevelText}>{profile?.tier?.toUpperCase()||'BRONZE'} · {profile?.points||0} RP</Text></View></View><View style={styles.garageStage}><View style={styles.garageStageLight}/>{car?<Animated.View {...pan.panHandlers} style={[styles.lobbyCar,{transform:[...position.getTranslateTransform(),{scale:position.x.interpolate({inputRange:[-200,0,200],outputRange:[.94,1,1.06],extrapolate:'clamp'})}]}]}>{carImage?<Image source={{uri:carImage}} style={styles.lobbyCarImage} resizeMode="contain"/>:<View style={styles.lobbyNoCar}><CarFront size={72} color="rgba(255,255,255,.24)"/><Text style={styles.characterMeta}>ADD PHOTOS TO MATERIALIZE BUILD</Text></View>}<View style={[styles.partHotspot,{left:'22%',top:'54%'}]}><View style={styles.partHotspotDot}/><Text style={styles.partHotspotLabel}>BRAKES</Text></View><View style={[styles.partHotspot,{right:'17%',top:'43%'}]}><View style={styles.partHotspotDot}/><Text style={styles.partHotspotLabel}>POWER</Text></View><View style={[styles.partHotspot,{right:'13%',bottom:'19%'}]}><View style={styles.partHotspotDot}/><Text style={styles.partHotspotLabel}>EXHAUST</Text></View></Animated.View>:<View style={styles.lobbyNoCar}><CarFront size={72} color="rgba(255,255,255,.24)"/><Text style={styles.characterMeta}>NO ACTIVE BUILD</Text></View>}<Text style={styles.dragHint}>{car?'DRAG TO INSPECT YOUR BUILD':'CREATE A VEHICLE TO ENTER THE GARAGE'}</Text></View><View style={styles.lobbyIdentity}><Text style={styles.characterIndex}>ACTIVE SAVE // {profile?.alias?.toUpperCase()}</Text><Text style={styles.lobbyCarName}>{car?car.nickname.toUpperCase():'UNREGISTERED PILOT'}</Text><Text style={styles.characterMeta}>{car?`${car.year} ${car.make} ${car.model} · ${car.horsepower} HP · ${car.color}`:'GARAGE SETUP REQUIRED'}</Text></View><View style={styles.lobbyActions}><Pressable onPress={()=>enter('command')} style={styles.playGameButton}><Play size={24} color="#050705" fill="#050705"/><View><Text style={styles.playGameText}>PLAY</Text><Text style={styles.playGameMeta}>ENTER UNDERGROUND</Text></View></Pressable><View style={styles.lobbyQuickRow}><GlassButton label="GARAGE" icon={CarFront} onPress={()=>onEnter('garage')} grow/><GlassButton label="PARTS" icon={ShoppingBag} onPress={()=>onEnter('shop')} grow/><GlassButton label="WORLD" icon={Map} onPress={()=>onEnter('world')} grow/></View></View></View>;
+}
+
 function GlassPanel({ children, style, glow = false }: { children: React.ReactNode; style?: any; glow?: boolean }) {
   return (
     <View style={[styles.glassShell, glow && styles.glassGlow, style]}>
@@ -183,7 +194,7 @@ function GlassButton({
   grow?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.glassButtonShell, compact && styles.glassButtonCompact, grow && styles.glassButtonGrow, pressed && styles.pressed]}>
+    <Pressable onPress={()=>{playInterfaceSound();onPress();}} style={({ pressed }) => [styles.glassButtonShell, compact && styles.glassButtonCompact, grow && styles.glassButtonGrow, pressed && styles.pressed]}>
       <BlurView intensity={Platform.OS === 'web' ? 48 : 34} tint="dark" style={[styles.glassButton, active && styles.glassButtonActive]}>
         <Icon size={compact ? 14 : 17} color={active ? accent : paper} strokeWidth={2.2} />
         <Text style={[styles.glassButtonText, active && styles.glassButtonTextActive]}>{label}</Text>
@@ -321,6 +332,10 @@ function RadarMap({
   followRevision,
   focus,
   fitAll,
+  discoveries,
+  territories,
+  drops,
+  reports,
 }: {
   location: { latitude: number; longitude: number } | null;
   mode: 'street' | 'satellite';
@@ -332,6 +347,10 @@ function RadarMap({
   followRevision: number;
   focus: { latitude: number; longitude: number } | null;
   fitAll: boolean;
+  discoveries: Array<{latitude:number;longitude:number}>;
+  territories: Territory[];
+  drops: DeadDrop[];
+  reports: RoadReport[];
 }) {
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -357,6 +376,11 @@ function RadarMap({
     const safeDrivers = JSON.stringify(drivers).replace(/</g, '\\u003c');
     const safeEvents = JSON.stringify(events).replace(/</g, '\\u003c');
     const safeRoute = JSON.stringify(routeCoordinates).replace(/</g, '\\u003c');
+    const safeDiscoveries=JSON.stringify(discoveries).replace(/</g,'\\u003c');
+    const safeTerritories=JSON.stringify(territories).replace(/</g,'\\u003c');
+    const safeDrops=JSON.stringify(drops).replace(/</g,'\\u003c');
+    const safeReports=JSON.stringify(reports).replace(/</g,'\\u003c');
+    const worldOverlay=`<script>(function(){const discoveries=${safeDiscoveries},territories=${safeTerritories},drops=${safeDrops},reports=${safeReports};territories.forEach(t=>L.circle([t.latitude,t.longitude],{radius:t.radius_m,color:t.unlocked?'#dfffd7':'#778079',weight:t.unlocked?3:1,dashArray:t.unlocked?'':'7 8',fillColor:t.unlocked?'#8fca83':'#121712',fillOpacity:t.unlocked?.16:.28}).addTo(map).bindTooltip('['+t.tag+'] '+t.name+(t.unlocked?' · UNLOCKED':' · LOCKED')));drops.forEach(d=>L.marker([d.latitude,d.longitude],{icon:L.divIcon({className:'',html:'<div style="width:26px;height:26px;transform:rotate(45deg);border:2px solid '+(d.claimed?'#707770':'#dfffd7')+';background:rgba(3,7,4,.9);box-shadow:0 0 18px rgba(167,229,154,.45)"><b style="display:block;transform:rotate(-45deg);font:900 8px monospace;color:#fff;text-align:center;line-height:22px">'+(d.claimed?'✓':'ACR')+'</b></div>',iconSize:[28,28],iconAnchor:[14,14]})}).addTo(map).bindTooltip(d.title+' · '+d.credits+' ACR'));const icons={hazard:'!',closure:'×',fixed_camera:'◉',dangerous_road:'△'};reports.forEach(r=>L.marker([r.latitude,r.longitude],{icon:L.divIcon({className:'',html:'<div style="width:25px;height:25px;border-radius:7px;border:1px solid rgba(255,255,255,.65);background:#090c09;color:#fff;font:900 14px monospace;text-align:center;line-height:24px;box-shadow:0 0 13px rgba(255,255,255,.18)">'+icons[r.type]+'</div>',iconSize:[27,27],iconAnchor:[13,13]})}).addTo(map).bindTooltip(r.type.replace('_',' ').toUpperCase()+(r.note?' · '+r.note:'')));const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('style','position:absolute;inset:0;width:100%;height:100%;z-index:480;pointer-events:none');svg.innerHTML='<defs><filter id="cloud"><feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="3" seed="9"><animate attributeName="baseFrequency" values=".010;.016;.010" dur="18s" repeatCount="indefinite"/></feTurbulence><feColorMatrix values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .82 0"/></filter><mask id="unlocked"><rect width="100%" height="100%" fill="white"/><g id="fog-holes"/></mask></defs><rect width="100%" height="100%" fill="#050806" opacity=".92"/><rect width="100%" height="100%" filter="url(#cloud)" opacity=".75" mask="url(#unlocked)"/>';document.body.appendChild(svg);const holes=svg.querySelector('#fog-holes');function reveal(){holes.innerHTML='';discoveries.forEach(d=>{const p=map.latLngToContainerPoint([d.latitude,d.longitude]);const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r','110');c.setAttribute('fill','black');holes.appendChild(c);});}map.on('zoom move resize',reveal);reveal();})();<\/script>`;
     const center = focus || location || { latitude: 20, longitude: 0 };
     const zoom = focus ? 16 : location ? 14 : 2;
     const selfMarker = location ? `L.marker([${location.latitude},${location.longitude}],{zIndexOffset:1000,icon:L.divIcon({className:'',html:'<div class="self-anchor"><i class="radar-ring r1"></i><i class="radar-ring r2"></i><i class="radar-ring r3"></i><i class="radar-sweep"></i><div class="self-dot"></div><b class="self-label">YOU</b></div>',iconSize:[180,180],iconAnchor:[90,90]})}).addTo(map);` : '';
@@ -365,7 +389,7 @@ function RadarMap({
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
           key: `${mode}-${followRevision}-${fitAll}`,
-          srcDoc: mapDocument,
+          srcDoc: mapDocument.replace('</body>',worldOverlay.replace('t.unlocked?.16:.28','t.unlocked?0.16:0.28').replace('1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .82 0','0 0 0 0 .08 0 0 0 0 .11 0 0 0 0 .09 0 0 0 .84 0').replace("c.setAttribute('r','110')","c.setAttribute('r',String(Math.max(12,Math.min(150,(map.getZoom()-1)*18))))")+'</body>'),
           title: 'Apex Radar',
           style: { width: '100%', height: '100%', border: 0 },
         })}
@@ -396,6 +420,10 @@ function RadarMap({
           </NativeMarker>
         ))}
         {events.map(event => <NativeCircle key={event.id} center={{ latitude: event.latitude, longitude: event.longitude }} radius={event.radiusM} strokeColor="rgba(145,185,133,.75)" fillColor="rgba(145,185,133,.12)" onPress={() => onSelectEvent(event)} />)}
+        {discoveries.map((cell,index)=><NativeCircle key={`cell-${index}`} center={cell} radius={110} strokeColor="rgba(223,255,215,.18)" fillColor="rgba(223,255,215,.035)"/>)}
+        {territories.map(item=><NativeCircle key={item.id} center={{latitude:item.latitude,longitude:item.longitude}} radius={item.radius_m} strokeColor={item.unlocked?'rgba(223,255,215,.85)':'rgba(120,128,121,.5)'} fillColor={item.unlocked?'rgba(145,185,133,.14)':'rgba(8,12,8,.28)'}/>)}
+        {drops.map(item=><NativeMarker key={item.id} coordinate={{latitude:item.latitude,longitude:item.longitude}}><View style={[styles.nativeWorldPin,Boolean(item.claimed)&&styles.worldClaimed]}><Gift size={14} color={item.claimed?muted:accent}/></View></NativeMarker>)}
+        {reports.map(item=><NativeMarker key={item.id} coordinate={{latitude:item.latitude,longitude:item.longitude}}><View style={styles.nativeSafetyPin}><Text style={styles.nativeSafetyText}>{item.type==='closure'?'×':'!'}</Text></View></NativeMarker>)}
         {routeCoordinates.length > 1 ? <NativePolyline coordinates={routeCoordinates} strokeColor="#DFFFD7" strokeWidth={4} /> : null}
       </NativeMap>
     </View>
@@ -414,12 +442,14 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [routeLoading, setRouteLoading] = useState(false);
   const { location, drivers: liveDrivers, events, cruises, route, savedPlaces, savedRoutes, suggestions, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, shareMinutes, shareExpiresAt, lockLocation, startDrive, stopDrive, toggleUnit, setShareMinutes, hideLocation, setRoute, setRouteToPoint, restoreRoute, saveCurrentRoute, savePlace, deletePlace, deleteSavedRoute, suggestAddresses, clearRoute } = useLiveNetworkStore();
   const {radarTargetId,setRadarTarget}=useContentStore();
+  const {discoveries,territories,drops,reports,refresh:refreshWorld}=useWorldStore();
   const drivers = liveDrivers.map((driver: LiveDriver): Driver => ({
     id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record,
     rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery,
     latitude: driver.latitude, longitude: driver.longitude, speedKph: driver.speedKph, cruiseId: driver.cruiseId, isLive: driver.isLive,
   }));
   useEffect(() => { if (!location) lockLocation(); }, []);
+  useEffect(()=>{void refreshWorld();const timer=setInterval(()=>void refreshWorld(),15000);return()=>clearInterval(timer);},[]);
   useEffect(() => { const timer=setTimeout(()=>void suggestAddresses(destination),280); return()=>clearTimeout(timer); }, [destination]);
   useEffect(()=>{if(!radarTargetId)return;const target=drivers.find(item=>item.id===radarTargetId);if(target){setSelected(target);setFitAll(false);setFollowRevision(value=>value+1);setRadarTarget(null);}},[radarTargetId,drivers.length]);
 
@@ -452,7 +482,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
 
   return (
     <View style={styles.radarScreen}>
-      <RadarMap location={location} mode={mode} onSelect={driver => { setFitAll(false); setSelected(driver); setSelectedEvent(null); setFollowRevision(value => value + 1); }} onSelectEvent={event => { setFitAll(false); setSelectedEvent(event); setSelected(null); setFollowRevision(value => value + 1); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} followRevision={followRevision} focus={selected ? { latitude: selected.latitude, longitude: selected.longitude } : selectedEvent ? { latitude: selectedEvent.latitude, longitude: selectedEvent.longitude } : null} fitAll={fitAll} />
+      <RadarMap location={location} mode={mode} onSelect={driver => { setFitAll(false); setSelected(driver); setSelectedEvent(null); setFollowRevision(value => value + 1); }} onSelectEvent={event => { setFitAll(false); setSelectedEvent(event); setSelected(null); setFollowRevision(value => value + 1); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} followRevision={followRevision} focus={selected ? { latitude: selected.latitude, longitude: selected.longitude } : selectedEvent ? { latitude: selectedEvent.latitude, longitude: selectedEvent.longitude } : null} fitAll={fitAll} discoveries={discoveries} territories={territories} drops={drops} reports={reports} />
       <View style={styles.radarTopControls}>
         <View style={styles.segmentedControl}>
           {(['street', 'satellite'] as const).map(item => (
@@ -595,12 +625,31 @@ function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const userId = useContentStore(state => state.userId);
   const isDeveloper = useContentStore(state => Boolean(state.profile?.isDeveloper));
   const modules: { tab: TabKey; label: string; meta: string; icon: IconType }[] = [
+    { tab: 'world', label: 'UNDERGROUND WORLD', meta: 'Crews, territory, drops, seasons', icon: Map },
     { tab: 'race', label: 'RACE CONTROL', meta: 'Stage, track, spectate', icon: Swords }, { tab: 'meets', label: 'MEETS', meta: 'Routes and live locations', icon: MapPin },
     { tab: 'shop', label: 'PARTS VAULT', meta: 'Verified vehicle fitment', icon: ShoppingBag }, { tab: 'leaderboard', label: 'RANKINGS', meta: 'Season tiers and records', icon: Trophy },
     { tab: 'messages', label: 'COMMS', meta: 'Groups and direct messages', icon: MessagesSquare }, { tab: 'vault', label: 'CREDITS', meta: 'Rewards, wagers, badges', icon: WalletCards },
     ...(isDeveloper?[{tab:'access' as TabKey,label:'ACCESS CONTROL',meta:'Codes, limits, new pilots',icon:LockKeyhole}]:[]),
   ];
   return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.moreHeader}><Text style={styles.eyebrow}>PILOT SYSTEMS</Text><Text style={styles.feedTitle}>ACCESS GRID</Text><Text style={styles.moreCopy}>All network tools. One encrypted identity.</Text></View><View style={styles.moduleGrid}>{modules.map(module => { const Icon = module.icon; return <Pressable key={module.tab} onPress={() => onTab(module.tab)} style={({ pressed }) => [styles.moduleCard, pressed && styles.pressed]}><View style={styles.moduleIcon}><Icon size={23} color={accent} /></View><Text style={styles.moduleTitle}>{module.label}</Text><Text style={styles.moduleMeta}>{module.meta}</Text><ChevronRight size={17} color={muted} style={styles.moduleChevron} /></Pressable>; })}</View><SectionTitle label="NETWORK HEALTH" /><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>GPS PROOF</Text><Text style={location ? styles.healthGood : styles.healthOffline}>{location ? 'LOCKED' : 'NOT GRANTED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>ENCRYPTED COMMS</Text><Text style={userId ? styles.healthGood : styles.healthOffline}>{userId ? 'LIVE' : 'SIGN IN REQUIRED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>LIVE NETWORK</Text><Text style={networkStatus === 'live' ? styles.healthGood : styles.healthOffline}>{networkStatus.replace('_', ' ').toUpperCase()}</Text></View></GlassPanel></ScrollView>;
+}
+
+function WorldScreen({onTab}:{onTab:(tab:TabKey)=>void}){
+  const world=useWorldStore();const {location,lockLocation,hideLocation}=useLiveNetworkStore();const profile=useContentStore(state=>state.profile);const userId=useContentStore(state=>state.userId);
+  const [crewName,setCrewName]=useState('');const [crewTag,setCrewTag]=useState('');const [territoryName,setTerritoryName]=useState('');const [reportType,setReportType]=useState<RoadReport['type']>('hazard');const [reportNote,setReportNote]=useState('');const [dropTitle,setDropTitle]=useState('');
+  useEffect(()=>{void world.refresh();},[]);
+  const ensureLocation=async()=>{if(location)return location;await lockLocation();return useLiveNetworkStore.getState().location;};
+  const submitReport=async()=>{const point=await ensureLocation();if(!point)return Alert.alert('Location required','Lock your GPS before placing a safety report.');if(await world.report(reportType,reportNote,point.latitude,point.longitude))setReportNote('');};
+  const ownedCrew=world.crews.find(crew=>crew.owner_id===userId);
+  const createTerritory=async()=>{const point=await ensureLocation();if(!point||!ownedCrew)return;if(await world.createTerritory(ownedCrew.id,{name:territoryName||`${ownedCrew.tag} ZONE`,latitude:point.latitude,longitude:point.longitude,radiusM:1200,requiredCells:12}))setTerritoryName('');};
+  const createDrop=async()=>{const point=await ensureLocation();if(!point||!dropTitle.trim())return;try{await cloudflareApi.request('/api/admin/dead-drops',{method:'POST',body:JSON.stringify({title:dropTitle,latitude:point.latitude,longitude:point.longitude,credits:500,radiusM:65})});setDropTitle('');await world.refresh();}catch(error){Alert.alert('Drop failed',error instanceof Error?error.message:'Could not create drop.');}};
+  const createSeason=async()=>{const startsAt=new Date().toISOString(),endsAt=new Date(Date.now()+30*86400000).toISOString();try{await cloudflareApi.request('/api/admin/seasons',{method:'POST',body:JSON.stringify({name:`UNDERGROUND // ${new Date().toLocaleString('en',{month:'short'}).toUpperCase()}`,startsAt,endsAt,rewardCredits:10000})});await world.refresh();}catch(error){Alert.alert('Season failed',error instanceof Error?error.message:'Could not create season.');}};
+  return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.worldHero}><View><Text style={styles.eyebrow}>PERSISTENT WORLD</Text><Text style={styles.feedTitle}>THE UNDERGROUND</Text><Text style={styles.moreCopy}>{world.discoveries.length} CELLS DISCOVERED · {world.territories.filter(item=>item.unlocked).length} ZONES UNLOCKED</Text></View><Pressable onPress={()=>onTab('radar')} style={styles.worldMapButton}><Map size={22} color={paper}/></Pressable></View><View style={styles.worldStats}><SpecCell value={String(world.drops.filter(item=>!item.claimed).length)} label="LIVE DROPS"/><SpecCell value={String(world.crews.length)} label="CREWS"/><SpecCell value={String(world.reports.length)} label="SAFETY MARKS"/></View><Pressable onPress={()=>void hideLocation()} style={styles.ghostProtocol}><VolumeX size={21} color={paper}/><View style={styles.commandCopy}><Text style={styles.commandTitle}>EMERGENCY GHOST PROTOCOL</Text><Text style={styles.commandMeta}>Immediately remove your live location from every pilot map</Text></View><ChevronRight size={18} color={paper}/></Pressable>
+  <SectionTitle label="UNDERGROUND SEASONS" action={`${world.seasons.length} ACTIVE`}/>{world.seasons.map(season=><GlassPanel key={season.id} style={styles.worldCard} glow><View style={styles.worldCardTop}><View><Text style={styles.commandTitle}>{season.name.toUpperCase()}</Text><Text style={styles.commandMeta}>ENDS {new Date(season.ends_at).toLocaleDateString()} · {season.reward_credits.toLocaleString()} ACR POOL</Text></View><Trophy size={21} color={accent}/></View><GlassButton label={season.joined?'SEASON ENTERED':'ENTER SEASON'} icon={season.joined?Check:Play} onPress={()=>void world.joinSeason(season.id)} active={!season.joined}/></GlassPanel>)}
+  <SectionTitle label="CREW NETWORK" action="APPROVAL REQUIRED"/>{!ownedCrew?<GlassPanel style={styles.worldCard}><TextInput value={crewName} onChangeText={setCrewName} placeholder="Crew name" placeholderTextColor={muted} style={styles.authInput}/><TextInput value={crewTag} onChangeText={value=>setCrewTag(value.toUpperCase().slice(0,5))} placeholder="2-5 character tag" placeholderTextColor={muted} style={styles.authInput}/><GlassButton label="FOUND CREW" icon={Users} onPress={()=>void world.createCrew(crewName,crewTag)} active/></GlassPanel>:<GlassPanel style={styles.worldCard} glow><Text style={styles.commandTitle}>[{ownedCrew.tag}] {ownedCrew.name.toUpperCase()}</Text><Text style={styles.commandMeta}>{ownedCrew.member_count} APPROVED MEMBERS · TERRITORY AUTHORITY</Text><TextInput value={territoryName} onChangeText={setTerritoryName} placeholder="New territory name" placeholderTextColor={muted} style={styles.authInput}/><GlassButton label="CLAIM GPS TERRITORY" icon={MapPin} onPress={()=>void createTerritory()} active/></GlassPanel>}{world.crews.filter(crew=>crew.owner_id!==userId).map(crew=><View key={crew.id} style={styles.worldListRow}><View style={styles.crewSigil}><Text style={styles.crewSigilText}>{crew.tag}</Text></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>{crew.name.toUpperCase()}</Text><Text style={styles.commandMeta}>{crew.member_count} MEMBERS · {(crew.member_status||'OPEN').toUpperCase()}</Text></View>{!crew.member_status?<GlassButton label="REQUEST" icon={LockKeyhole} onPress={()=>void world.joinCrew(crew.id)} compact/>:null}</View>)}{world.crewRequests.map(request=><View key={`${request.crew_id}-${request.user_id}`} style={styles.worldListRow}><UserRound size={20} color={accent}/><View style={styles.commandCopy}><Text style={styles.commandTitle}>{request.username.toUpperCase()}</Text><Text style={styles.commandMeta}>REQUESTING CREW CLEARANCE</Text></View><GlassButton label="APPROVE" icon={Check} onPress={()=>void world.approveMember(request.crew_id,request.user_id)} compact/></View>)}
+  <SectionTitle label="DEAD DROPS" action="DRIVE TO CLAIM"/>{world.drops.map(drop=><View key={drop.id} style={[styles.worldListRow,Boolean(drop.claimed)&&styles.worldClaimed]}><Gift size={21} color={drop.claimed?muted:accent}/><View style={styles.commandCopy}><Text style={styles.commandTitle}>{drop.title.toUpperCase()}</Text><Text style={styles.commandMeta}>{drop.claimed?'RECOVERED':`${drop.credits} ACR · ENTER ${drop.radius_m}M ZONE`}</Text></View><Text style={styles.dropValue}>{drop.claimed?'✓':`+${drop.credits}`}</Text></View>)}
+  <SectionTitle label="COMMUNITY ROAD INTEL" action="PERSISTENT"/><GlassPanel style={styles.worldCard}><View style={styles.reportTypes}>{(['hazard','closure','fixed_camera','dangerous_road'] as const).map(type=><Pressable key={type} onPress={()=>setReportType(type)} style={[styles.reportType,reportType===type&&styles.reportTypeActive]}><Text style={[styles.reportTypeText,reportType===type&&styles.reportTypeTextActive]}>{type.replace('_',' ').toUpperCase()}</Text></Pressable>)}</View><TextInput value={reportNote} onChangeText={setReportNote} placeholder="Road safety note" placeholderTextColor={muted} style={styles.authInput}/><GlassButton label="PIN AT MY LOCATION" icon={MapPin} onPress={()=>void submitReport()} active/></GlassPanel>
+  {profile?.isDeveloper?<><SectionTitle label="WORLDMASTER TOOLS" action="OWNER"/><GlassPanel style={styles.worldCard}><TextInput value={dropTitle} onChangeText={setDropTitle} placeholder="Dead drop title" placeholderTextColor={muted} style={styles.authInput}/><View style={styles.lobbyQuickRow}><GlassButton label="PLACE 500 ACR DROP" icon={Gift} onPress={()=>void createDrop()} grow/><GlassButton label="START 30D SEASON" icon={Trophy} onPress={()=>void createSeason()} grow/></View></GlassPanel></>:null}{world.error?<Text style={styles.networkError}>{world.error}</Text>:null}</ScrollView>;
 }
 
 function MeetScreen() {
@@ -665,9 +714,22 @@ function CatalogField({label,value,options,onChange,placeholder}: {label:string;
   return <View style={styles.catalogField}><Text style={styles.identityLabel}>{label}</Text><TextInput value={value} onFocus={()=>setFocused(true)} onChangeText={onChange} placeholder={placeholder||label} placeholderTextColor={muted} style={styles.authInput}/>{focused&&matches.length?<View style={styles.catalogOptions}>{matches.map(option=><Pressable key={option} onPress={()=>{onChange(option);setFocused(false);}} style={styles.catalogOption}><Text style={styles.catalogOptionText}>{option.toUpperCase()}</Text><ChevronRight size={13} color={accent}/></Pressable>)}</View>:null}</View>;
 }
 
+const vehicleAngleLabels={front:'FRONT',rear:'REAR',driver:'DRIVER SIDE',passenger:'PASSENGER SIDE'} as const;
+
+function DigitalTwinCapture({vehicle,onClose}:{vehicle:ReturnType<typeof useContentStore.getState>['vehicles'][number];onClose:()=>void}){
+  const [angles,setAngles]=useState<Record<keyof typeof vehicleAngleLabels,string|null>>({front:null,rear:null,driver:null,passenger:null});
+  const [geminiKey,setGeminiKey]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [status,setStatus]=useState('CAPTURE FOUR CLEAR ANGLES');
+  const pick=async(angle:keyof typeof vehicleAngleLabels)=>{const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:ImagePicker.MediaTypeOptions.Images,quality:.82,allowsEditing:false});if(!result.canceled&&result.assets[0])setAngles(current=>({...current,[angle]:result.assets[0].uri}));};
+  const generate=async()=>{const entries=Object.entries(angles) as Array<[keyof typeof vehicleAngleLabels,string|null]>;if(entries.some(([,uri])=>!uri)){setStatus('ALL FOUR ANGLES ARE REQUIRED');return;}if(!geminiKey.trim()){setStatus('ENTER YOUR GEMINI API KEY');return;}setBusy(true);setStatus('UPLOADING SECURE REFERENCES');try{const uploaded=await Promise.all(entries.map(async([angle,uri])=>({angle,url:(await cloudflareApi.upload(uri!,'photo')).url})));setStatus('MATERIALIZING DIGITAL BUILD');await cloudflareApi.request('/api/vehicle-digital-twin',{method:'POST',body:JSON.stringify({vehicleId:vehicle.id,angles:uploaded,geminiApiKey:geminiKey.trim()})});setGeminiKey('');await useContentStore.getState().loadVehicles();setStatus('DIGITAL BUILD READY');}catch(error){setStatus((error instanceof Error?error.message:'GENERATION FAILED').toUpperCase());}finally{setBusy(false);}};
+  return <View><View style={styles.raceHeader}><View><Text style={styles.eyebrow}>AI GARAGE SCAN</Text><Text style={styles.feedTitle}>DIGITAL BUILD</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper}/></Pressable></View>{vehicle.digitalTwinUrl?<View style={styles.twinPreview}><Image source={{uri:vehicle.digitalTwinUrl}} style={styles.twinPreviewImage} resizeMode="contain"/><LinearGradient colors={['transparent','rgba(1,3,2,.92)']} style={StyleSheet.absoluteFill}/><View style={styles.garageHeroCopy}><Text style={styles.commandTitle}>CURRENT DIGITAL BUILD</Text><BadgeCheck size={19} color={accent}/></View></View>:null}<Text style={styles.emptyCopy}>Use the same car, lighting, wheels, paint, and body setup in every frame. The references remain attached to this garage vehicle.</Text><View style={styles.angleGrid}>{(Object.keys(vehicleAngleLabels) as Array<keyof typeof vehicleAngleLabels>).map(angle=><Pressable key={angle} onPress={()=>void pick(angle)} style={[styles.angleCapture,Boolean(angles[angle])&&styles.angleCaptureReady]}>{angles[angle]?<Image source={{uri:angles[angle]!}} style={styles.angleImage}/>:<CarFront size={27} color={muted}/>}<View style={styles.angleLabel}><Text style={styles.angleLabelText}>{vehicleAngleLabels[angle]}</Text>{angles[angle]?<Check size={12} color={accent}/>:null}</View></Pressable>)}</View><GlassPanel style={styles.twinKeyPanel}><View style={styles.fitmentBanner}><Sparkles size={20} color={accent}/><View style={styles.commandCopy}><Text style={styles.commandTitle}>GEMINI IMAGE CONNECTION</Text><Text style={styles.commandMeta}>Your key is sent once to Google and is never stored by Apex.</Text></View></View><TextInput value={geminiKey} onChangeText={setGeminiKey} secureTextEntry autoCapitalize="none" placeholder="Gemini API key" placeholderTextColor={muted} style={styles.authInput}/><Text style={styles.twinStatus}>{status}</Text><GlassButton label={busy?'GENERATING BUILD':'CREATE DIGITAL BUILD'} icon={Sparkles} onPress={()=>void generate()} active/></GlassPanel></View>;
+}
+
 function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const { vehicles, activeVehicleId, loading, error, setActiveVehicle, addVehicle } = useContentStore();
   const [showAdd, setShowAdd] = useState(false);
+  const [showTwin,setShowTwin]=useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [vehicleDraft, setVehicleDraft] = useState({ nickname: '', year: String(new Date().getFullYear()), make: '', model: '', trim: 'Base', engine: 'Stock', drivetrain: 'AWD', horsepower: '300', color: 'Black' });
   const [makes,setMakes]=useState<string[]>(['Acura','Alfa Romeo','Aston Martin','Audi','Bentley','BMW','Buick','Cadillac','Chevrolet','Chrysler','Dodge','Ferrari','Ford','Genesis','GMC','Honda','Hyundai','Infiniti','Jaguar','Jeep','Kia','Lamborghini','Land Rover','Lexus','Lotus','Maserati','Mazda','McLaren','Mercedes-Benz','Mini','Mitsubishi','Nissan','Porsche','Ram','Subaru','Tesla','Toyota','Volkswagen','Volvo']);
@@ -685,6 +747,7 @@ function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
     const ready = await addVehicle({ ...vehicleDraft, nickname: vehicleDraft.nickname || `${vehicleDraft.make} ${vehicleDraft.model}`, year: Number(vehicleDraft.year), horsepower: Number(vehicleDraft.horsepower) || 0 }, photoUri);
     if (ready) { setShowAdd(false); setPhotoUri(null); setVehicleDraft({ nickname: '', year: String(new Date().getFullYear()), make: '', model: '', trim: 'Base', engine: 'Stock', drivetrain: 'AWD', horsepower: '300', color: 'Black' }); }
   };
+  if(car&&showTwin)return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><DigitalTwinCapture vehicle={car} onClose={()=>setShowTwin(false)}/></ScrollView>;
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
       <View style={styles.garageSwitcher}>
@@ -719,6 +782,9 @@ function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
         <SpecCell value={car.engine} label="ENGINE" />
         <SpecCell value={car.trim || 'BASE'} label="TRIM" accentValue />
       </View>
+
+      <SectionTitle label="DIGITAL BUILD" action={car.digitalTwinUrl?'READY':'4 ANGLES'} />
+      <Pressable onPress={()=>setShowTwin(true)} style={({pressed})=>[styles.fitmentCard,styles.digitalBuildCard,pressed&&styles.pressed]}><View style={styles.fitmentIcon}><Sparkles size={24} color={accent}/></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>{car.digitalTwinUrl?'UPDATE DIGITAL CAR':'SCAN THIS CAR'}</Text><Text style={styles.commandMeta}>Four-angle capture · AI-accurate paint, wheels, and body</Text></View><ChevronRight size={18} color={accent}/></Pressable>
 
       <SectionTitle label="BUILD IDENTITY" action="EDIT" />
       <GlassPanel>
@@ -991,6 +1057,7 @@ function AuthPanel({ onClose, initialMode='signin', inviteCode }: { onClose: () 
 
 export function ApexDesignPreview() {
   const [tab, setTab] = useState<TabKey>('command');
+  const [gameStarted,setGameStarted]=useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode,setAuthMode]=useState<'signin'|'signup'>('signin');
@@ -1016,12 +1083,15 @@ export function ApexDesignPreview() {
       const target = event.target as HTMLElement | null;
       if (event.key !== 'Enter' || target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
       event.preventDefault();
+      setGameStarted(true);
       setTab('radar');
       useLiveNetworkStore.getState().startDrive();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => { window.removeEventListener('keydown', onKeyDown); useLiveNetworkStore.getState().dispose(); useNotificationStore.getState().unsubscribeFromNotifications(); };
   }, []);
+
+  useEffect(()=>{if(!userId)setGameStarted(false);},[userId]);
 
   useEffect(() => {
     entrance.setValue(0);
@@ -1038,12 +1108,14 @@ export function ApexDesignPreview() {
     if (tab === 'shop') return <ShopScreen />;
     if (tab === 'leaderboard') return <LeaderboardScreen />;
     if (tab === 'access') return <DeveloperAccessScreen />;
+    if (tab === 'world') return <WorldScreen onTab={setTab}/>;
     if (tab === 'meets' || tab === 'messages') return <UtilityScreen kind={tab} />;
     return <CommandScreen onTab={setTab} />;
   }, [tab]);
 
   if(!booted)return <SafeAreaView style={styles.app}><AtmosphereBackdrop/><View style={styles.bootScreen}><ApexLogo/><Text style={styles.bootLabel}>ESTABLISHING PRIVATE CHANNEL</Text></View></SafeAreaView>;
   if(!userId)return <SafeAreaView style={styles.app}><AccessPortal onUnlock={code=>{setInviteCode(code);setAuthMode('signup');setAuthOpen(true);}} onExisting={()=>{setInviteCode(null);setAuthMode('signin');setAuthOpen(true);}}/>{authOpen?<AuthPanel key={`${authMode}-${inviteCode||'owner'}`} onClose={()=>setAuthOpen(false)} initialMode={authMode} inviteCode={inviteCode}/>:null}</SafeAreaView>;
+  if(!gameStarted)return <SafeAreaView style={styles.app}><GameLobby onEnter={next=>{setTab(next);setGameStarted(true);}}/></SafeAreaView>;
 
   return (
     <SafeAreaView style={styles.app}>
@@ -1069,9 +1141,9 @@ export function ApexDesignPreview() {
           <BlurView intensity={42} tint="dark" style={styles.tabBar}>
             {tabs.map(item => {
               const Icon = item.icon;
-              const activeTab = tab === item.key || (item.key === 'more' && ['race', 'vault', 'shop', 'meets', 'messages', 'leaderboard','access'].includes(tab));
+              const activeTab = tab === item.key || (item.key === 'more' && ['race', 'vault', 'shop', 'meets', 'messages', 'leaderboard','access','world'].includes(tab));
               return (
-                <Pressable key={item.key} onPress={() => setTab(item.key)} style={styles.tabItem}>
+                <Pressable key={item.key} onPress={() => {playInterfaceSound();setTab(item.key);}} style={styles.tabItem}>
                   <View style={[styles.tabIcon, activeTab && styles.tabIconActive]}><Icon size={19} color={activeTab ? accent : muted} strokeWidth={2.1} /></View>
                   <Text style={[styles.tabLabel, activeTab && styles.tabLabelActive]}>{item.label}</Text>
                 </Pressable>
@@ -1098,6 +1170,26 @@ const darkMapStyle = [
 ];
 
 const styles = StyleSheet.create({
+  gameLobby: { flex: 1, backgroundColor: '#010201', overflow: 'hidden', paddingHorizontal: 16, paddingTop: 22, paddingBottom: 20 },
+  lobbyHeader: { zIndex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  lobbyLevel: { minHeight: 32, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(255,255,255,.07)', paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+  lobbyLevelText: { color: paper, fontSize: 7, fontWeight: '900', letterSpacing: 1 },
+  garageStage: { flex: 1, minHeight: 260, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  garageStageLight: { position: 'absolute', width: '88%', height: 130, bottom: '19%', borderRadius: 70, backgroundColor: 'rgba(223,255,215,.08)', shadowColor: '#DFFFD7', shadowOpacity: .34, shadowRadius: 55, transform: [{ scaleX: 1.2 }] },
+  lobbyCar: { width: '100%', maxWidth: 660, height: '75%', minHeight: 230, alignItems: 'center', justifyContent: 'center' },
+  lobbyCarImage: { width: '100%', height: '100%' },
+  lobbyNoCar: { width: '100%', minHeight: 190, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  partHotspot: { position: 'absolute', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(2,5,3,.78)', borderWidth: 1, borderColor: 'rgba(255,255,255,.26)', borderRadius: 9, paddingHorizontal: 7, paddingVertical: 5 },
+  partHotspotDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: accent, shadowColor: accent, shadowOpacity: 1, shadowRadius: 7 },
+  partHotspotLabel: { color: paper, fontSize: 6, fontWeight: '900' },
+  dragHint: { position: 'absolute', bottom: 4, color: '#A7AEA9', fontSize: 6, fontWeight: '900', letterSpacing: 1.2 },
+  lobbyIdentity: { zIndex: 2, borderLeftWidth: 2, borderLeftColor: 'rgba(255,255,255,.8)', paddingLeft: 12, marginBottom: 15 },
+  lobbyCarName: { color: paper, fontSize: 28, fontWeight: '900', marginTop: 3 },
+  lobbyActions: { zIndex: 2, gap: 9 },
+  playGameButton: { minHeight: 64, borderRadius: 15, backgroundColor: '#EAF7E7', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, shadowColor: '#FFFFFF', shadowOpacity: .24, shadowRadius: 22 },
+  playGameText: { color: '#050705', fontSize: 17, fontWeight: '900' },
+  playGameMeta: { color: '#364035', fontSize: 6, fontWeight: '900', letterSpacing: 1.1, marginTop: 2 },
+  lobbyQuickRow: { flexDirection: 'row', gap: 8 },
   app: { flex: 1, backgroundColor: '#010201', overflow: 'hidden' },
   main: { flex: 1 },
   atmosphere: { ...StyleSheet.absoluteFillObject, overflow: 'hidden', backgroundColor: '#010201' },
@@ -1623,4 +1715,33 @@ const styles = StyleSheet.create({
   messageText: { color: paper, fontSize: 11, lineHeight: 16 },
   messageTime: { color: muted, fontSize: 6, marginTop: 5 },
   messageComposer: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderTopWidth: 1, borderTopColor: border },
+  digitalBuildCard: { borderColor: 'rgba(223,255,215,.34)', backgroundColor: 'rgba(223,255,215,.055)' },
+  twinPreview: { height: 250, marginTop: 12, marginBottom: 14, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,.22)', backgroundColor: '#030503', overflow: 'hidden' },
+  twinPreviewImage: { width: '100%', height: '100%' },
+  angleGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 14 },
+  angleCapture: { width: '48.5%', aspectRatio: 1.38, borderRadius: 11, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,.22)', backgroundColor: 'rgba(255,255,255,.035)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  angleCaptureReady: { borderStyle: 'solid', borderColor: 'rgba(167,229,154,.56)' },
+  angleImage: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+  angleLabel: { position: 'absolute', left: 6, right: 6, bottom: 6, minHeight: 25, borderRadius: 7, paddingHorizontal: 7, backgroundColor: 'rgba(2,4,3,.82)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  angleLabelText: { color: paper, fontSize: 6, fontWeight: '900', letterSpacing: .7 },
+  twinKeyPanel: { marginBottom: 10 },
+  twinStatus: { color: accent, fontSize: 7, fontWeight: '900', letterSpacing: .8, marginVertical: 11 },
+  worldHero: { minHeight: 150, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,.20)', backgroundColor: 'rgba(4,8,5,.80)', padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden' },
+  worldMapButton: { width: 58, height: 58, borderRadius: 29, borderWidth: 1, borderColor: 'rgba(255,255,255,.35)', backgroundColor: 'rgba(255,255,255,.08)', alignItems: 'center', justifyContent: 'center', shadowColor: '#DFFFD7', shadowOpacity: .24, shadowRadius: 18 },
+  worldStats: { flexDirection: 'row', marginTop: 9, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: '#090B09', overflow: 'hidden' },
+  ghostProtocol: { minHeight: 70, marginTop: 9, paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,.32)', backgroundColor: 'rgba(255,255,255,.07)', flexDirection: 'row', alignItems: 'center', gap: 11 },
+  worldCard: { marginBottom: 9 },
+  worldCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  worldListRow: { minHeight: 68, marginBottom: 7, paddingHorizontal: 11, borderRadius: 10, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(7,10,8,.82)', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  worldClaimed: { opacity: .5 },
+  crewSigil: { width: 40, height: 40, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(167,229,154,.42)', backgroundColor: 'rgba(167,229,154,.09)', alignItems: 'center', justifyContent: 'center' },
+  crewSigilText: { color: accent, fontSize: 8, fontWeight: '900' },
+  reportTypes: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  reportType: { minHeight: 34, paddingHorizontal: 9, borderRadius: 8, borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center' },
+  reportTypeActive: { borderColor: 'rgba(167,229,154,.52)', backgroundColor: 'rgba(167,229,154,.12)' },
+  reportTypeText: { color: muted, fontSize: 6, fontWeight: '900' },
+  reportTypeTextActive: { color: paper },
+  nativeWorldPin: { width: 30, height: 30, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(223,255,215,.7)', backgroundColor: 'rgba(3,7,4,.92)', alignItems: 'center', justifyContent: 'center' },
+  nativeSafetyPin: { width: 27, height: 27, borderRadius: 7, borderWidth: 1, borderColor: 'rgba(255,255,255,.62)', backgroundColor: '#090C09', alignItems: 'center', justifyContent: 'center' },
+  nativeSafetyText: { color: paper, fontSize: 14, fontWeight: '900' },
 });

@@ -3,7 +3,7 @@ import { cloudflareApi } from '../../config/cloudflareApi';
 
 export type LivePost = { id:string; userId:string; alias:string; avatarUrl:string|null; mediaUrl:string; videoUrl:string|null; caption:string; likes:number; comments:number; liked:boolean; saved:boolean; following:boolean; createdAt:string };
 export type Ranking = { id:string; alias:string; avatarUrl:string|null; tier:string; points:number; wins:number; losses:number; entered:number; topSpeed:number; reputation:number; credits:number };
-export type ActiveVehicle = { id:string; nickname:string; year:number; make:string; model:string; trim:string|null; engine:string; drivetrain:string; horsepower:number; color:string; photoUrl:string|null };
+export type ActiveVehicle = { id:string; nickname:string; year:number; make:string; model:string; trim:string|null; engine:string; drivetrain:string; horsepower:number; color:string; photoUrl:string|null;digitalTwinUrl:string|null;digitalTwinStatus:string };
 export type ProviderProduct = { id:string; provider:string; title:string; imageUrl:string|null; price:number; currency:string; condition:string|null; seller:string|null; shipping:string|null; purchaseUrl:string; compatibility:string };
 export type ProviderLink = { name:string; mode:string; url?:string };
 export type PilotDirectoryEntry={id:string;alias:string;avatarUrl:string|null;tier:'Bronze'|'Silver'|'Master'|'Platinum';points:number;wins:number;losses:number;reputation:number;vehicle:string|null;photoUrl:string|null;latitude:number|null;longitude:number|null;speedKph:number;driveMode:boolean};
@@ -66,7 +66,7 @@ export const useContentStore=create<ContentState>((set,get)=>({
   setRadarTarget:id=>set({radarTargetId:id}),
   loadVehicles:async()=>{
     if(!get().userId)return;
-    try{const data=await cloudflareApi.request<{vehicles:any[]}>('/api/vehicles');const vehicles=data.vehicles.map(row=>({id:row.id,nickname:row.nickname,year:Number(row.year),make:row.make,model:row.model,trim:row.trim||null,engine:row.engine||'',drivetrain:row.drivetrain||'',horsepower:Number(row.horsepower||0),color:row.color||'',photoUrl:row.photo_url||null}));const activeRow=data.vehicles.find(row=>Boolean(row.is_active));set({vehicles,activeVehicleId:activeRow?.id||vehicles[0]?.id||null});}catch(error){set({error:error instanceof Error?error.message:'Garage failed'});}
+    try{const data=await cloudflareApi.request<{vehicles:any[]}>('/api/vehicles');const vehicles=data.vehicles.map(row=>({id:row.id,nickname:row.nickname,year:Number(row.year),make:row.make,model:row.model,trim:row.trim||null,engine:row.engine||'',drivetrain:row.drivetrain||'',horsepower:Number(row.horsepower||0),color:row.color||'',photoUrl:row.photo_url||null,digitalTwinUrl:row.digital_twin_url||null,digitalTwinStatus:row.digital_twin_status||'not_started'}));const activeRow=data.vehicles.find(row=>Boolean(row.is_active));set({vehicles,activeVehicleId:activeRow?.id||vehicles[0]?.id||null});}catch(error){set({error:error instanceof Error?error.message:'Garage failed'});}
   },
   addVehicle:async(vehicle,photoUri)=>{
     if(!get().userId){set({error:'Sign in before adding a vehicle.'});return false;}
