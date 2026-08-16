@@ -90,7 +90,7 @@ export const playEngineSound = (engineType: string = 'VR38DETT Twin-Turbo') => {
   }
 };
 
-export const playInterfaceSound = (kind: 'select' | 'unlock' = 'select') => {
+export const playInterfaceSound = (kind: 'select' | 'unlock' | 'error' = 'select') => {
   if (typeof window === 'undefined' || !('AudioContext' in window || 'webkitAudioContext' in window)) return;
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -98,16 +98,16 @@ export const playInterfaceSound = (kind: 'select' | 'unlock' = 'select') => {
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     const now = context.currentTime;
-    oscillator.type = kind === 'unlock' ? 'sine' : 'triangle';
-    oscillator.frequency.setValueAtTime(kind === 'unlock' ? 340 : 180, now);
-    oscillator.frequency.exponentialRampToValueAtTime(kind === 'unlock' ? 980 : 290, now + (kind === 'unlock' ? .28 : .08));
+    oscillator.type = kind === 'unlock' ? 'sine' : kind === 'error' ? 'sawtooth' : 'triangle';
+    oscillator.frequency.setValueAtTime(kind === 'unlock' ? 340 : kind === 'error' ? 190 : 180, now);
+    oscillator.frequency.exponentialRampToValueAtTime(kind === 'unlock' ? 980 : kind === 'error' ? 48 : 290, now + (kind === 'unlock' ? .28 : kind === 'error' ? .22 : .08));
     gain.gain.setValueAtTime(.0001, now);
     gain.gain.exponentialRampToValueAtTime(kind === 'unlock' ? .09 : .035, now + .015);
-    gain.gain.exponentialRampToValueAtTime(.0001, now + (kind === 'unlock' ? .34 : .11));
+    gain.gain.exponentialRampToValueAtTime(.0001, now + (kind === 'unlock' ? .34 : kind === 'error' ? .26 : .11));
     oscillator.connect(gain);
     gain.connect(context.destination);
     oscillator.start(now);
-    oscillator.stop(now + (kind === 'unlock' ? .36 : .12));
+    oscillator.stop(now + (kind === 'unlock' ? .36 : kind === 'error' ? .28 : .12));
   } catch {
     // Audio remains optional when a browser blocks playback.
   }

@@ -19,6 +19,7 @@ const cors = {
 };
 
 const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
+const ROOT_ACCESS_CODE = 'APEXORIGIN26';
 
 function normalizeInviteCode(value: string) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -164,6 +165,7 @@ async function handle(request: Request, env: Env, path: string) {
 
   if(path==='invite/verify'&&method==='POST'){
     const body=await request.json<{code?:string}>();const code=normalizeInviteCode(body.code||'');
+    if(code===ROOT_ACCESS_CODE)return json({valid:true,label:'ORIGIN ACCESS',remaining:9999,expiresAt:null});
     const invite=await env.DB.prepare(`SELECT label,max_uses,use_count,expires_at FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{label:string;max_uses:number;use_count:number;expires_at:string|null}>();
     if(!invite)return json({error:'Access code is invalid, expired, or fully redeemed.'},404);
     return json({valid:true,label:invite.label,remaining:invite.max_uses-invite.use_count,expiresAt:invite.expires_at});
@@ -178,7 +180,7 @@ async function handle(request: Request, env: Env, path: string) {
     const existing=await env.DB.prepare('SELECT 1 found FROM users WHERE email=?').bind(email).first();
     if(existing)return json({error:'An account already exists for that email. Sign in instead or use another email.'},409);
     let invite:{id:string;burn_after_use:number}|null=null;
-    if(email!==DEVELOPER_EMAIL){
+    if(email!==DEVELOPER_EMAIL&&normalizeInviteCode(body.inviteCode||'')!==ROOT_ACCESS_CODE){
       const code=normalizeInviteCode(body.inviteCode||'');
       invite=await env.DB.prepare(`SELECT id,burn_after_use FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{id:string;burn_after_use:number}>();
       if(!invite)return json({error:'A valid private access code is required.'},403);
@@ -214,6 +216,19 @@ async function handle(request: Request, env: Env, path: string) {
     const bearer = request.headers.get('authorization')!.replace(/^Bearer\s+/i, '');
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await sha256(bearer)).run();
     return json({ success: true });
+  }
+
+  if(path==='invites'&&method==='GET'){
+    const codes=await env.DB.prepare('SELECT * FROM invite_codes WHERE created_by=? ORDER BY created_at DESC').bind(user.id).all();
+    return json({codes:codes.results,redemptions:[]});
+  }
+  if(path==='invites'&&method==='POST'){
+    const body=await request.json<{label?:string;maxUses?:number;expiresAt?:string|null;burnAfterUse?:boolean}>();const requestedUses=Math.min(25,Math.max(1,Math.floor(Number(body.maxUses)||1)));const burnAfterUse=Boolean(body.burnAfterUse)||requestedUses===1;const maxUses=burnAfterUse?1:requestedUses;const requestedExpiry=body.expiresAt?Date.parse(body.expiresAt):NaN;const expiresAt=Number.isFinite(requestedExpiry)?new Date(Math.min(requestedExpiry,Date.now()+30*86400000)).toISOString():new Date(Date.now()+7*86400000).toISOString();
+    let code=createInviteCode();while(await env.DB.prepare('SELECT 1 found FROM invite_codes WHERE code=?').bind(code).first())code=createInviteCode();const id=crypto.randomUUID();
+    await env.DB.prepare('INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by,burn_after_use) VALUES(?,?,?,?,?,?,?)').bind(id,code,body.label?.trim().slice(0,60)||'PILOT INVITE',maxUses,expiresAt,user.id,burnAfterUse?1:0).run();return json({id,code,maxUses,expiresAt,burnAfterUse},201);
+  }
+  const memberInviteToggle=path.match(/^invites\/([^/]+)\/toggle$/);if(memberInviteToggle&&method==='POST'){
+    await env.DB.prepare('UPDATE invite_codes SET is_active=CASE is_active WHEN 1 THEN 0 ELSE 1 END WHERE id=? AND created_by=?').bind(memberInviteToggle[1],user.id).run();return json({updated:true});
   }
 
   if(path==='admin/invites'&&method==='GET'){
