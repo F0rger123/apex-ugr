@@ -453,7 +453,7 @@ function RadarMap({
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
           key: `${mode}-${followRevision}-${fitAll}-${revealOrigin?.latitude.toFixed(4)||'none'}-${discoveries.length}-${rewards.length}-${drops.length}`,
-          srcDoc: mapDocument.replace('</body>',worldOverlay.replace('t.unlocked?.16:.28','t.unlocked?0.16:0.28').replace('1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .82 0','0 0 0 0 .08 0 0 0 0 .11 0 0 0 0 .09 0 0 0 .84 0').replace('opacity=".75"','opacity=".48"').replace('<rect width="100%" height="100%" fill="#050806" opacity=".92"/>','<rect width="100%" height="100%" fill="#050806" opacity=".82" mask="url(#unlocked)"/>').replace("c.setAttribute('r','110')","c.setAttribute('r',String(Math.max(2,Math.abs(map.latLngToContainerPoint(L.latLng(d.latitude,d.longitude).toBounds((d.radiusM||650)*2).getEast()).x-p.x))))")+rewardReplayOverlay+'</body>'),
+          srcDoc: mapDocument.replace('</body>',worldOverlay.replace('t.unlocked?.16:.28','t.unlocked?0.16:0.28').replace('1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .82 0','0 0 0 0 .08 0 0 0 0 .11 0 0 0 0 .09 0 0 0 .84 0').replace('opacity=".75"','opacity=".48"').replace('<rect width="100%" height="100%" fill="#050806" opacity=".92"/>','<rect width="100%" height="100%" fill="#050806" opacity=".82" mask="url(#unlocked)"/>').replace("c.setAttribute('r','110')","c.setAttribute('r',String(Math.max(2,Math.abs(map.latLngToContainerPoint([d.latitude,d.longitude+(d.radiusM||650)/(111320*Math.max(.2,Math.cos(d.latitude*Math.PI/180)))]).x-p.x))))")+rewardReplayOverlay+'</body>'),
           title: 'Apex Radar',
           style: { width: '100%', height: '100%', border: 0 },
         })}
