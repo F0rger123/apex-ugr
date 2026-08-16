@@ -631,9 +631,9 @@ async function handle(request: Request, env: Env, path: string) {
   if(path==='navigation'&&method==='GET'){
     const [places,routes]=await Promise.all([
       env.DB.prepare('SELECT * FROM saved_places WHERE user_id=? ORDER BY is_favorite DESC,created_at DESC').bind(user.id).all(),
-      env.DB.prepare('SELECT id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,created_at FROM saved_routes WHERE user_id=? ORDER BY created_at DESC').bind(user.id).all(),
+      env.DB.prepare('SELECT id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,stops_json,created_at FROM saved_routes WHERE user_id=? ORDER BY created_at DESC').bind(user.id).all(),
     ]);
-    return json({places:places.results,routes:routes.results.map((row:any)=>({...row,coordinates:JSON.parse(row.coordinates_json||'[]')}))});
+    return json({places:places.results,routes:routes.results.map((row:any)=>({...row,coordinates:JSON.parse(row.coordinates_json||'[]'),stops:JSON.parse(row.stops_json||'[]')}))});
   }
 
   if(path==='places'&&method==='POST'){
@@ -647,25 +647,35 @@ async function handle(request: Request, env: Env, path: string) {
   if(deletePlace&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_places WHERE id=? AND user_id=?').bind(deletePlace[1],user.id).run();return json({deleted:true});}
 
   if(path==='routes/save'&&method==='POST'){
-    const body=await request.json<{name?:string;route?:{destination:string;destinationLatitude:number;destinationLongitude:number;distanceKm:number;durationMinutes:number;coordinates:Array<{latitude:number;longitude:number}>}}>();
+    const body=await request.json<{name?:string;route?:{destination:string;destinationLatitude:number;destinationLongitude:number;distanceKm:number;durationMinutes:number;coordinates:Array<{latitude:number;longitude:number}>;stops?:Array<{name:string;latitude:number;longitude:number}>}}>();
     const route=body.route;
     if(!route?.destination||!Number.isFinite(route.destinationLatitude)||!Number.isFinite(route.destinationLongitude)||!Array.isArray(route.coordinates)||route.coordinates.length<2)return json({error:'Create a route before saving it.'},400);
     const id=crypto.randomUUID();
-    await env.DB.prepare('INSERT INTO saved_routes(id,user_id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json) VALUES(?,?,?,?,?,?,?,?,?)').bind(id,user.id,(body.name||route.destination).trim().slice(0,80),route.destination.slice(0,300),route.destinationLatitude,route.destinationLongitude,route.distanceKm,route.durationMinutes,JSON.stringify(route.coordinates)).run();
+    await env.DB.prepare('INSERT INTO saved_routes(id,user_id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,stops_json) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id,user.id,(body.name||route.destination).trim().slice(0,80),route.destination.slice(0,300),route.destinationLatitude,route.destinationLongitude,route.distanceKm,route.durationMinutes,JSON.stringify(route.coordinates),JSON.stringify((route.stops||[]).slice(0,8))).run();
     return json({id},201);
   }
   const deleteRoute=path.match(/^routes\/([^/]+)$/);
   if(deleteRoute&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_routes WHERE id=? AND user_id=?').bind(deleteRoute[1],user.id).run();return json({deleted:true});}
 
   if (path === 'routes' && method === 'POST') {
-    const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string;target?:{latitude:number;longitude:number}}>();// Exact coordinates are used for pilot pins; text destinations are geocoded.
-    if(!body.origin||!body.destination?.trim()) return json({error:'Current location and destination are required.'},400);
-    const target=Number.isFinite(body.target?.latitude)&&Number.isFinite(body.target?.longitude)?{latitude:Number(body.target!.latitude),longitude:Number(body.target!.longitude),name:body.destination.trim()}:await geocode(body.destination);
-    if(!target) return json({error:'Destination not found.'},404);
-    const routeUrl=`https://router.project-osrm.org/route/v1/driving/${body.origin.longitude},${body.origin.latitude};${target.longitude},${target.latitude}?overview=full&geometries=geojson`;
+    const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string;target?:{latitude:number;longitude:number};stops?:Array<{name?:string;latitude?:number;longitude?:number}>}>();// Exact coordinates are used for pins and queued route stops.
+    if(!body.origin) return json({error:'Current location is required.'},400);
+    const requested=(body.stops||[]).slice(0,8);let stops:Array<{name:string;latitude:number;longitude:number}>=[];
+    if(requested.length){stops=requested.filter(stop=>stop.name&&Number.isFinite(stop.latitude)&&Number.isFinite(stop.longitude)).map(stop=>({name:String(stop.name).slice(0,300),latitude:Number(stop.latitude),longitude:Number(stop.longitude)}));if(stops.length!==requested.length)return json({error:'Every route stop needs a name and valid coordinates.'},400);}
+    else {if(!body.destination?.trim())return json({error:'Add at least one route stop.'},400);const target=Number.isFinite(body.target?.latitude)&&Number.isFinite(body.target?.longitude)?{latitude:Number(body.target!.latitude),longitude:Number(body.target!.longitude),name:body.destination.trim()}:await geocode(body.destination);if(!target)return json({error:'Destination not found.'},404);stops=[target];}
+    const target=stops[stops.length-1];const routePath=[body.origin,...stops].map(point=>`${point.longitude},${point.latitude}`).join(';');
+    const routeUrl=`https://router.project-osrm.org/route/v1/driving/${routePath}?overview=full&geometries=geojson&steps=false`;
     const routed=await fetch(routeUrl); const route=await routed.json<{routes?:Array<{distance:number;duration:number;geometry:{coordinates:number[][]}}>}>();
     if(!route.routes?.[0]) return json({error:'No drivable route found.'},404);
-    return json({destination:target,distanceKm:route.routes[0].distance/1000,durationMinutes:route.routes[0].duration/60,coordinates:route.routes[0].geometry.coordinates.map(([longitude,latitude])=>({latitude,longitude}))});
+    return json({destination:target,stops,distanceKm:route.routes[0].distance/1000,durationMinutes:route.routes[0].duration/60,coordinates:route.routes[0].geometry.coordinates.map(([longitude,latitude])=>({latitude,longitude}))});
+  }
+
+  if(path==='route-places'&&method==='POST'){
+    const body=await request.json<{category?:string;coordinates?:Array<{latitude:number;longitude:number}>}>();const category=body.category||'fuel',coordinates=(body.coordinates||[]).filter(point=>Number.isFinite(point.latitude)&&Number.isFinite(point.longitude));if(coordinates.length<2)return json({error:'Create a route before searching along it.'},400);
+    const selectors:Record<string,string>={fuel:'["amenity"="fuel"]',food:'["amenity"~"^(restaurant|fast_food|cafe)$"]',parking:'["amenity"="parking"]',service:'["shop"~"^(car_repair|car_parts|tyres)$"]'};if(!selectors[category])return json({error:'Unsupported stop category.'},400);
+    const sampleIndexes=[.2,.5,.8].map(ratio=>Math.min(coordinates.length-1,Math.floor((coordinates.length-1)*ratio)));const clauses=sampleIndexes.map(index=>`nwr${selectors[category]}(around:6000,${coordinates[index].latitude},${coordinates[index].longitude});`).join('');const query=`[out:json][timeout:15];(${clauses});out center 30;`;
+    const response=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':'ApexUGR/1.0 (https://apex-ugr.pages.dev)'},body:`data=${encodeURIComponent(query)}`});if(!response.ok)return json({error:'Along-route search is temporarily unavailable.'},502);
+    const data=await response.json<{elements?:Array<{id:number;lat?:number;lon?:number;center?:{lat:number;lon:number};tags?:Record<string,string>}>}>();const places=(data.elements||[]).map(item=>({id:`osm-${item.id}`,name:item.tags?.name||item.tags?.brand||`${category.toUpperCase()} STOP`,latitude:Number(item.lat??item.center?.lat),longitude:Number(item.lon??item.center?.lon),type:category})).filter(item=>Number.isFinite(item.latitude)&&Number.isFinite(item.longitude));const unique=new Map<string,typeof places[number]>();for(const place of places){const key=`${place.name}-${place.latitude.toFixed(4)}-${place.longitude.toFixed(4)}`;if(!unique.has(key))unique.set(key,place);}return json({places:[...unique.values()].slice(0,20)});
   }
 
   return json({ error: 'Not found.' }, 404);
