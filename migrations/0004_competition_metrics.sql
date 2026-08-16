@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN top_speed_kph REAL NOT NULL DEFAULT 0;

@@ -6,7 +6,7 @@ import { cloudflareApi } from '../../config/cloudflareApi';
 const LOCATION_KEY='apex.last-location';
 
 export type LiveCoordinate={latitude:number;longitude:number;accuracy:number|null;altitude:number|null;heading:number;speedKph:number;timestamp:number};
-export type LiveDriver={id:string;userId:string;alias:string;avatarUrl:string|null;vehicle:string|null;latitude:number;longitude:number;heading:number;speedKph:number;driveMode:boolean;cruiseId:string|null;updatedAt:string;mystery:boolean;tier:'Bronze'|'Silver'|'Master'|'Platinum';record:string};
+export type LiveDriver={id:string;userId:string;alias:string;avatarUrl:string|null;vehicle:string|null;latitude:number;longitude:number;heading:number;speedKph:number;driveMode:boolean;cruiseId:string|null;updatedAt:string;mystery:boolean;isLive:boolean;tier:'Bronze'|'Silver'|'Master'|'Platinum';record:string};
 export type LiveEvent={id:string;title:string;latitude:number;longitude:number;radiusM:number;attendees:number;startTime:string;locationName:string};
 export type LiveCruise={id:string;title:string;status:string;memberCount:number};
 export type LiveRoute={destination:string;destinationLatitude:number;destinationLongitude:number;distanceKm:number;durationMinutes:number;coordinates:Array<{latitude:number;longitude:number}>};
@@ -57,7 +57,7 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
   refreshNetwork:async()=>{
     if(!get()._userId)return;
     try{const data=await cloudflareApi.request<{drivers:any[];events:any[];cruises:any[]}>('/api/network');set({
-      drivers:data.drivers.map(row=>({id:row.user_id,userId:row.user_id,alias:row.username||'UNKNOWN',avatarUrl:row.avatar_url||null,vehicle:row.make?`${row.year} ${row.make} ${row.model}`:null,latitude:Number(row.latitude),longitude:Number(row.longitude),heading:Number(row.heading||0),speedKph:Number(row.speed_kph||0),driveMode:Boolean(row.drive_mode),cruiseId:row.cruise_id||null,updatedAt:row.updated_at,mystery:row.privacy_mode==='meet_only',tier:['Bronze','Silver','Master','Platinum'].includes(row.tier)?row.tier:'Bronze',record:`${Number(row.wins||0)}–${Number(row.losses||0)}`})),
+      drivers:data.drivers.map(row=>({id:row.user_id,userId:row.user_id,alias:row.username||'UNKNOWN',avatarUrl:row.avatar_url||null,vehicle:row.make?`${row.year} ${row.make} ${row.model}`:null,latitude:Number(row.latitude),longitude:Number(row.longitude),heading:Number(row.heading||0),speedKph:Number(row.speed_kph||0),driveMode:Boolean(row.drive_mode),cruiseId:row.cruise_id||null,updatedAt:row.updated_at,mystery:row.privacy_mode==='meet_only',isLive:Boolean(row.is_live),tier:['Bronze','Silver','Master','Platinum'].includes(row.tier)?row.tier:'Bronze',record:`${Number(row.wins||0)}–${Number(row.losses||0)}`})),
       events:data.events.map(row=>({id:row.id,title:row.title,latitude:Number(row.latitude),longitude:Number(row.longitude),radiusM:Number(row.radius_m||250),attendees:Number(row.attendees||0),startTime:row.starts_at,locationName:row.location_name})),
       cruises:data.cruises.map(row=>({id:row.id,title:row.title,status:row.status,memberCount:Number(row.member_count||0)})),error:null});
     }catch(error){set({networkStatus:'error',error:error instanceof Error?error.message:'Network refresh failed'});}

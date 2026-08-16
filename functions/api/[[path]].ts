@@ -118,7 +118,9 @@ async function vehicleCatalog(year: string | null, make: string | null) {
   if(make){
     const url=`https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMakeYear/make/${encodeURIComponent(make)}/modelyear/${encodeURIComponent(year||String(new Date().getFullYear()))}?format=json`;
     const response=await fetch(url); const data=await response.json<{Results?:Array<{Model_Name:string}>}>();
-    return {models:[...new Set((data.Results||[]).map(row=>row.Model_Name).filter(Boolean))].sort()};
+    let models=[...new Set((data.Results||[]).map(row=>row.Model_Name).filter(Boolean))].sort();
+    if(!models.length){const fallback=await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMake/${encodeURIComponent(make)}?format=json`);const fallbackData=await fallback.json<{Results?:Array<{Model_Name:string}>}>();models=[...new Set((fallbackData.Results||[]).map(row=>row.Model_Name).filter(Boolean))].sort();}
+    return {models};
   }
   const response=await fetch('https://vpic.nhtsa.dot.gov/api/vehicles/GetAllMakes?format=json');
   const data=await response.json<{Results?:Array<{Make_Name:string}>}>();
@@ -201,7 +203,7 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === 'network' && method === 'GET') {
     const now = new Date().toISOString();
     const [drivers, events, cruises] = await Promise.all([
-      env.DB.prepare(`SELECT l.*,u.username,u.avatar_url,u.privacy_mode,u.tier,u.wins,u.losses,v.year,v.make,v.model FROM driver_locations l JOIN users u ON u.id=l.user_id LEFT JOIN vehicles v ON v.id=l.vehicle_id WHERE l.expires_at>? AND l.user_id<>?`).bind(now,user.id).all(),
+      env.DB.prepare(`SELECT l.*,u.username,u.avatar_url,u.privacy_mode,u.tier,u.wins,u.losses,v.year,v.make,v.model,CASE WHEN l.expires_at>? THEN 1 ELSE 0 END is_live FROM driver_locations l JOIN users u ON u.id=l.user_id LEFT JOIN vehicles v ON v.id=l.vehicle_id WHERE l.user_id<>? ORDER BY is_live DESC,l.updated_at DESC LIMIT 500`).bind(now,user.id).all(),
       env.DB.prepare('SELECT * FROM events WHERE ends_at IS NULL OR ends_at>? ORDER BY starts_at').bind(now).all(),
       env.DB.prepare("SELECT * FROM cruises WHERE status IN ('scheduled','live') ORDER BY starts_at").all(),
     ]);
@@ -219,6 +221,7 @@ async function handle(request: Request, env: Env, path: string) {
     await env.DB.prepare(`INSERT INTO driver_locations(user_id,vehicle_id,latitude,longitude,accuracy_m,altitude_m,speed_kph,heading,drive_mode,cruise_id,expires_at,updated_at)
       VALUES(?,COALESCE(?,(SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1)),?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,altitude_m=excluded.altitude_m,speed_kph=excluded.speed_kph,heading=excluded.heading,drive_mode=excluded.drive_mode,cruise_id=excluded.cruise_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`)
       .bind(user.id,body.vehicleId||null,user.id,Number(body.latitude),Number(body.longitude),body.accuracy??null,body.altitude??null,body.speedKph||0,body.heading||0,body.driveMode?1:0,body.cruiseId||null,expires).run();
+    await env.DB.prepare('UPDATE users SET top_speed_kph=MAX(top_speed_kph,?) WHERE id=?').bind(Math.max(0,Number(body.speedKph)||0),user.id).run();
     return json({ success: true });
   }
 
@@ -255,7 +258,7 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   if (path === 'leaderboard' && method === 'GET') {
-    const rows=await env.DB.prepare(`SELECT id,username,avatar_url,tier,points,wins,reputation,(wins+losses) entered FROM users ORDER BY points DESC,wins DESC,reputation DESC,created_at ASC LIMIT 100`).all();
+    const rows=await env.DB.prepare(`SELECT id,username,avatar_url,tier,points,wins,losses,reputation,credits,top_speed_kph,(wins+losses) entered FROM users ORDER BY points DESC,wins DESC,reputation DESC,created_at ASC LIMIT 250`).all();
     return json({ rankings: rows.results });
   }
 

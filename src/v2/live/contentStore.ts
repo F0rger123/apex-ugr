@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { cloudflareApi } from '../../config/cloudflareApi';
 
 export type LivePost = { id:string; userId:string; alias:string; avatarUrl:string|null; mediaUrl:string; videoUrl:string|null; caption:string; likes:number; comments:number; liked:boolean; saved:boolean; createdAt:string };
-export type Ranking = { id:string; alias:string; avatarUrl:string|null; tier:string; points:number; wins:number; entered:number; topSpeed:number; reputation:number };
+export type Ranking = { id:string; alias:string; avatarUrl:string|null; tier:string; points:number; wins:number; losses:number; entered:number; topSpeed:number; reputation:number; credits:number };
 export type ActiveVehicle = { id:string; nickname:string; year:number; make:string; model:string; trim:string|null; engine:string; drivetrain:string; horsepower:number; color:string; photoUrl:string|null };
 export type ProviderProduct = { id:string; provider:string; title:string; imageUrl:string|null; price:number; currency:string; condition:string|null; seller:string|null; shipping:string|null; purchaseUrl:string; compatibility:string };
 export type ProviderLink = { name:string; mode:string; url?:string };
@@ -50,7 +50,7 @@ export const useContentStore=create<ContentState>((set,get)=>({
   },
   loadRankings:async()=>{
     if(!get().userId)return;
-    try{const data=await cloudflareApi.request<{rankings:any[]}>('/api/leaderboard');set({rankings:data.rankings.map(row=>({id:row.id,alias:row.username,avatarUrl:row.avatar_url||null,tier:row.tier||'Bronze',points:Number(row.points||0),wins:Number(row.wins||0),entered:Number(row.entered||0),topSpeed:0,reputation:Number(row.reputation||1000)}))});}catch(error){set({error:error instanceof Error?error.message:'Rankings failed'});}
+    try{const data=await cloudflareApi.request<{rankings:any[]}>('/api/leaderboard');set({rankings:data.rankings.map(row=>({id:row.id,alias:row.username,avatarUrl:row.avatar_url||null,tier:row.tier||'Bronze',points:Number(row.points||0),wins:Number(row.wins||0),losses:Number(row.losses||0),entered:Number(row.entered||0),topSpeed:Number(row.top_speed_kph||0),reputation:Number(row.reputation||1000),credits:Number(row.credits||0)}))});}catch(error){set({error:error instanceof Error?error.message:'Rankings failed'});}
   },
   loadPilots:async()=>{
     if(!get().userId)return;

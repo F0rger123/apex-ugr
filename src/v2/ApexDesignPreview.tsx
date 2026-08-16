@@ -46,6 +46,7 @@ import {
   LockKeyhole,
   Map,
   MapPin,
+  Maximize2,
   Medal,
   MessageCircle,
   MessagesSquare,
@@ -107,6 +108,7 @@ interface Driver {
   longitude: number;
   speedKph?: number;
   cruiseId?: string | null;
+  isLive?: boolean;
 }
 
 const tabs: { key: TabKey; label: string; icon: IconType }[] = [
@@ -144,6 +146,10 @@ function GridBackdrop() {
       <Animated.View style={[styles.scanline, { transform: [{ translateY: scan }] }]} />
     </View>
   );
+}
+
+function ApexLogo(){
+  return <View style={styles.apexLogo}><View style={styles.apexLogoOuter}><View style={styles.apexLogoInner}><Text style={styles.apexLogoLetter}>A</Text><View style={styles.apexLogoSlash}/></View></View><View style={styles.apexLogoSignal}/></View>;
 }
 
 function GlassPanel({ children, style, glow = false }: { children: React.ReactNode; style?: any; glow?: boolean }) {
@@ -309,6 +315,7 @@ function RadarMap({
   routeCoordinates,
   followRevision,
   focus,
+  fitAll,
 }: {
   location: { latitude: number; longitude: number } | null;
   mode: 'street' | 'satellite';
@@ -319,6 +326,7 @@ function RadarMap({
   routeCoordinates: Array<{ latitude: number; longitude: number }>;
   followRevision: number;
   focus: { latitude: number; longitude: number } | null;
+  fitAll: boolean;
 }) {
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -347,11 +355,11 @@ function RadarMap({
     const center = focus || location || { latitude: 20, longitude: 0 };
     const zoom = focus ? 16 : location ? 14 : 2;
     const selfMarker = location ? `L.marker([${location.latitude},${location.longitude}],{zIndexOffset:1000,icon:L.divIcon({className:'',html:'<div class="self-anchor"><i class="radar-ring r1"></i><i class="radar-ring r2"></i><i class="radar-ring r3"></i><i class="radar-sweep"></i><div class="self-dot"></div><b class="self-label">YOU</b></div>',iconSize:[180,180],iconAnchor:[90,90]})}).addTo(map);` : '';
-    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#030503}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}.driver-pin{display:flex;align-items:center;justify-content:center;background:rgba(3,6,4,.96);border:2px solid #f3f5f3;color:#b9deb0;font:900 12px monospace;border-radius:50%;box-shadow:0 0 18px rgba(255,255,255,.18),0 0 26px rgba(145,185,133,.28);width:34px;height:34px;transition:transform .22s ease;cursor:pointer}.driver-pin:hover{transform:scale(1.14)}.driver-pin.mystery{border-style:dashed}.driver-pin.cruise{box-shadow:0 0 0 7px rgba(145,185,133,.12),0 0 20px rgba(145,185,133,.58)}.self-anchor{position:relative;width:180px;height:180px;display:flex;align-items:center;justify-content:center}.self-dot{position:relative;z-index:5;width:20px;height:20px;border-radius:50%;background:#7dff69;border:3px solid #fff;box-shadow:0 0 0 7px rgba(125,255,105,.18),0 0 28px #7dff69}.self-label{position:absolute;z-index:6;top:108px;color:#fff;background:rgba(2,5,3,.88);border:1px solid rgba(255,255,255,.3);border-radius:9px;padding:3px 7px;font:900 8px monospace}.radar-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(180,224,170,.4);border-radius:50%;transform:translate(-50%,-50%)}.r1{width:72px;height:72px}.r2{width:116px;height:116px;opacity:.65}.r3{width:168px;height:168px;opacity:.36}.radar-sweep{position:absolute;left:50%;top:50%;width:84px;height:84px;transform-origin:0 0;background:conic-gradient(from -18deg,rgba(145,185,133,.34),transparent 48deg);animation:sweep 3.2s linear infinite}.event-core{width:16px;height:16px;border-radius:50%;background:#b9deb0;border:2px solid #fff;box-shadow:0 0 20px #91b985;cursor:pointer}@keyframes sweep{to{transform:rotate(360deg)}}@keyframes eventPulse{0%{stroke-opacity:.74;fill-opacity:.2}50%{stroke-opacity:.16;fill-opacity:.04}100%{stroke-opacity:.74;fill-opacity:.2}}.event-zone{animation:eventPulse 2.4s ease-in-out infinite}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.25) brightness(.43)}' : '#map{filter:saturate(.38) contrast(1.24) brightness(.43)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([${center.latitude},${center.longitude}],${zoom});L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);${selfMarker}const route=${safeRoute};if(route.length>1){L.polyline(route.map(p=>[p.latitude,p.longitude]),{color:'#dfffd7',weight:4,opacity:.9,lineCap:'round'}).addTo(map);}const drivers=${safeDrivers};drivers.forEach(d=>{const label=d.mystery?'?':d.alias.slice(0,1);const classes='driver-pin '+(d.mystery?'mystery ':'')+(d.cruiseId?'cruise':'');L.marker([d.latitude,d.longitude],{icon:L.divIcon({className:'',html:'<div class="'+classes+'">'+label+'</div>',iconSize:[38,38],iconAnchor:[19,19]})}).addTo(map).on('click',()=>{map.flyTo([d.latitude,d.longitude],16,{duration:.7});parent.postMessage({source:'apex-radar',driverId:d.id},'*')});});const events=${safeEvents};events.forEach(e=>{L.circle([e.latitude,e.longitude],{radius:e.radiusM,color:'#b9deb0',weight:2,fillColor:'#91b985',fillOpacity:.12,className:'event-zone'}).addTo(map).on('click',()=>{map.flyTo([e.latitude,e.longitude],15,{duration:.7});parent.postMessage({source:'apex-radar',eventId:e.id},'*')}).bindTooltip(e.title);L.marker([e.latitude,e.longitude],{icon:L.divIcon({className:'',html:'<div class="event-core"></div>',iconSize:[20,20],iconAnchor:[10,10]})}).addTo(map).on('click',()=>{map.flyTo([e.latitude,e.longitude],15,{duration:.7});parent.postMessage({source:'apex-radar',eventId:e.id},'*')});});</script></body></html>`;
+    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#030503}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}.driver-pin{display:flex;align-items:center;justify-content:center;background:rgba(3,6,4,.96);border:2px solid #f3f5f3;color:#b9deb0;font:900 12px monospace;border-radius:50%;box-shadow:0 0 18px rgba(255,255,255,.18),0 0 26px rgba(145,185,133,.28);width:34px;height:34px;transition:transform .22s ease;cursor:pointer}.driver-pin:hover{transform:scale(1.14)}.driver-pin.mystery{border-style:dashed}.driver-pin.stale{opacity:.56;border-color:#858e87;box-shadow:none}.driver-pin.cruise{box-shadow:0 0 0 7px rgba(145,185,133,.12),0 0 20px rgba(145,185,133,.58)}.self-anchor{position:relative;width:180px;height:180px;display:flex;align-items:center;justify-content:center}.self-dot{position:relative;z-index:5;width:20px;height:20px;border-radius:50%;background:#7dff69;border:3px solid #fff;box-shadow:0 0 0 7px rgba(125,255,105,.18),0 0 28px #7dff69}.self-label{position:absolute;z-index:6;top:108px;color:#fff;background:rgba(2,5,3,.88);border:1px solid rgba(255,255,255,.3);border-radius:9px;padding:3px 7px;font:900 8px monospace}.radar-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(180,224,170,.4);border-radius:50%;transform:translate(-50%,-50%)}.r1{width:72px;height:72px}.r2{width:116px;height:116px;opacity:.65}.r3{width:168px;height:168px;opacity:.36}.radar-sweep{position:absolute;left:50%;top:50%;width:84px;height:84px;transform-origin:0 0;background:conic-gradient(from -18deg,rgba(145,185,133,.34),transparent 48deg);animation:sweep 3.2s linear infinite}.event-core{width:16px;height:16px;border-radius:50%;background:#b9deb0;border:2px solid #fff;box-shadow:0 0 20px #91b985;cursor:pointer}@keyframes sweep{to{transform:rotate(360deg)}}@keyframes eventPulse{0%{stroke-opacity:.74;fill-opacity:.2}50%{stroke-opacity:.16;fill-opacity:.04}100%{stroke-opacity:.74;fill-opacity:.2}}.event-zone{animation:eventPulse 2.4s ease-in-out infinite}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.25) brightness(.43)}' : '#map{filter:saturate(.38) contrast(1.24) brightness(.43)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([${center.latitude},${center.longitude}],${zoom});L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);${selfMarker}const route=${safeRoute};if(route.length>1){L.polyline(route.map(p=>[p.latitude,p.longitude]),{color:'#dfffd7',weight:4,opacity:.9,lineCap:'round'}).addTo(map);}const drivers=${safeDrivers};drivers.forEach(d=>{const label=d.mystery?'?':d.alias.slice(0,1);const classes='driver-pin '+(d.mystery?'mystery ':'')+(d.cruiseId?'cruise ':'')+(!d.isLive?'stale':'');L.marker([d.latitude,d.longitude],{icon:L.divIcon({className:'',html:'<div class="'+classes+'">'+label+'</div>',iconSize:[38,38],iconAnchor:[19,19]})}).addTo(map).on('click',()=>{map.flyTo([d.latitude,d.longitude],16,{duration:.7});parent.postMessage({source:'apex-radar',driverId:d.id},'*')});});const events=${safeEvents};events.forEach(e=>{L.circle([e.latitude,e.longitude],{radius:e.radiusM,color:'#b9deb0',weight:2,fillColor:'#91b985',fillOpacity:.12,className:'event-zone'}).addTo(map).on('click',()=>{map.flyTo([e.latitude,e.longitude],15,{duration:.7});parent.postMessage({source:'apex-radar',eventId:e.id},'*')}).bindTooltip(e.title);L.marker([e.latitude,e.longitude],{icon:L.divIcon({className:'',html:'<div class="event-core"></div>',iconSize:[20,20],iconAnchor:[10,10]})}).addTo(map).on('click',()=>{map.flyTo([e.latitude,e.longitude],15,{duration:.7});parent.postMessage({source:'apex-radar',eventId:e.id},'*')});});const allPoints=[...drivers.map(d=>[d.latitude,d.longitude])${location ? `,[${location.latitude},${location.longitude}]` : ''}];if(${fitAll?'true':'false'}&&allPoints.length){map.fitBounds(allPoints,{padding:[42,42],maxZoom:12});}</script></body></html>`;
     return (
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
-          key: `${mode}-${followRevision}`,
+          key: `${mode}-${followRevision}-${fitAll}`,
           srcDoc: mapDocument,
           title: 'Apex Radar',
           style: { width: '100%', height: '100%', border: 0 },
@@ -360,6 +368,9 @@ function RadarMap({
     );
   }
 
+  const allCoordinates=[...(location?[location]:[]),...drivers];
+  const latitudes=allCoordinates.map(point=>point.latitude); const longitudes=allCoordinates.map(point=>point.longitude);
+  const nativeCenter=fitAll&&allCoordinates.length?{latitude:(Math.min(...latitudes)+Math.max(...latitudes))/2,longitude:(Math.min(...longitudes)+Math.max(...longitudes))/2,latitudeDelta:Math.max(.04,(Math.max(...latitudes)-Math.min(...latitudes))*1.35),longitudeDelta:Math.max(.04,(Math.max(...longitudes)-Math.min(...longitudes))*1.35)}:{ latitude: focus?.latitude || location?.latitude || 20, longitude: focus?.longitude || location?.longitude || 0, latitudeDelta: focus ? 0.012 : location ? 0.04 : 90, longitudeDelta: focus ? 0.012 : location ? 0.04 : 90 };
   return (
     <View style={styles.mapFrame}>
       <NativeMap
@@ -367,14 +378,14 @@ function RadarMap({
         style={StyleSheet.absoluteFill}
         mapType={mode === 'satellite' ? 'satellite' : 'standard'}
         customMapStyle={darkMapStyle}
-        initialRegion={{ latitude: focus?.latitude || location?.latitude || 20, longitude: focus?.longitude || location?.longitude || 0, latitudeDelta: focus ? 0.012 : location ? 0.04 : 90, longitudeDelta: focus ? 0.012 : location ? 0.04 : 90 }}
+        initialRegion={nativeCenter}
         showsUserLocation={false}
         showsMyLocationButton={false}
       >
         {location ? <NativeMarker coordinate={{ latitude: location.latitude, longitude: location.longitude }} anchor={{ x: .5, y: .5 }}><View style={styles.nativeSelfPin}><View style={styles.nativeSelfCore} /></View></NativeMarker> : null}
         {drivers.map(driver => (
           <NativeMarker key={driver.id} coordinate={{ latitude: driver.latitude, longitude: driver.longitude }} onPress={() => onSelect(driver)}>
-            <View style={[styles.nativePin, driver.mystery && styles.mysteryPin]}>
+            <View style={[styles.nativePin, driver.mystery && styles.mysteryPin, !driver.isLive && styles.staleNativePin]}>
               <Text style={styles.nativePinText}>{driver.mystery ? '?' : driver.alias.slice(0, 1)}</Text>
             </View>
           </NativeMarker>
@@ -414,6 +425,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [mode, setMode] = useState<'street' | 'satellite'>('street');
   const [filter, setFilter] = useState<'drivers' | 'events' | 'crews'>('drivers');
   const [followRevision, setFollowRevision] = useState(0);
+  const [fitAll, setFitAll] = useState(false);
   const [routeOpen, setRouteOpen] = useState(false);
   const [destination, setDestination] = useState('');
   const [routeLoading, setRouteLoading] = useState(false);
@@ -421,7 +433,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const drivers = liveDrivers.map((driver: LiveDriver): Driver => ({
     id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record,
     rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery,
-    latitude: driver.latitude, longitude: driver.longitude, speedKph: driver.speedKph, cruiseId: driver.cruiseId,
+    latitude: driver.latitude, longitude: driver.longitude, speedKph: driver.speedKph, cruiseId: driver.cruiseId, isLive: driver.isLive,
   }));
   useEffect(() => { if (!location) lockLocation(); }, []);
   useEffect(() => { const timer=setTimeout(()=>void suggestAddresses(destination),280); return()=>clearTimeout(timer); }, [destination]);
@@ -430,6 +442,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
     await lockLocation();
     setSelected(null);
     setSelectedEvent(null);
+    setFitAll(false);
     setFollowRevision(value => value + 1);
   };
   const submitRoute = async (target = destination) => {
@@ -453,7 +466,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
 
   return (
     <View style={styles.radarScreen}>
-      <RadarMap location={location} mode={mode} onSelect={driver => { setSelected(driver); setSelectedEvent(null); setFollowRevision(value => value + 1); }} onSelectEvent={event => { setSelectedEvent(event); setSelected(null); setFollowRevision(value => value + 1); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} followRevision={followRevision} focus={selected ? { latitude: selected.latitude, longitude: selected.longitude } : selectedEvent ? { latitude: selectedEvent.latitude, longitude: selectedEvent.longitude } : null} />
+      <RadarMap location={location} mode={mode} onSelect={driver => { setFitAll(false); setSelected(driver); setSelectedEvent(null); setFollowRevision(value => value + 1); }} onSelectEvent={event => { setFitAll(false); setSelectedEvent(event); setSelected(null); setFollowRevision(value => value + 1); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} followRevision={followRevision} focus={selected ? { latitude: selected.latitude, longitude: selected.longitude } : selectedEvent ? { latitude: selectedEvent.latitude, longitude: selectedEvent.longitude } : null} fitAll={fitAll} />
       <View style={styles.radarTopControls}>
         <View style={styles.segmentedControl}>
           {(['street', 'satellite'] as const).map(item => (
@@ -464,7 +477,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
         </View>
         <Pressable onPress={recenter} style={styles.locateButton}><Crosshair size={16} color={accent} /><Text style={styles.locateText}>{location ? 'CENTER ME' : 'LOCK ON'}</Text></Pressable>
       </View>
-      <View style={styles.networkPill}><View style={styles.liveDot} /><Text style={styles.networkPillText}>{drivers.length} DRIVERS / {events.length} EVENTS / {cruises.length} CRUISES</Text></View>
+      <Pressable onPress={()=>{setSelected(null);setSelectedEvent(null);setFitAll(true);setFollowRevision(value=>value+1);}} style={styles.networkPill}><Maximize2 size={13} color={accent}/><Text style={styles.networkPillText}>ALL PILOTS · {drivers.length} LOCATIONS / {drivers.filter(item=>item.isLive).length} LIVE</Text></Pressable>
       <View style={styles.radarFilters}>
         {(['drivers', 'events', 'crews'] as const).map(item => (
           <Pressable key={item} onPress={() => setFilter(item)} style={[styles.radarFilter, filter === item && styles.radarFilterActive]}>
@@ -477,7 +490,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
         <GlassPanel style={styles.driverSheet} glow>
           <View style={styles.driverSheetHeader}>
             <View style={[styles.driverAvatar, selected.mystery && styles.mysteryAvatar]}><Text style={styles.driverAvatarText}>{selected.mystery ? '?' : selected.alias.slice(0, 2)}</Text></View>
-            <View style={styles.driverIdentity}><Text style={styles.driverAlias}>{selected.alias}</Text><Text style={styles.driverCar}>{selected.car}</Text></View>
+            <View style={styles.driverIdentity}><Text style={styles.driverAlias}>{selected.alias}</Text><Text style={styles.driverCar}>{selected.car} · {selected.isLive?'LIVE NOW':'LAST KNOWN POSITION'}</Text></View>
             <Pressable onPress={() => { setSelected(null); setFollowRevision(value => value + 1); }} style={styles.closeButton}><X size={17} color={paper} /></Pressable>
           </View>
           <View style={styles.driverStats}>
@@ -617,6 +630,30 @@ function MeetScreen() {
   return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.raceHeader}><View><Text style={styles.eyebrow}>MEET NETWORK</Text><Text style={styles.feedTitle}>CAR MEETS</Text></View><GlassButton label={creating?'CANCEL':'HOST MEET'} icon={creating?X:Plus} onPress={()=>setCreating(value=>!value)} active/></View>{creating?<GlassPanel style={styles.meetCreatePanel} glow><TextInput value={draft.title} onChangeText={value=>updateDraft('title',value)} placeholder="Meet title" placeholderTextColor={muted} style={styles.authInput}/><TextInput value={draft.location} onChangeText={value=>updateDraft('location',value)} placeholder="Primary address or place" placeholderTextColor={muted} style={styles.authInput}/><TextInput value={draft.stops} onChangeText={value=>updateDraft('stops',value)} placeholder={'Additional route stops, one per line'} placeholderTextColor={muted} multiline style={[styles.authInput,styles.meetTextArea]}/><TextInput value={draft.startsAt} onChangeText={value=>updateDraft('startsAt',value)} placeholder="YYYY-MM-DDTHH:mm" placeholderTextColor={muted} style={styles.authInput}/><TextInput value={draft.description} onChangeText={value=>updateDraft('description',value)} placeholder="Meet description" placeholderTextColor={muted} multiline style={[styles.authInput,styles.meetTextArea]}/><TextInput value={draft.rules} onChangeText={value=>updateDraft('rules',value)} placeholder="Rules, roll-in, safety, eligibility" placeholderTextColor={muted} multiline style={[styles.authInput,styles.meetTextArea]}/><GlassButton label={busy?'CREATING':'PUBLISH MEET'} icon={MapPin} onPress={()=>void createMeet()} active/></GlassPanel>:null}<SectionTitle label="OPEN MEETS" action={`${events.length} LIVE`}/>{events.map(event=><Pressable key={event.id} onPress={()=>void openMeet(event.id)} style={({pressed})=>[styles.meetCard,pressed&&styles.pressed]}><View style={styles.eventAvatar}><MapPin size={21} color={paper}/></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>{event.title.toUpperCase()}</Text><Text style={styles.commandMeta}>{event.locationName} · {event.attendees} REGISTERED · {new Date(event.startTime).toLocaleString()}</Text></View><ChevronRight size={18} color={accent}/></Pressable>)}{!events.length&&!creating?<GlassPanel style={styles.emptyState}><MapPin size={28} color={accent}/><Text style={styles.emptyTitle}>NO OPEN MEETS</Text><Text style={styles.emptyCopy}>Host the first event and register show cars, attendees, and sponsors.</Text></GlassPanel>:null}</ScrollView>;
 }
 
+type LeaderboardMode='season'|'wins'|'speed'|'reputation'|'credits';
+function LeaderboardScreen(){
+  const rankings=useContentStore(state=>state.rankings);
+  const [mode,setMode]=useState<LeaderboardMode>('season');
+  const boards:{key:LeaderboardMode;label:string;title:string;icon:IconType;value:(row:(typeof rankings)[number])=>number;format:(value:number)=>string}[]=[
+    {key:'season',label:'SEASON',title:'SEASON RP',icon:Trophy,value:row=>row.points,format:value=>`${value.toLocaleString()} RP`},
+    {key:'wins',label:'WINS',title:'RACE WINS',icon:Medal,value:row=>row.wins,format:value=>`${value} WINS`},
+    {key:'speed',label:'SPEED',title:'TOP SPEED',icon:Gauge,value:row=>row.topSpeed,format:value=>`${Math.round(value)} KPH`},
+    {key:'reputation',label:'REP',title:'REPUTATION',icon:ShieldCheck,value:row=>row.reputation,format:value=>`${value.toLocaleString()} REP`},
+    {key:'credits',label:'CREDITS',title:'CREDIT VAULT',icon:Gem,value:row=>row.credits,format:value=>`${value.toLocaleString()} ACR`},
+  ];
+  const board=boards.find(item=>item.key===mode)!;
+  const sorted=useMemo(()=>[...rankings].sort((a,b)=>board.value(b)-board.value(a)||b.points-a.points||a.alias.localeCompare(b.alias)),[rankings,mode]);
+  return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
+    <View style={styles.leaderboardHero}><View><Text style={styles.eyebrow}>APEX COMPETITION NETWORK</Text><Text style={styles.feedTitle}>LEADERBOARDS</Text><Text style={styles.leaderboardHeroMeta}>VERIFIED BOARDS · LIVE SEASON</Text></View><View style={styles.leaderboardHeroIcon}><board.icon size={30} color={accent}/></View></View>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.boardTabs}>{boards.map(item=><Pressable key={item.key} onPress={()=>setMode(item.key)} style={[styles.boardTab,mode===item.key&&styles.boardTabActive]}><item.icon size={15} color={mode===item.key?accent:muted}/><Text style={[styles.boardTabText,mode===item.key&&styles.boardTabTextActive]}>{item.label}</Text></Pressable>)}</ScrollView>
+    <View style={styles.boardIdentity}><Text style={styles.identityLabel}>ACTIVE BOARD</Text><Text style={styles.boardIdentityTitle}>{board.title}</Text><Text style={styles.commandMeta}>{mode==='speed'?'PERSONAL BESTS CAPTURED IN GPS DRIVE MODE':mode==='reputation'?'ACCEPTANCE, COMPLETION, AND NETWORK TRUST':mode==='wins'?'VERIFIED HEAD-TO-HEAD RESULTS':mode==='credits'?'CURRENT VIRTUAL CREDIT BALANCE':'RACE POINTS ACROSS THE ACTIVE SEASON'}</Text></View>
+    {sorted.length?<View style={styles.podium}>{[1,0,2].map(position=>{const row=sorted[position];if(!row)return null;return <View key={row.id} style={[styles.podiumPilot,position===0&&styles.podiumFirst]}><Text style={styles.podiumPlace}>#{position+1}</Text><View style={styles.podiumAvatar}>{row.avatarUrl?<Image source={{uri:row.avatarUrl}} style={styles.opponentPhoto}/>:<Text style={styles.opponentAvatarText}>{row.alias.slice(0,1)}</Text>}</View><Text numberOfLines={1} style={styles.podiumName}>{row.alias.toUpperCase()}</Text><Text style={styles.podiumPoints}>{board.format(board.value(row))}</Text></View>;})}</View>:null}
+    <SectionTitle label="BOARD STANDINGS" action={`${sorted.length} PILOTS`}/>
+    <View style={styles.standingsTable}>{sorted.map((row,index)=><View key={row.id} style={[styles.leaderboardRow,index<3&&styles.leaderboardRowTop]}><Text style={styles.leaderboardRank}>{String(index+1).padStart(2,'0')}</Text><View style={styles.podiumAvatarSmall}>{row.avatarUrl?<Image source={{uri:row.avatarUrl}} style={styles.opponentPhoto}/>:<Text style={styles.opponentAvatarText}>{row.alias.slice(0,1)}</Text>}</View><View style={styles.commandCopy}><Text style={styles.utilityText}>{row.alias.toUpperCase()}</Text><Text style={styles.commandMeta}>{row.tier.toUpperCase()} · {row.wins}–{row.losses} · REP {row.reputation}</Text></View><Text style={styles.leaderboardPoints}>{board.format(board.value(row))}</Text></View>)}</View>
+    {!sorted.length?<GlassPanel style={styles.emptyState}><Trophy size={28} color={accent}/><Text style={styles.emptyTitle}>BOARD AWAITING RESULTS</Text><Text style={styles.emptyCopy}>Verified pilot activity will populate this leaderboard.</Text></GlassPanel>:null}
+  </ScrollView>;
+}
+
 function UtilityScreen({ kind }: { kind: 'meets' | 'messages' | 'leaderboard' }) {
   const rankings = useContentStore(state => state.rankings);
   const events = useLiveNetworkStore(state => state.events);
@@ -646,8 +683,9 @@ function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [showAdd, setShowAdd] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [vehicleDraft, setVehicleDraft] = useState({ nickname: '', year: String(new Date().getFullYear()), make: '', model: '', trim: 'Base', engine: 'Stock', drivetrain: 'AWD', horsepower: '300', color: 'Black' });
-  const [makes,setMakes]=useState<string[]>(['Acura','Audi','BMW','Chevrolet','Dodge','Ford','Honda','Hyundai','Lexus','Mercedes-Benz','Mitsubishi','Nissan','Porsche','Subaru','Toyota','Volkswagen']);
+  const [makes,setMakes]=useState<string[]>(['Acura','Alfa Romeo','Aston Martin','Audi','Bentley','BMW','Buick','Cadillac','Chevrolet','Chrysler','Dodge','Ferrari','Ford','Genesis','GMC','Honda','Hyundai','Infiniti','Jaguar','Jeep','Kia','Lamborghini','Land Rover','Lexus','Lotus','Maserati','Mazda','McLaren','Mercedes-Benz','Mini','Mitsubishi','Nissan','Porsche','Ram','Subaru','Tesla','Toyota','Volkswagen','Volvo']);
   const [models,setModels]=useState<string[]>([]);
+  const colorOptions=[{name:'Black',hex:'#090B0A'},{name:'White',hex:'#F4F5F2'},{name:'Pearl White',hex:'#E8ECE6'},{name:'Silver',hex:'#AEB4B2'},{name:'Gunmetal',hex:'#515857'},{name:'Gray',hex:'#747A78'},{name:'Red',hex:'#B5242D'},{name:'Burgundy',hex:'#641E2B'},{name:'Blue',hex:'#245EB5'},{name:'Navy',hex:'#142A52'},{name:'Green',hex:'#276143'},{name:'British Racing Green',hex:'#173D2A'},{name:'Yellow',hex:'#E4C62F'},{name:'Orange',hex:'#D36A25'},{name:'Purple',hex:'#633C88'},{name:'Bronze',hex:'#8C6844'},{name:'Gold',hex:'#B69A4D'},{name:'Tan',hex:'#B69E7D'},{name:'Pink',hex:'#D78BA7'},{name:'Custom',hex:'transparent'}];
   const car = vehicles.find(vehicle => vehicle.id === activeVehicleId);
   const updateVehicle = (key: keyof typeof vehicleDraft, value: string) => setVehicleDraft(current => ({ ...current, [key]: value }));
   useEffect(()=>{void cloudflareApi.request<{makes:string[]}>('/api/vehicle-catalog').then(data=>setMakes(data.makes||[])).catch(()=>undefined);},[]);
@@ -673,12 +711,12 @@ function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
       </View>
       {(showAdd || !car) ? <GlassPanel style={styles.vehicleForm} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>VERIFIED FITMENT IDENTITY</Text><Text style={styles.notificationTitle}>ADD VEHICLE</Text></View>{car ? <Pressable onPress={() => setShowAdd(false)} style={styles.closeButton}><X size={17} color={paper} /></Pressable> : null}</View><Pressable onPress={pickVehiclePhoto} style={styles.vehiclePhotoPicker}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.vehiclePhotoPreview} /> : <><CarFront size={32} color={accent} /><Text style={styles.composerHint}>UPLOAD YOUR ACTUAL CAR PHOTO</Text></>}</Pressable>
         <View style={styles.fitmentStep}><Text style={styles.fitmentStepNo}>01</Text><View style={styles.commandCopy}><Text style={styles.commandTitle}>VEHICLE IDENTITY</Text><Text style={styles.commandMeta}>NHTSA make and model catalog</Text></View></View>
-        <View style={styles.vehicleFormGrid}><View style={styles.catalogField}><Text style={styles.identityLabel}>YEAR</Text><TextInput value={vehicleDraft.year} onChangeText={value=>updateVehicle('year',value.replace(/\D/g,'').slice(0,4))} keyboardType="numeric" placeholder="YEAR" placeholderTextColor={muted} style={styles.authInput}/></View><CatalogField label="MAKE" value={vehicleDraft.make} options={makes} onChange={value=>setVehicleDraft(current=>({...current,make:value,model:''}))}/><CatalogField label="MODEL" value={vehicleDraft.model} options={models} onChange={value=>updateVehicle('model',value)} placeholder={vehicleDraft.make?'SELECT MODEL':'SELECT MAKE FIRST'}/><CatalogField label="TRIM" value={vehicleDraft.trim} options={['Base','Premium','Sport','Touring','Limited','Performance','Track','NISMO','Type R','GT','S','SE','SEL']} onChange={value=>updateVehicle('trim',value)}/></View>
+        <View style={styles.vehicleFormGrid}><View style={styles.catalogField}><Text style={styles.identityLabel}>YEAR</Text><TextInput value={vehicleDraft.year} onChangeText={value=>updateVehicle('year',value.replace(/\D/g,'').slice(0,4))} keyboardType="numeric" placeholder="YEAR" placeholderTextColor={muted} style={styles.authInput}/></View><CatalogField label={`MAKE · ${makes.length} OPTIONS`} value={vehicleDraft.make} options={makes} onChange={value=>setVehicleDraft(current=>({...current,make:value,model:''}))}/><CatalogField label={`MODEL · ${models.length||'—'} OPTIONS`} value={vehicleDraft.model} options={models} onChange={value=>updateVehicle('model',value)} placeholder={vehicleDraft.make?'SELECT MODEL':'SELECT MAKE FIRST'}/><CatalogField label="TRIM" value={vehicleDraft.trim} options={['Base','Standard','Premium','Luxury','Sport','Touring','Limited','Performance','Competition','Track','NISMO','Type R','Type S','GT','GT-Line','GTS','RS','ST','S','SE','SEL','SL','SV','Platinum']} onChange={value=>updateVehicle('trim',value)}/></View>
         <View style={styles.fitmentStep}><Text style={styles.fitmentStepNo}>02</Text><View style={styles.commandCopy}><Text style={styles.commandTitle}>POWERTRAIN</Text><Text style={styles.commandMeta}>Used for marketplace fitment</Text></View></View>
-        <View style={styles.choiceSection}><Text style={styles.identityLabel}>ENGINE</Text><View style={styles.choiceRail}>{['Stock','I4','I6','V6','V8','Electric','Hybrid'].map(item=><Pressable key={item} onPress={()=>updateVehicle('engine',item)} style={[styles.choiceChip,vehicleDraft.engine===item&&styles.choiceChipActive]}><Text style={[styles.choiceChipText,vehicleDraft.engine===item&&styles.choiceChipTextActive]}>{item.toUpperCase()}</Text></Pressable>)}</View></View>
-        <View style={styles.choiceSection}><Text style={styles.identityLabel}>DRIVETRAIN</Text><View style={styles.choiceRail}>{['FWD','RWD','AWD','4WD'].map(item=><Pressable key={item} onPress={()=>updateVehicle('drivetrain',item)} style={[styles.choiceChip,vehicleDraft.drivetrain===item&&styles.choiceChipActive]}><Text style={[styles.choiceChipText,vehicleDraft.drivetrain===item&&styles.choiceChipTextActive]}>{item}</Text></Pressable>)}</View></View>
+        <View style={styles.choiceSection}><Text style={styles.identityLabel}>ENGINE / POWER UNIT</Text><View style={styles.choiceRail}>{['Stock','I3','I4','I5','I6','Flat-4','Flat-6','V6','V8','V10','V12','W12','Rotary','Diesel','Hybrid','Plug-in Hybrid','Single Motor EV','Dual Motor EV','Tri Motor EV'].map(item=><Pressable key={item} onPress={()=>updateVehicle('engine',item)} style={[styles.choiceChip,vehicleDraft.engine===item&&styles.choiceChipActive]}><Text style={[styles.choiceChipText,vehicleDraft.engine===item&&styles.choiceChipTextActive]}>{item.toUpperCase()}</Text></Pressable>)}</View></View>
+        <View style={styles.choiceSection}><Text style={styles.identityLabel}>DRIVETRAIN</Text><View style={styles.choiceRail}>{['FWD','RWD','AWD','4WD','4x4','Dual Motor AWD','Tri Motor AWD'].map(item=><Pressable key={item} onPress={()=>updateVehicle('drivetrain',item)} style={[styles.choiceChip,vehicleDraft.drivetrain===item&&styles.choiceChipActive]}><Text style={[styles.choiceChipText,vehicleDraft.drivetrain===item&&styles.choiceChipTextActive]}>{item}</Text></Pressable>)}</View></View>
         <View style={styles.horsepowerPanel}><View style={styles.horsepowerTop}><View><Text style={styles.identityLabel}>HORSEPOWER</Text><Text style={styles.horsepowerHint}>CURRENT WHEEL OR CRANK ESTIMATE</Text></View><Text style={styles.horsepowerValue}>{vehicleDraft.horsepower} HP</Text></View><Slider minimumValue={50} maximumValue={2000} step={10} value={Number(vehicleDraft.horsepower)||300} onValueChange={value=>updateVehicle('horsepower',String(value))} minimumTrackTintColor={accent} maximumTrackTintColor="rgba(255,255,255,.16)" thumbTintColor={paper}/><View style={styles.sliderLabels}><Text style={styles.commandMeta}>50</Text><Text style={styles.commandMeta}>2,000 HP</Text></View></View>
-        <View style={styles.vehicleFormGrid}><CatalogField label="COLOR" value={vehicleDraft.color} options={['Black','White','Silver','Gray','Red','Blue','Green','Yellow','Orange','Purple','Bronze']} onChange={value=>updateVehicle('color',value)}/><View style={styles.catalogField}><Text style={styles.identityLabel}>GARAGE NAME</Text><TextInput value={vehicleDraft.nickname} onChangeText={value=>updateVehicle('nickname',value)} placeholder="OPTIONAL NICKNAME" placeholderTextColor={muted} style={styles.authInput}/></View></View>
+        <View style={styles.choiceSection}><Text style={styles.identityLabel}>COLOR</Text><View style={styles.colorGrid}>{colorOptions.map(item=><Pressable key={item.name} onPress={()=>updateVehicle('color',item.name)} style={[styles.colorChoice,vehicleDraft.color===item.name&&styles.colorChoiceActive]}><View style={[styles.colorSwatch,{backgroundColor:item.hex},item.name==='Custom'&&styles.customSwatch]}/><Text style={styles.colorChoiceText}>{item.name.toUpperCase()}</Text></Pressable>)}</View></View><View style={styles.catalogFieldWide}><Text style={styles.identityLabel}>GARAGE NAME</Text><TextInput value={vehicleDraft.nickname} onChangeText={value=>updateVehicle('nickname',value)} placeholder="OPTIONAL NICKNAME" placeholderTextColor={muted} style={styles.authInput}/></View>
         {error ? <Text style={styles.networkError}>{error}</Text> : null}<GlassButton label={loading ? 'UPLOADING BUILD' : 'ADD TO GARAGE'} icon={Plus} onPress={() => void saveVehicle()} active /></GlassPanel> : <>
       <View style={styles.garageHero}>{car.photoUrl ? <Image source={{ uri: car.photoUrl }} style={styles.garageImage} /> : <View style={[styles.garageImage, styles.productImageMissing]}><CarFront size={54} color={muted} /></View>}
         <LinearGradient colors={['transparent', 'rgba(2,3,2,0.95)']} style={StyleSheet.absoluteFill} />
@@ -977,7 +1015,8 @@ export function ApexDesignPreview() {
     if (tab === 'race') return <RaceScreen />;
     if (tab === 'vault') return <VaultScreen />;
     if (tab === 'shop') return <ShopScreen />;
-    if (tab === 'meets' || tab === 'messages' || tab === 'leaderboard') return <UtilityScreen kind={tab} />;
+    if (tab === 'leaderboard') return <LeaderboardScreen />;
+    if (tab === 'meets' || tab === 'messages') return <UtilityScreen kind={tab} />;
     return <CommandScreen onTab={setTab} />;
   }, [tab]);
 
@@ -986,7 +1025,7 @@ export function ApexDesignPreview() {
       <GridBackdrop />
       <View style={styles.header}>
         <View style={styles.brandLockup}>
-          <View style={styles.brandMark}><Text style={styles.brandMarkText}>A</Text></View>
+          <ApexLogo />
           <View><Text style={styles.brand}>APEX UGR</Text><Text style={styles.brandSub}>UNDERGROUND RACING NETWORK</Text></View>
         </View>
         <View style={styles.headerRight}>
@@ -1045,6 +1084,12 @@ const styles = StyleSheet.create({
   brandLockup: { flexDirection: 'row', alignItems: 'center' },
   brandMark: { width: 34, height: 34, borderWidth: 1, borderColor: accent, alignItems: 'center', justifyContent: 'center', marginRight: 10, transform: [{ rotate: '45deg' }] },
   brandMarkText: { color: accent, fontSize: 18, fontWeight: '900', transform: [{ rotate: '-45deg' }] },
+  apexLogo: { width: 42, height: 42, marginRight: 9, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  apexLogoOuter: { width: 34, height: 34, transform: [{ rotate: '45deg' }], borderWidth: 1, borderColor: 'rgba(232,255,226,.72)', backgroundColor: 'rgba(145,185,133,.055)', alignItems: 'center', justifyContent: 'center', shadowColor: accent, shadowOpacity: .32, shadowRadius: 9 },
+  apexLogoInner: { width: 25, height: 25, borderWidth: 1, borderColor: 'rgba(145,185,133,.5)', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' },
+  apexLogoLetter: { color: paper, fontSize: 18, lineHeight: 21, fontWeight: '900', transform: [{ rotate: '-45deg' }] },
+  apexLogoSlash: { position: 'absolute', width: 3, height: 34, backgroundColor: accent, right: 3, transform: [{ rotate: '-12deg' }] },
+  apexLogoSignal: { position: 'absolute', width: 6, height: 6, borderRadius: 3, backgroundColor: accent, right: 0, top: 3, borderWidth: 1, borderColor: '#010201', shadowColor: accent, shadowOpacity: .8, shadowRadius: 5 },
   brand: { color: paper, fontSize: 15, fontWeight: '900', letterSpacing: 1.8 },
   brandSub: { color: muted, fontSize: 7, fontWeight: '800', letterSpacing: 1.1, marginTop: 2 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -1148,6 +1193,7 @@ const styles = StyleSheet.create({
   mysteryPin: { backgroundColor: '#030403', borderStyle: 'dashed', borderColor: accent },
   driverPinText: { color: accent, fontSize: 13, fontWeight: '900' },
   nativePin: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#0A0C0A', borderWidth: 2, borderColor: paper, alignItems: 'center', justifyContent: 'center' },
+  staleNativePin: { opacity: .55, borderColor: muted },
   nativePinText: { color: accent, fontWeight: '900' },
   nativeSelfPin: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(125,255,105,.18)', alignItems: 'center', justifyContent: 'center' },
   nativeSelfCore: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#7DFF69', borderWidth: 3, borderColor: paper },
@@ -1214,6 +1260,13 @@ const styles = StyleSheet.create({
   choiceChipActive: { borderColor: 'rgba(145,185,133,.5)', backgroundColor: 'rgba(145,185,133,.12)' },
   choiceChipText: { color: muted, fontSize: 7, fontWeight: '900' },
   choiceChipTextActive: { color: paper },
+  colorGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 },
+  colorChoice: { width: screenWidth > 620 ? '23.8%' : '48.8%', minHeight: 39, paddingHorizontal: 9, borderRadius: 9, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.03)', flexDirection: 'row', alignItems: 'center', gap: 8 },
+  colorChoiceActive: { borderColor: 'rgba(145,185,133,.55)', backgroundColor: 'rgba(145,185,133,.10)' },
+  colorSwatch: { width: 17, height: 17, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,.46)' },
+  customSwatch: { borderColor: accent, borderStyle: 'dashed', backgroundColor: 'rgba(145,185,133,.08)' },
+  colorChoiceText: { flex: 1, color: paper, fontSize: 7, fontWeight: '900' },
+  catalogFieldWide: { width: '100%', gap: 6, marginBottom: 12 },
   horsepowerPanel: { padding: 13, marginBottom: 12, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(145,185,133,.3)', backgroundColor: 'rgba(145,185,133,.055)' },
   horsepowerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   horsepowerHint: { color: muted, fontSize: 6, fontWeight: '800', marginTop: 4 },
@@ -1395,6 +1448,17 @@ const styles = StyleSheet.create({
   utilityIndex: { color: accent, fontSize: 9, fontWeight: '900', width: 34 },
   utilityText: { color: paper, fontSize: 9, fontWeight: '900', flex: 1 },
   leaderboardHero: { minHeight: 104, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  leaderboardHeroMeta: { color: muted, fontSize: 7, fontWeight: '900', marginTop: 7, letterSpacing: .8 },
+  leaderboardHeroIcon: { width: 58, height: 58, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(145,185,133,.35)', backgroundColor: 'rgba(145,185,133,.08)', alignItems: 'center', justifyContent: 'center' },
+  boardTabs: { gap: 7, paddingRight: 14, marginBottom: 12 },
+  boardTab: { minWidth: 88, height: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.035)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  boardTabActive: { borderColor: 'rgba(145,185,133,.52)', backgroundColor: 'rgba(145,185,133,.11)' },
+  boardTabText: { color: muted, fontSize: 7, fontWeight: '900' },
+  boardTabTextActive: { color: paper },
+  boardIdentity: { minHeight: 88, padding: 13, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,.17)', backgroundColor: 'rgba(7,10,8,.82)' },
+  boardIdentityTitle: { color: paper, fontSize: 22, fontWeight: '900', marginTop: 5 },
+  standingsTable: { borderRadius: 11, borderWidth: 1, borderColor: border, overflow: 'hidden', backgroundColor: 'rgba(7,10,8,.72)' },
+  podiumAvatarSmall: { width: 35, height: 35, borderRadius: 9, marginRight: 9, overflow: 'hidden', backgroundColor: '#182018', alignItems: 'center', justifyContent: 'center' },
   podium: { minHeight: 190, flexDirection: 'row', alignItems: 'flex-end', gap: 7, marginBottom: 8 },
   podiumPilot: { flex: 1, minWidth: 0, height: 145, borderWidth: 1, borderColor: border, borderRadius: 10, backgroundColor: 'rgba(255,255,255,.045)', alignItems: 'center', justifyContent: 'center', padding: 8 },
   podiumFirst: { height: 180, borderColor: 'rgba(145,185,133,.48)', backgroundColor: 'rgba(145,185,133,.10)' },
