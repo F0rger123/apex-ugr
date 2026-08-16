@@ -5,7 +5,7 @@ const configuredBase = process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') 
 
 export type CloudflareSession = {
   token: string;
-  user: { id: string; email: string; username: string; displayName: string; avatarUrl: string | null; credits: number; points: number; tier: string; wins: number; losses: number };
+  user: { id: string; email: string; username: string; displayName: string; avatarUrl: string | null; credits: number; points: number; tier: string; wins: number; losses: number; reputation: number; declineStreak: number };
 };
 
 async function token() {

@@ -9,7 +9,7 @@ interface Env {
 
 type UserRow = {
   id: string; email: string; username: string; display_name: string; avatar_url: string | null;
-  credits: number; points: number; tier: string; wins: number; losses: number;
+  credits: number; points: number; tier: string; wins: number; losses: number; reputation: number; decline_streak: number;
 };
 
 const cors = {
@@ -39,7 +39,7 @@ async function sha256(value: string) {
 
 async function passwordHash(password: string, salt: Uint8Array) {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 210_000 }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100_000 }, key, 256);
   return bytesToBase64(new Uint8Array(bits));
 }
 
@@ -47,7 +47,7 @@ function publicUser(user: UserRow) {
   return {
     id: user.id, email: user.email, username: user.username, displayName: user.display_name,
     avatarUrl: user.avatar_url, credits: user.credits, points: user.points, tier: user.tier,
-    wins: user.wins, losses: user.losses,
+    wins: user.wins, losses: user.losses, reputation: user.reputation, declineStreak: user.decline_streak,
   };
 }
 
@@ -55,7 +55,7 @@ async function authenticatedUser(request: Request, env: Env) {
   const bearer = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!bearer) return null;
   const tokenHash = await sha256(bearer);
-  return env.DB.prepare(`SELECT u.id,u.email,u.username,u.display_name,u.avatar_url,u.credits,u.points,u.tier,u.wins,u.losses
+  return env.DB.prepare(`SELECT u.id,u.email,u.username,u.display_name,u.avatar_url,u.credits,u.points,u.tier,u.wins,u.losses,u.reputation,u.decline_streak
     FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`)
     .bind(tokenHash, new Date().toISOString()).first<UserRow>();
 }
@@ -95,6 +95,15 @@ function providerSearches(vehicle: Record<string, string | number>, query: strin
   return providers;
 }
 
+async function geocode(destination: string) {
+  const geoUrl=new URL('https://nominatim.openstreetmap.org/search');
+  geoUrl.searchParams.set('q',destination.trim()); geoUrl.searchParams.set('format','jsonv2'); geoUrl.searchParams.set('limit','1');
+  const geo=await fetch(geoUrl,{headers:{'User-Agent':'ApexUGR/1.0 (https://apex-ugr.pages.dev)'}});
+  const places=await geo.json<Array<{lat:string;lon:string;display_name:string}>>();
+  if(!places[0]) return null;
+  return {latitude:Number(places[0].lat),longitude:Number(places[0].lon),name:places[0].display_name};
+}
+
 async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === 'OPTIONS') return new Response(null, { headers: cors });
@@ -113,19 +122,22 @@ async function handle(request: Request, env: Env, path: string) {
     if (!/^\S+@\S+\.\S+$/.test(email) || (body.password?.length || 0) < 8) return json({ error: 'Use a valid email and at least 8 password characters.' }, 400);
     const usernameBase = email.split('@')[0].replace(/[^a-z0-9_]/g, '').slice(0, 20) || 'pilot';
     const username = `${usernameBase}_${crypto.randomUUID().slice(0, 5)}`;
+    const existing=await env.DB.prepare('SELECT 1 found FROM users WHERE email=?').bind(email).first();
+    if(existing)return json({error:'An account already exists for that email. Sign in instead or use another email.'},409);
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const id = crypto.randomUUID();
+    const hash=await passwordHash(body.password!,salt);
     try {
       await env.DB.prepare(`INSERT INTO users(id,email,username,display_name,password_hash,password_salt) VALUES(?,?,?,?,?,?)`)
-        .bind(id, email, username, usernameBase.toUpperCase(), await passwordHash(body.password!, salt), bytesToBase64(salt)).run();
-    } catch { return json({ error: 'An account already exists for that email.' }, 409); }
-    const user = await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses FROM users WHERE id=?').bind(id).first<UserRow>();
+        .bind(id, email, username, usernameBase.toUpperCase(), hash, bytesToBase64(salt)).run();
+    } catch(error) { console.error('signup_insert_failed',error); return json({ error: 'Account creation failed. Please try again.' }, 500); }
+    const user = await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?').bind(id).first<UserRow>();
     return json(await createSession(user!, env), 201);
   }
 
   if (path === 'auth/signin' && method === 'POST') {
     const body = await request.json<{ email?: string; password?: string }>();
-    const row = await env.DB.prepare(`SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,password_hash,password_salt FROM users WHERE email=?`)
+    const row = await env.DB.prepare(`SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak,password_hash,password_salt FROM users WHERE email=?`)
       .bind(body.email?.trim().toLowerCase() || '').first<UserRow & { password_hash: string; password_salt: string }>();
     if (!row || await passwordHash(body.password || '', base64ToBytes(row.password_salt)) !== row.password_hash) return json({ error: 'Invalid email or password.' }, 401);
     return json(await createSession(row, env));
@@ -174,12 +186,18 @@ async function handle(request: Request, env: Env, path: string) {
     ]);
     return json({ drivers: drivers.results, events: events.results, cruises: cruises.results });
   }
+  if(path==='pilots'&&method==='GET'){
+    const rows=await env.DB.prepare(`SELECT u.id,u.username,u.avatar_url,u.tier,u.points,u.wins,u.losses,u.reputation,v.year,v.make,v.model,v.photo_url,
+      l.latitude,l.longitude,l.speed_kph,l.drive_mode FROM users u LEFT JOIN vehicles v ON v.user_id=u.id AND v.is_active=1 LEFT JOIN driver_locations l ON l.user_id=u.id WHERE u.id<>? ORDER BY u.reputation DESC,u.points DESC LIMIT 100`).bind(user.id).all();
+    return json({pilots:rows.results});
+  }
   if (path === 'location' && method === 'POST') {
     const body = await request.json<Record<string, number | string | boolean | null>>();
-    const expires = new Date(Date.now()+90_000).toISOString();
+    if(!Number.isFinite(Number(body.latitude))||!Number.isFinite(Number(body.longitude)))return json({error:'Valid latitude and longitude are required.'},400);
+    const expires = new Date(Date.now()+15*60_000).toISOString();
     await env.DB.prepare(`INSERT INTO driver_locations(user_id,vehicle_id,latitude,longitude,accuracy_m,altitude_m,speed_kph,heading,drive_mode,cruise_id,expires_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,altitude_m=excluded.altitude_m,speed_kph=excluded.speed_kph,heading=excluded.heading,drive_mode=excluded.drive_mode,cruise_id=excluded.cruise_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`)
-      .bind(user.id,body.vehicleId||null,body.latitude,body.longitude,body.accuracy,body.altitude,body.speedKph||0,body.heading||0,body.driveMode?1:0,body.cruiseId||null,expires).run();
+      VALUES(?,COALESCE(?,(SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1)),?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,altitude_m=excluded.altitude_m,speed_kph=excluded.speed_kph,heading=excluded.heading,drive_mode=excluded.drive_mode,cruise_id=excluded.cruise_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`)
+      .bind(user.id,body.vehicleId||null,user.id,Number(body.latitude),Number(body.longitude),body.accuracy??null,body.altitude??null,body.speedKph||0,body.heading||0,body.driveMode?1:0,body.cruiseId||null,expires).run();
     return json({ success: true });
   }
 
@@ -216,7 +234,7 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   if (path === 'leaderboard' && method === 'GET') {
-    const rows=await env.DB.prepare(`SELECT id,username,avatar_url,tier,points,wins,(wins+losses) entered FROM users ORDER BY points DESC,wins DESC,created_at ASC LIMIT 100`).all();
+    const rows=await env.DB.prepare(`SELECT id,username,avatar_url,tier,points,wins,reputation,(wins+losses) entered FROM users ORDER BY points DESC,wins DESC,reputation DESC,created_at ASC LIMIT 100`).all();
     return json({ rankings: rows.results });
   }
 
@@ -234,6 +252,46 @@ async function handle(request: Request, env: Env, path: string) {
     }
     await env.DB.batch(statements);
     return json({id,status:'pending'},201);
+  }
+  if(path==='races'&&method==='GET'){
+    const rows=await env.DB.prepare(`SELECT DISTINCT r.*,u.username challenger_name FROM race_contracts r JOIN users u ON u.id=r.challenger_id LEFT JOIN race_opponents o ON o.race_id=r.id WHERE r.challenger_id=? OR o.user_id=? ORDER BY r.starts_at DESC LIMIT 60`).bind(user.id,user.id).all<Record<string,unknown>>();
+    const races=await Promise.all(rows.results.map(async race=>{
+      const participants=await env.DB.prepare(`SELECT o.user_id,o.status,u.username,u.tier,u.reputation FROM race_opponents o JOIN users u ON u.id=o.user_id WHERE o.race_id=?`).bind(race.id).all();
+      return {...race,participants:participants.results,is_challenger:race.challenger_id===user.id};
+    }));
+    return json({races});
+  }
+  const raceAction=path.match(/^races\/([^/]+)\/(accept|decline|reschedule)$/);
+  if(raceAction&&method==='POST'){
+    const raceId=raceAction[1],action=raceAction[2];
+    const race=await env.DB.prepare('SELECT * FROM race_contracts WHERE id=?').bind(raceId).first<Record<string,unknown>>();
+    if(!race)return json({error:'Race challenge not found.'},404);
+    const opponent=await env.DB.prepare('SELECT status FROM race_opponents WHERE race_id=? AND user_id=?').bind(raceId,user.id).first<{status:string}>();
+    const isChallenger=race.challenger_id===user.id;
+    if(!opponent&&!isChallenger)return json({error:'Race challenge not found.'},404);
+    if(action==='decline'){
+      if(!opponent)return json({error:'The challenger cannot decline their own contract.'},400);
+      const next=user.decline_streak+1,penalty=next>=3?25:0;
+      await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='declined' WHERE race_id=? AND user_id=?").bind(raceId,user.id),env.DB.prepare("UPDATE race_contracts SET status='declined',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId),env.DB.prepare('UPDATE users SET decline_streak=?,reputation=MAX(0,reputation-?) WHERE id=?').bind(next>=3?0:next,penalty,user.id)]);
+      return json({status:'declined',reputationPenalty:penalty});
+    }
+    if(action==='reschedule'){
+      const body=await request.json<{startsAt?:string}>();
+      if(!body.startsAt||Number.isNaN(Date.parse(body.startsAt)))return json({error:'A valid new start time is required.'},400);
+      await env.DB.batch([env.DB.prepare("UPDATE race_contracts SET starts_at=?,status='rescheduled',reschedule_count=reschedule_count+1,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(body.startsAt,raceId),env.DB.prepare("UPDATE race_opponents SET status='invited' WHERE race_id=?").bind(raceId)]);
+      return json({status:'rescheduled',startsAt:body.startsAt});
+    }
+    if(!opponent)return json({error:'Challenge is already accepted by the host.'},400);
+    await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='accepted' WHERE race_id=? AND user_id=?").bind(raceId,user.id),env.DB.prepare('UPDATE users SET decline_streak=0 WHERE id=?').bind(user.id)]);
+    const pending=await env.DB.prepare("SELECT COUNT(*) count FROM race_opponents WHERE race_id=? AND status<>'accepted'").bind(raceId).first<{count:number}>();
+    if((pending?.count||0)===0){
+      const wager=Number(race.wager_credits||0); const opponentRows=await env.DB.prepare('SELECT user_id FROM race_opponents WHERE race_id=?').bind(raceId).all<{user_id:string}>(); const ids=[String(race.challenger_id),...opponentRows.results.map(row=>row.user_id)];
+      const placeholders=ids.map(()=>'?').join(','); const poor=await env.DB.prepare(`SELECT id FROM users WHERE id IN (${placeholders}) AND credits<? LIMIT 1`).bind(...ids,wager).first();
+      if(poor){await env.DB.prepare("UPDATE race_contracts SET status='credit_failed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId).run();return json({error:'A pilot no longer has enough credits for this wager.'},409);}
+      const statements=ids.map(id=>env.DB.prepare('UPDATE users SET credits=credits-? WHERE id=?').bind(wager,id)); statements.push(env.DB.prepare("UPDATE race_contracts SET status='scheduled',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId)); await env.DB.batch(statements);
+      return json({status:'scheduled'});
+    }
+    return json({status:'accepted'});
   }
 
   if (path === 'notifications' && method === 'GET') {
@@ -294,6 +352,34 @@ async function handle(request: Request, env: Env, path: string) {
     await env.DB.prepare('UPDATE events SET attendees=? WHERE id=?').bind(count?.count||0,eventRsvp[1]).run();
     return json({active:!current,attendees:count?.count||0});
   }
+  if(path==='events'&&method==='POST'){
+    const body=await request.json<{title?:string;description?:string;rules?:string;startsAt?:string;endsAt?:string;radiusM?:number;locations?:Array<{label?:string;address?:string}>;allowShowCars?:boolean;allowSponsors?:boolean}>();
+    if(!body.title?.trim()||!body.startsAt||!body.locations?.[0]?.address?.trim())return json({error:'Title, start time, and at least one location are required.'},400);
+    const requested=body.locations.slice(0,5); const located:Array<{label:string;name:string;latitude:number;longitude:number}>=[];
+    for(const item of requested){const point=await geocode(item.address||'');if(!point)return json({error:`Location not found: ${item.address}`},404);located.push({label:item.label?.trim()||`STOP ${located.length+1}`,name:point.name,latitude:point.latitude,longitude:point.longitude});}
+    const first=located[0],id=crypto.randomUUID();
+    const statements=[env.DB.prepare(`INSERT INTO events(id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,body.title.trim().slice(0,100),first.name,first.latitude,first.longitude,Math.max(50,Math.min(2000,Number(body.radiusM)||250)),body.startsAt,body.endsAt||null,body.description?.trim().slice(0,2000)||'',body.rules?.trim().slice(0,1500)||'',body.allowShowCars===false?0:1,body.allowSponsors===false?0:1),env.DB.prepare("INSERT INTO event_registrations(event_id,user_id,role) VALUES(?,?,'host')").bind(id,user.id)];
+    located.forEach((point,index)=>statements.push(env.DB.prepare('INSERT INTO event_locations(id,event_id,label,location_name,latitude,longitude,stop_order) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),id,point.label,point.name,point.latitude,point.longitude,index)));
+    await env.DB.batch(statements); return json({id,locations:located},201);
+  }
+  const eventDetails=path.match(/^events\/([^/]+)$/);
+  if(eventDetails&&method==='GET'){
+    const event=await env.DB.prepare('SELECT e.*,u.username host_name FROM events e JOIN users u ON u.id=e.host_id WHERE e.id=?').bind(eventDetails[1]).first();
+    if(!event)return json({error:'Meet not found.'},404);
+    const [locations,registrations]=await Promise.all([env.DB.prepare('SELECT * FROM event_locations WHERE event_id=? ORDER BY stop_order').bind(eventDetails[1]).all(),env.DB.prepare(`SELECT r.role,r.sponsor_name,r.vehicle_id,u.id user_id,u.username,u.avatar_url,v.year,v.make,v.model,v.trim,v.photo_url FROM event_registrations r JOIN users u ON u.id=r.user_id LEFT JOIN vehicles v ON v.id=r.vehicle_id WHERE r.event_id=? ORDER BY r.created_at`).bind(eventDetails[1]).all()]);
+    return json({event,locations:locations.results,registrations:registrations.results});
+  }
+  const eventJoin=path.match(/^events\/([^/]+)\/join$/);
+  if(eventJoin&&method==='POST'){
+    const body=await request.json<{role?:string;vehicleId?:string;sponsorName?:string}>(); const role=body.role||'attendee';
+    if(!['attendee','show_car','sponsor'].includes(role))return json({error:'Choose attendee, show car, or sponsor.'},400);
+    const event=await env.DB.prepare('SELECT allow_show_cars,allow_sponsors FROM events WHERE id=?').bind(eventJoin[1]).first<{allow_show_cars:number;allow_sponsors:number}>();
+    if(!event)return json({error:'Meet not found.'},404); if(role==='show_car'&&!event.allow_show_cars)return json({error:'Show car registration is closed.'},400); if(role==='sponsor'&&!event.allow_sponsors)return json({error:'Sponsor registration is closed.'},400);
+    if(role==='show_car'){const vehicle=await env.DB.prepare('SELECT id FROM vehicles WHERE id=? AND user_id=?').bind(body.vehicleId||'',user.id).first();if(!vehicle)return json({error:'Select one of your garage vehicles.'},400);}
+    if(role==='sponsor'&&!body.sponsorName?.trim())return json({error:'Sponsor name is required.'},400);
+    await env.DB.prepare(`INSERT INTO event_registrations(event_id,user_id,vehicle_id,role,sponsor_name) VALUES(?,?,?,?,?) ON CONFLICT(event_id,user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,role=excluded.role,sponsor_name=excluded.sponsor_name`).bind(eventJoin[1],user.id,role==='show_car'?body.vehicleId:null,role,role==='sponsor'?body.sponsorName?.trim().slice(0,100):null).run();
+    const count=await env.DB.prepare('SELECT COUNT(*) count FROM event_registrations WHERE event_id=?').bind(eventJoin[1]).first<{count:number}>(); await env.DB.prepare('UPDATE events SET attendees=? WHERE id=?').bind(count?.count||0,eventJoin[1]).run(); return json({role,attendees:count?.count||0});
+  }
 
   if (path === 'upload' && method === 'POST') {
     const form=await request.formData();
@@ -314,12 +400,8 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === 'routes' && method === 'POST') {
     const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string}>();
     if(!body.origin||!body.destination?.trim()) return json({error:'Current location and destination are required.'},400);
-    const geoUrl=new URL('https://nominatim.openstreetmap.org/search');
-    geoUrl.searchParams.set('q',body.destination.trim()); geoUrl.searchParams.set('format','jsonv2'); geoUrl.searchParams.set('limit','1');
-    const geo=await fetch(geoUrl,{headers:{'User-Agent':'ApexUGR/1.0 (apex-ugr.pages.dev)'}});
-    const places=await geo.json<Array<{lat:string;lon:string;display_name:string}>>();
-    if(!places[0]) return json({error:'Destination not found.'},404);
-    const target={latitude:Number(places[0].lat),longitude:Number(places[0].lon),name:places[0].display_name};
+    const target=await geocode(body.destination);
+    if(!target) return json({error:'Destination not found.'},404);
     const routeUrl=`https://router.project-osrm.org/route/v1/driving/${body.origin.longitude},${body.origin.latitude};${target.longitude},${target.latitude}?overview=full&geometries=geojson`;
     const routed=await fetch(routeUrl); const route=await routed.json<{routes?:Array<{distance:number;duration:number;geometry:{coordinates:number[][]}}>}>();
     if(!route.routes?.[0]) return json({error:'No drivable route found.'},404);

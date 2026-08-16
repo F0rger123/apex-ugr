@@ -209,8 +209,9 @@ function CreditsToken({ value, compact = false }: { value: number; compact?: boo
   return (
     <View style={[styles.tokenWrap, compact && styles.tokenWrapCompact]}>
       <Animated.View style={[styles.tokenAura, { opacity: pulse }]} />
-      <LinearGradient colors={['#E7FFD0', accent, '#62A51E']} style={[styles.token, compact && styles.tokenCompact]}>
-        <Text style={[styles.tokenLetter, compact && styles.tokenLetterCompact]}>A</Text>
+      <Animated.View style={[styles.tokenOrbit,{transform:[{rotate:pulse.interpolate({inputRange:[.72,1],outputRange:['0deg','24deg']})}]}]} />
+      <LinearGradient colors={['#FFFFFF', '#AEE8A0', '#3E6C39']} style={[styles.token, compact && styles.tokenCompact]}>
+        <View style={styles.tokenInner}><Text style={[styles.tokenLetter, compact && styles.tokenLetterCompact]}>A</Text></View>
       </LinearGradient>
       <View>
         <Text style={styles.tokenValue}>{value.toLocaleString()}</Text>
@@ -266,6 +267,9 @@ function CommandScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
         <View style={styles.progressLabels}><Text style={styles.progressText}>{(profile?.points || 0).toLocaleString()} RP</Text><Text style={styles.progressText}>{profile?.tier?.toUpperCase() || 'UNRANKED'}</Text></View>
       </GlassPanel>
 
+      <SectionTitle label="SEASON LEADERS" action="VIEW ALL" />
+      <Pressable onPress={() => onTab('leaderboard')} style={styles.leaderPreview}>{rankings.slice(0,3).map((row,index)=><View key={row.id} style={styles.leaderPreviewRow}><Text style={styles.leaderPreviewRank}>{index+1}</Text><View style={styles.commandCopy}><Text style={styles.commandTitle}>{row.alias.toUpperCase()}</Text><Text style={styles.commandMeta}>{row.tier.toUpperCase()} · {row.points} RP · {row.wins} WINS</Text></View><Trophy size={17} color={index===0?accent:muted}/></View>)}{rankings.length===0?<View style={styles.leaderPreviewRow}><Trophy size={18} color={accent}/><Text style={styles.commandMeta}>THE FIRST VERIFIED RUN TAKES THE BOARD</Text></View>:null}<View style={styles.leaderPreviewOpen}><Text style={styles.sectionAction}>OPEN FULL LEADERBOARD</Text><ChevronRight size={16} color={accent}/></View></Pressable>
+
       <SectionTitle label="LIVE NETWORK" action={`${drivers.length} ONLINE`} />
       <Pressable onPress={() => onTab('race')} style={({ pressed }) => [styles.commandRow, pressed && styles.pressed]}>
         <View style={styles.commandIcon}><Swords size={20} color={accent} /></View>
@@ -303,6 +307,7 @@ function RadarMap({
   events,
   routeCoordinates,
   followRevision,
+  focus,
 }: {
   location: { latitude: number; longitude: number } | null;
   mode: 'street' | 'satellite';
@@ -312,6 +317,7 @@ function RadarMap({
   events: LiveEvent[];
   routeCoordinates: Array<{ latitude: number; longitude: number }>;
   followRevision: number;
+  focus: { latitude: number; longitude: number } | null;
 }) {
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -337,10 +343,10 @@ function RadarMap({
     const safeDrivers = JSON.stringify(drivers).replace(/</g, '\\u003c');
     const safeEvents = JSON.stringify(events).replace(/</g, '\\u003c');
     const safeRoute = JSON.stringify(routeCoordinates).replace(/</g, '\\u003c');
-    const center = location || { latitude: 20, longitude: 0 };
-    const zoom = location ? 14 : 2;
-    const selfMarker = location ? `L.marker([${location.latitude},${location.longitude}],{zIndexOffset:1000,icon:L.divIcon({className:'',html:'<div class="self-anchor"><i class="radar-ring r1"></i><i class="radar-ring r2"></i><i class="radar-ring r3"></i><i class="radar-sweep"></i><div class="self-pin"><span>▲</span><b>YOU</b></div></div>',iconSize:[180,180],iconAnchor:[90,90]})}).addTo(map);` : '';
-    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#030503}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}.driver-pin,.self-pin{display:flex;align-items:center;justify-content:center;background:rgba(3,6,4,.96);border:2px solid #f3f5f3;color:#b9deb0;font:900 12px monospace;border-radius:50%;box-shadow:0 0 18px rgba(255,255,255,.18),0 0 26px rgba(145,185,133,.28)}.driver-pin{width:34px;height:34px;transition:transform .22s ease}.driver-pin:hover{transform:scale(1.14)}.driver-pin.mystery{border-style:dashed}.driver-pin.cruise{box-shadow:0 0 0 7px rgba(145,185,133,.12),0 0 20px rgba(145,185,133,.58)}.self-anchor{position:relative;width:180px;height:180px;display:flex;align-items:center;justify-content:center}.self-pin{position:relative;z-index:5;width:58px;height:30px;border-radius:18px;background:#edf5ea;color:#071007;gap:5px}.self-pin b{font-size:9px}.radar-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(180,224,170,.4);border-radius:50%;transform:translate(-50%,-50%)}.r1{width:72px;height:72px}.r2{width:116px;height:116px;opacity:.65}.r3{width:168px;height:168px;opacity:.36}.radar-sweep{position:absolute;left:50%;top:50%;width:84px;height:84px;transform-origin:0 0;background:conic-gradient(from -18deg,rgba(145,185,133,.34),transparent 48deg);animation:sweep 3.2s linear infinite}.event-core{width:16px;height:16px;border-radius:50%;background:#b9deb0;border:2px solid #fff;box-shadow:0 0 20px #91b985;cursor:pointer}@keyframes sweep{to{transform:rotate(360deg)}}@keyframes eventPulse{0%{stroke-opacity:.74;fill-opacity:.2}50%{stroke-opacity:.16;fill-opacity:.04}100%{stroke-opacity:.74;fill-opacity:.2}}.event-zone{animation:eventPulse 2.4s ease-in-out infinite}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.25) brightness(.43)}' : '#map{filter:saturate(.38) contrast(1.24) brightness(.43)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([${center.latitude},${center.longitude}],${zoom});L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);${selfMarker}const route=${safeRoute};if(route.length>1){L.polyline(route.map(p=>[p.latitude,p.longitude]),{color:'#dfffd7',weight:4,opacity:.9,lineCap:'round'}).addTo(map);}const drivers=${safeDrivers};drivers.forEach(d=>{const label=d.mystery?'?':d.alias.slice(0,1);const classes='driver-pin '+(d.mystery?'mystery ':'')+(d.cruiseId?'cruise':'');L.marker([d.latitude,d.longitude],{icon:L.divIcon({className:'',html:'<div class="'+classes+'">'+label+'</div>',iconSize:[38,38],iconAnchor:[19,19]})}).addTo(map).on('click',()=>parent.postMessage({source:'apex-radar',driverId:d.id},'*'));});const events=${safeEvents};events.forEach(e=>{L.circle([e.latitude,e.longitude],{radius:e.radiusM,color:'#b9deb0',weight:2,fillColor:'#91b985',fillOpacity:.12,className:'event-zone'}).addTo(map).on('click',()=>parent.postMessage({source:'apex-radar',eventId:e.id},'*')).bindTooltip(e.title);L.marker([e.latitude,e.longitude],{icon:L.divIcon({className:'',html:'<div class="event-core"></div>',iconSize:[20,20],iconAnchor:[10,10]})}).addTo(map).on('click',()=>parent.postMessage({source:'apex-radar',eventId:e.id},'*'));});</script></body></html>`;
+    const center = focus || location || { latitude: 20, longitude: 0 };
+    const zoom = focus ? 16 : location ? 14 : 2;
+    const selfMarker = location ? `L.marker([${location.latitude},${location.longitude}],{zIndexOffset:1000,icon:L.divIcon({className:'',html:'<div class="self-anchor"><i class="radar-ring r1"></i><i class="radar-ring r2"></i><i class="radar-ring r3"></i><i class="radar-sweep"></i><div class="self-dot"></div><b class="self-label">YOU</b></div>',iconSize:[180,180],iconAnchor:[90,90]})}).addTo(map);` : '';
+    const mapDocument = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#030503}.leaflet-control-attribution{font:8px monospace;background:rgba(3,4,3,.72)!important;color:#aaa}.leaflet-control-attribution a{color:#91b985}.leaflet-control-zoom{display:none}.driver-pin{display:flex;align-items:center;justify-content:center;background:rgba(3,6,4,.96);border:2px solid #f3f5f3;color:#b9deb0;font:900 12px monospace;border-radius:50%;box-shadow:0 0 18px rgba(255,255,255,.18),0 0 26px rgba(145,185,133,.28);width:34px;height:34px;transition:transform .22s ease;cursor:pointer}.driver-pin:hover{transform:scale(1.14)}.driver-pin.mystery{border-style:dashed}.driver-pin.cruise{box-shadow:0 0 0 7px rgba(145,185,133,.12),0 0 20px rgba(145,185,133,.58)}.self-anchor{position:relative;width:180px;height:180px;display:flex;align-items:center;justify-content:center}.self-dot{position:relative;z-index:5;width:20px;height:20px;border-radius:50%;background:#7dff69;border:3px solid #fff;box-shadow:0 0 0 7px rgba(125,255,105,.18),0 0 28px #7dff69}.self-label{position:absolute;z-index:6;top:108px;color:#fff;background:rgba(2,5,3,.88);border:1px solid rgba(255,255,255,.3);border-radius:9px;padding:3px 7px;font:900 8px monospace}.radar-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(180,224,170,.4);border-radius:50%;transform:translate(-50%,-50%)}.r1{width:72px;height:72px}.r2{width:116px;height:116px;opacity:.65}.r3{width:168px;height:168px;opacity:.36}.radar-sweep{position:absolute;left:50%;top:50%;width:84px;height:84px;transform-origin:0 0;background:conic-gradient(from -18deg,rgba(145,185,133,.34),transparent 48deg);animation:sweep 3.2s linear infinite}.event-core{width:16px;height:16px;border-radius:50%;background:#b9deb0;border:2px solid #fff;box-shadow:0 0 20px #91b985;cursor:pointer}@keyframes sweep{to{transform:rotate(360deg)}}@keyframes eventPulse{0%{stroke-opacity:.74;fill-opacity:.2}50%{stroke-opacity:.16;fill-opacity:.04}100%{stroke-opacity:.74;fill-opacity:.2}}.event-zone{animation:eventPulse 2.4s ease-in-out infinite}${mode === 'street' ? '#map{filter:grayscale(1) invert(.91) contrast(1.25) brightness(.43)}' : '#map{filter:saturate(.38) contrast(1.24) brightness(.43)}'}</style></head><body><div id="map"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([${center.latitude},${center.longitude}],${zoom});L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${attribution}'}).addTo(map);${selfMarker}const route=${safeRoute};if(route.length>1){L.polyline(route.map(p=>[p.latitude,p.longitude]),{color:'#dfffd7',weight:4,opacity:.9,lineCap:'round'}).addTo(map);}const drivers=${safeDrivers};drivers.forEach(d=>{const label=d.mystery?'?':d.alias.slice(0,1);const classes='driver-pin '+(d.mystery?'mystery ':'')+(d.cruiseId?'cruise':'');L.marker([d.latitude,d.longitude],{icon:L.divIcon({className:'',html:'<div class="'+classes+'">'+label+'</div>',iconSize:[38,38],iconAnchor:[19,19]})}).addTo(map).on('click',()=>{map.flyTo([d.latitude,d.longitude],16,{duration:.7});parent.postMessage({source:'apex-radar',driverId:d.id},'*')});});const events=${safeEvents};events.forEach(e=>{L.circle([e.latitude,e.longitude],{radius:e.radiusM,color:'#b9deb0',weight:2,fillColor:'#91b985',fillOpacity:.12,className:'event-zone'}).addTo(map).on('click',()=>{map.flyTo([e.latitude,e.longitude],15,{duration:.7});parent.postMessage({source:'apex-radar',eventId:e.id},'*')}).bindTooltip(e.title);L.marker([e.latitude,e.longitude],{icon:L.divIcon({className:'',html:'<div class="event-core"></div>',iconSize:[20,20],iconAnchor:[10,10]})}).addTo(map).on('click',()=>{map.flyTo([e.latitude,e.longitude],15,{duration:.7});parent.postMessage({source:'apex-radar',eventId:e.id},'*')});});</script></body></html>`;
     return (
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
@@ -360,10 +366,11 @@ function RadarMap({
         style={StyleSheet.absoluteFill}
         mapType={mode === 'satellite' ? 'satellite' : 'standard'}
         customMapStyle={darkMapStyle}
-        initialRegion={{ latitude: location?.latitude || 20, longitude: location?.longitude || 0, latitudeDelta: location ? 0.04 : 90, longitudeDelta: location ? 0.04 : 90 }}
-        showsUserLocation
+        initialRegion={{ latitude: focus?.latitude || location?.latitude || 20, longitude: focus?.longitude || location?.longitude || 0, latitudeDelta: focus ? 0.012 : location ? 0.04 : 90, longitudeDelta: focus ? 0.012 : location ? 0.04 : 90 }}
+        showsUserLocation={false}
         showsMyLocationButton={false}
       >
+        {location ? <NativeMarker coordinate={{ latitude: location.latitude, longitude: location.longitude }} anchor={{ x: .5, y: .5 }}><View style={styles.nativeSelfPin}><View style={styles.nativeSelfCore} /></View></NativeMarker> : null}
         {drivers.map(driver => (
           <NativeMarker key={driver.id} coordinate={{ latitude: driver.latitude, longitude: driver.longitude }} onPress={() => onSelect(driver)}>
             <View style={[styles.nativePin, driver.mystery && styles.mysteryPin]}>
@@ -371,7 +378,7 @@ function RadarMap({
             </View>
           </NativeMarker>
         ))}
-        {events.map(event => <NativeCircle key={event.id} center={{ latitude: event.latitude, longitude: event.longitude }} radius={event.radiusM} strokeColor="rgba(145,185,133,.75)" fillColor="rgba(145,185,133,.12)" />)}
+        {events.map(event => <NativeCircle key={event.id} center={{ latitude: event.latitude, longitude: event.longitude }} radius={event.radiusM} strokeColor="rgba(145,185,133,.75)" fillColor="rgba(145,185,133,.12)" onPress={() => onSelectEvent(event)} />)}
         {routeCoordinates.length > 1 ? <NativePolyline coordinates={routeCoordinates} strokeColor="#DFFFD7" strokeWidth={4} /> : null}
       </NativeMap>
     </View>
@@ -444,7 +451,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
 
   return (
     <View style={styles.radarScreen}>
-      <RadarMap location={location} mode={mode} onSelect={driver => { setSelected(driver); setSelectedEvent(null); }} onSelectEvent={event => { setSelectedEvent(event); setSelected(null); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} followRevision={followRevision} />
+      <RadarMap location={location} mode={mode} onSelect={driver => { setSelected(driver); setSelectedEvent(null); setFollowRevision(value => value + 1); }} onSelectEvent={event => { setSelectedEvent(event); setSelected(null); setFollowRevision(value => value + 1); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} followRevision={followRevision} focus={selected ? { latitude: selected.latitude, longitude: selected.longitude } : selectedEvent ? { latitude: selectedEvent.latitude, longitude: selectedEvent.longitude } : null} />
       <View style={styles.radarTopControls}>
         <View style={styles.segmentedControl}>
           {(['street', 'satellite'] as const).map(item => (
@@ -469,7 +476,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           <View style={styles.driverSheetHeader}>
             <View style={[styles.driverAvatar, selected.mystery && styles.mysteryAvatar]}><Text style={styles.driverAvatarText}>{selected.mystery ? '?' : selected.alias.slice(0, 2)}</Text></View>
             <View style={styles.driverIdentity}><Text style={styles.driverAlias}>{selected.alias}</Text><Text style={styles.driverCar}>{selected.car}</Text></View>
-            <Pressable onPress={() => setSelected(null)} style={styles.closeButton}><X size={17} color={paper} /></Pressable>
+            <Pressable onPress={() => { setSelected(null); setFollowRevision(value => value + 1); }} style={styles.closeButton}><X size={17} color={paper} /></Pressable>
           </View>
           <View style={styles.driverStats}>
             <View><Text style={styles.driverStatValue}>{selected.hp || '—'}</Text><Text style={styles.driverStatLabel}>HP</Text></View>
@@ -478,8 +485,9 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
             <RankBadge rank={selected.rank} compact />
           </View>
           <View style={styles.sheetActions}>
-            <GlassButton label="CHALLENGE" icon={Swords} onPress={() => onTab('race')} active grow />
-            <GlassButton label="PROFILE" icon={UserRound} onPress={() => Alert.alert(selected.alias, selected.mystery ? 'This pilot is running in mystery mode.' : `${selected.car}\n${selected.record} career record`)} grow />
+            <GlassButton label="CHALLENGE" icon={Swords} onPress={() => { useContentStore.getState().setChallengeTarget(selected.id); onTab('race'); }} active grow />
+            <GlassButton label="FOLLOW" icon={Crosshair} onPress={() => setFollowRevision(value => value + 1)} grow />
+            <GlassButton label="STATS" icon={UserRound} onPress={() => Alert.alert(selected.alias, selected.mystery ? 'This pilot is running in mystery mode.' : `${selected.car}\n${selected.record} career record`)} grow />
           </View>
         </GlassPanel>
       ) : selectedEvent ? (
@@ -496,7 +504,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           {route ? <View style={styles.activeRoute}><Navigation size={15} color={accent} /><View style={styles.commandCopy}><Text style={styles.activeRouteTitle}>{route.destination.toUpperCase()}</Text><Text style={styles.activeRouteMeta}>{route.distanceKm.toFixed(1)} KM · {Math.round(route.durationMinutes)} MIN</Text></View><Pressable onPress={clearRoute} style={styles.routeClose}><X size={14} color={paper} /></Pressable></View> : null}
           <View style={styles.driveDock}>
             <Pressable onPress={isDriving ? stopDrive : startDrive} style={[styles.driveEnter, isDriving && styles.driveEnterActive]}><Play size={16} color={isDriving ? accent : paper} /><Text style={styles.driveEnterText}>{isDriving ? 'END DRIVE' : 'ENTER DRIVE MODE'}</Text></Pressable>
-            <Pressable onPress={() => setRouteOpen(value => !value)} style={styles.routeButton}><Navigation size={16} color={route ? accent : paper} /></Pressable>
+            <Pressable onPress={() => setRouteOpen(value => !value)} style={styles.routeButton}><Navigation size={16} color={route ? accent : paper} /><Text style={styles.routeButtonText}>SET ROUTE</Text></Pressable>
             {isDriving ? <Pressable onPress={toggleUnit} style={styles.unitButton}><Text style={styles.unitText}>{unit.toUpperCase()}</Text></Pressable> : null}
           </View>
         </GlassPanel>
@@ -587,6 +595,20 @@ function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.moreHeader}><Text style={styles.eyebrow}>PILOT SYSTEMS</Text><Text style={styles.feedTitle}>ACCESS GRID</Text><Text style={styles.moreCopy}>All network tools. One encrypted identity.</Text></View><View style={styles.moduleGrid}>{modules.map(module => { const Icon = module.icon; return <Pressable key={module.tab} onPress={() => onTab(module.tab)} style={({ pressed }) => [styles.moduleCard, pressed && styles.pressed]}><View style={styles.moduleIcon}><Icon size={23} color={accent} /></View><Text style={styles.moduleTitle}>{module.label}</Text><Text style={styles.moduleMeta}>{module.meta}</Text><ChevronRight size={17} color={muted} style={styles.moduleChevron} /></Pressable>; })}</View><SectionTitle label="NETWORK HEALTH" /><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>GPS PROOF</Text><Text style={location ? styles.healthGood : styles.healthOffline}>{location ? 'LOCKED' : 'NOT GRANTED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>ENCRYPTED COMMS</Text><Text style={userId ? styles.healthGood : styles.healthOffline}>{userId ? 'LIVE' : 'SIGN IN REQUIRED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>LIVE NETWORK</Text><Text style={networkStatus === 'live' ? styles.healthGood : styles.healthOffline}>{networkStatus.replace('_', ' ').toUpperCase()}</Text></View></GlassPanel></ScrollView>;
 }
 
+function MeetScreen() {
+  const events=useLiveNetworkStore(state=>state.events); const refreshNetwork=useLiveNetworkStore(state=>state.refreshNetwork);
+  const {vehicles,activeVehicleId,userId}=useContentStore();
+  const [creating,setCreating]=useState(false); const [selectedId,setSelectedId]=useState<string|null>(null); const [details,setDetails]=useState<any|null>(null); const [busy,setBusy]=useState(false);
+  const [role,setRole]=useState<'attendee'|'show_car'|'sponsor'>('attendee'); const [sponsorName,setSponsorName]=useState('');
+  const [draft,setDraft]=useState({title:'',location:'',stops:'',description:'',rules:'',startsAt:new Date(Date.now()+3600000).toISOString().slice(0,16)});
+  const updateDraft=(key:keyof typeof draft,value:string)=>setDraft(current=>({...current,[key]:value}));
+  const openMeet=async(id:string)=>{setSelectedId(id);setBusy(true);try{setDetails(await cloudflareApi.request(`/api/events/${id}`));}catch(error){Alert.alert('Meet unavailable',error instanceof Error?error.message:'Could not load meet.');}finally{setBusy(false);}};
+  const createMeet=async()=>{if(!userId){Alert.alert('Sign in required','Create a free pilot account before hosting a meet.');return;}setBusy(true);try{const locations=[{label:'MEET POINT',address:draft.location},...draft.stops.split('\n').map((address,index)=>({label:`STOP ${index+1}`,address:address.trim()})).filter(item=>item.address)];const result=await cloudflareApi.request<{id:string}>('/api/events',{method:'POST',body:JSON.stringify({title:draft.title,description:draft.description,rules:draft.rules,startsAt:new Date(draft.startsAt).toISOString(),locations,allowShowCars:true,allowSponsors:true})});await refreshNetwork();setCreating(false);await openMeet(result.id);}catch(error){Alert.alert('Meet creation failed',error instanceof Error?error.message:'Could not create meet.');}finally{setBusy(false);}};
+  const joinMeet=async()=>{if(!selectedId)return;setBusy(true);try{await cloudflareApi.request(`/api/events/${selectedId}/join`,{method:'POST',body:JSON.stringify({role,vehicleId:role==='show_car'?activeVehicleId:null,sponsorName:role==='sponsor'?sponsorName:null})});await Promise.all([openMeet(selectedId),refreshNetwork()]);}catch(error){Alert.alert('Registration failed',error instanceof Error?error.message:'Could not register.');}finally{setBusy(false);}};
+  if(selectedId&&details){const event=details.event;return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.meetDetailHeader}><Pressable onPress={()=>{setSelectedId(null);setDetails(null);}} style={styles.closeButton}><X size={17} color={paper}/></Pressable><View style={styles.commandCopy}><Text style={styles.eyebrow}>LIVE MEET</Text><Text style={styles.feedTitle}>{String(event.title).toUpperCase()}</Text></View></View><GlassPanel glow><Text style={styles.meetLocation}>{event.location_name}</Text><Text style={styles.emptyCopy}>{event.description||'No description supplied.'}</Text><View style={styles.identityDivider}/><Text style={styles.identityLabel}>RULES</Text><Text style={styles.meetRules}>{event.rules||'Host rules have not been posted.'}</Text></GlassPanel><SectionTitle label="ROUTE LOCATIONS" action={`${details.locations.length} STOPS`}/>{details.locations.map((point:any,index:number)=><View key={point.id} style={styles.utilityRow}><Text style={styles.utilityIndex}>{String(index+1).padStart(2,'0')}</Text><View style={styles.commandCopy}><Text style={styles.utilityText}>{point.label}</Text><Text style={styles.commandMeta}>{point.location_name}</Text></View><MapPin size={17} color={accent}/></View>)}<SectionTitle label="REGISTER AS"/><View style={styles.meetRoleGrid}>{(['attendee','show_car','sponsor'] as const).map(item=><Pressable key={item} onPress={()=>setRole(item)} style={[styles.meetRole,role===item&&styles.meetRoleActive]}><Text style={[styles.segmentText,role===item&&styles.segmentTextActive]}>{item.replace('_',' ').toUpperCase()}</Text></Pressable>)}</View>{role==='show_car'?<View style={styles.fitmentBanner}><CarFront size={19} color={accent}/><Text style={styles.commandTitle}>{vehicles.find(item=>item.id===activeVehicleId)?.nickname.toUpperCase()||'ADD A GARAGE VEHICLE FIRST'}</Text></View>:null}{role==='sponsor'?<TextInput value={sponsorName} onChangeText={setSponsorName} placeholder="Sponsor or brand name" placeholderTextColor={muted} style={styles.authInput}/>:null}<GlassButton label={busy?'REGISTERING':'JOIN MEET'} icon={Check} onPress={()=>void joinMeet()} active/><SectionTitle label="REGISTERED GRID" action={`${details.registrations.length} PILOTS`}/>{details.registrations.map((entry:any)=><View key={entry.user_id} style={styles.meetRegistration}><View style={styles.opponentAvatar}>{entry.photo_url?<Image source={{uri:entry.photo_url}} style={styles.opponentPhoto}/>:<Text style={styles.opponentAvatarText}>{String(entry.username).slice(0,1)}</Text>}</View><View style={styles.commandCopy}><Text style={styles.commandTitle}>{String(entry.username).toUpperCase()}</Text><Text style={styles.commandMeta}>{String(entry.role).replace('_',' ').toUpperCase()}{entry.make?` · ${entry.year} ${entry.make} ${entry.model}`:''}{entry.sponsor_name?` · ${entry.sponsor_name}`:''}</Text></View></View>)}</ScrollView>}
+  return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.raceHeader}><View><Text style={styles.eyebrow}>MEET NETWORK</Text><Text style={styles.feedTitle}>CAR MEETS</Text></View><GlassButton label={creating?'CANCEL':'HOST MEET'} icon={creating?X:Plus} onPress={()=>setCreating(value=>!value)} active/></View>{creating?<GlassPanel style={styles.meetCreatePanel} glow><TextInput value={draft.title} onChangeText={value=>updateDraft('title',value)} placeholder="Meet title" placeholderTextColor={muted} style={styles.authInput}/><TextInput value={draft.location} onChangeText={value=>updateDraft('location',value)} placeholder="Primary address or place" placeholderTextColor={muted} style={styles.authInput}/><TextInput value={draft.stops} onChangeText={value=>updateDraft('stops',value)} placeholder={'Additional route stops, one per line'} placeholderTextColor={muted} multiline style={[styles.authInput,styles.meetTextArea]}/><TextInput value={draft.startsAt} onChangeText={value=>updateDraft('startsAt',value)} placeholder="YYYY-MM-DDTHH:mm" placeholderTextColor={muted} style={styles.authInput}/><TextInput value={draft.description} onChangeText={value=>updateDraft('description',value)} placeholder="Meet description" placeholderTextColor={muted} multiline style={[styles.authInput,styles.meetTextArea]}/><TextInput value={draft.rules} onChangeText={value=>updateDraft('rules',value)} placeholder="Rules, roll-in, safety, eligibility" placeholderTextColor={muted} multiline style={[styles.authInput,styles.meetTextArea]}/><GlassButton label={busy?'CREATING':'PUBLISH MEET'} icon={MapPin} onPress={()=>void createMeet()} active/></GlassPanel>:null}<SectionTitle label="OPEN MEETS" action={`${events.length} LIVE`}/>{events.map(event=><Pressable key={event.id} onPress={()=>void openMeet(event.id)} style={({pressed})=>[styles.meetCard,pressed&&styles.pressed]}><View style={styles.eventAvatar}><MapPin size={21} color={paper}/></View><View style={styles.commandCopy}><Text style={styles.commandTitle}>{event.title.toUpperCase()}</Text><Text style={styles.commandMeta}>{event.locationName} · {event.attendees} REGISTERED · {new Date(event.startTime).toLocaleString()}</Text></View><ChevronRight size={18} color={accent}/></Pressable>)}{!events.length&&!creating?<GlassPanel style={styles.emptyState}><MapPin size={28} color={accent}/><Text style={styles.emptyTitle}>NO OPEN MEETS</Text><Text style={styles.emptyCopy}>Host the first event and register show cars, attendees, and sponsors.</Text></GlassPanel>:null}</ScrollView>;
+}
+
 function UtilityScreen({ kind }: { kind: 'meets' | 'messages' | 'leaderboard' }) {
   const rankings = useContentStore(state => state.rankings);
   const events = useLiveNetworkStore(state => state.events);
@@ -596,8 +618,8 @@ function UtilityScreen({ kind }: { kind: 'meets' | 'messages' | 'leaderboard' })
   const [messageDraft, setMessageDraft] = useState('');
   const title = kind === 'meets' ? 'MEET CONTROL' : kind === 'messages' ? 'SECURE COMMS' : 'SEASON RANKINGS';
   const Icon = kind === 'meets' ? CalendarDays : kind === 'messages' ? MessagesSquare : Trophy;
-  if (kind === 'leaderboard') return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.utilityHero}><Icon size={28} color={accent} /><Text style={styles.feedTitle}>{title}</Text></View>{rankings.map((row, index) => <View key={row.id} style={styles.utilityRow}><Text style={styles.utilityIndex}>{String(index + 1).padStart(2, '0')}</Text><View style={styles.commandCopy}><Text style={styles.utilityText}>{row.alias.toUpperCase()} / {row.tier.toUpperCase()}</Text><Text style={styles.commandMeta}>{row.wins} WINS · {row.entered} RUNS · {row.points} RP · {Math.round(row.topSpeed)} MPH</Text></View></View>)}{rankings.length === 0 ? <GlassPanel style={styles.emptyState}><Trophy size={28} color={accent} /><Text style={styles.emptyTitle}>NO RANKED PILOTS YET</Text><Text style={styles.emptyCopy}>Verified race results will populate this leaderboard.</Text></GlassPanel> : null}</ScrollView>;
-  if (kind === 'meets') return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.utilityHero}><Icon size={28} color={accent} /><Text style={styles.feedTitle}>{title}</Text></View>{events.map((event, index) => <View key={event.id} style={styles.utilityRow}><Text style={styles.utilityIndex}>{String(index + 1).padStart(2, '0')}</Text><View style={styles.commandCopy}><Text style={styles.utilityText}>{event.title.toUpperCase()}</Text><Text style={styles.commandMeta}>{event.locationName} · {event.attendees} RSVP · {new Date(event.startTime).toLocaleString()}</Text></View></View>)}{events.length === 0 ? <GlassPanel style={styles.emptyState}><MapPin size={28} color={accent} /><Text style={styles.emptyTitle}>NO LIVE EVENTS</Text></GlassPanel> : null}</ScrollView>;
+  if (kind === 'leaderboard') return <ScrollView contentContainerStyle={styles.screenContent}><View style={styles.leaderboardHero}><View><Text style={styles.eyebrow}>VERIFIED SEASON</Text><Text style={styles.feedTitle}>{title}</Text></View><Trophy size={34} color={accent}/></View>{rankings.slice(0,3).length?<View style={styles.podium}>{[1,0,2].map(position=>{const row=rankings[position];if(!row)return null;return <View key={row.id} style={[styles.podiumPilot,position===0&&styles.podiumFirst]}><Text style={styles.podiumPlace}>#{position+1}</Text><View style={styles.podiumAvatar}>{row.avatarUrl?<Image source={{uri:row.avatarUrl}} style={styles.opponentPhoto}/>:<Text style={styles.opponentAvatarText}>{row.alias.slice(0,1)}</Text>}</View><Text style={styles.podiumName}>{row.alias.toUpperCase()}</Text><Text style={styles.podiumPoints}>{row.points} RP</Text></View>;})}</View>:null}<SectionTitle label="GLOBAL GRID" action={`${rankings.length} PILOTS`}/>{rankings.map((row,index)=><View key={row.id} style={[styles.leaderboardRow,index<3&&styles.leaderboardRowTop]}><Text style={styles.leaderboardRank}>{String(index+1).padStart(2,'0')}</Text><View style={styles.commandCopy}><Text style={styles.utilityText}>{row.alias.toUpperCase()} / {row.tier.toUpperCase()}</Text><Text style={styles.commandMeta}>{row.wins} WINS · {row.entered} RUNS · REP {row.reputation}</Text></View><Text style={styles.leaderboardPoints}>{row.points} RP</Text></View>)}{rankings.length===0?<GlassPanel style={styles.emptyState}><Trophy size={28} color={accent}/><Text style={styles.emptyTitle}>NO RANKED PILOTS YET</Text><Text style={styles.emptyCopy}>Verified race results will populate this leaderboard.</Text></GlassPanel>:null}</ScrollView>;
+  if (kind === 'meets') return <MeetScreen />;
   if (conversationId) {
     const messages = messagesMap[conversationId] || [];
     return <View style={styles.messageScreen}><View style={styles.messageHeader}><Pressable onPress={() => { unsubscribeFromConversation(conversationId); setConversationId(null); }}><X size={20} color={paper} /></Pressable><Text style={styles.utilityText}>SECURE CHANNEL</Text></View><ScrollView contentContainerStyle={styles.messageList}>{messages.map(message => <View key={message.id} style={[styles.messageBubble, message.sender_id === userId && styles.messageBubbleOwn]}><Text style={styles.messageText}>{message.content}</Text><Text style={styles.messageTime}>{new Date(message.created_at).toLocaleTimeString()}</Text></View>)}</ScrollView><View style={styles.messageComposer}><TextInput value={messageDraft} onChangeText={setMessageDraft} placeholder="Encrypted message" placeholderTextColor={muted} style={styles.commentInput} /><Pressable onPress={async () => { if (!userId || !messageDraft.trim()) return; const result = await sendMessage(conversationId, userId, messageDraft.trim()); if (!result.error) setMessageDraft(''); }}><Send size={19} color={accent} /></Pressable></View></View>;
@@ -673,6 +695,7 @@ function SpecCell({ value, label, accentValue = false }: { value: string; label:
 
 function RaceScreen() {
   const formats = ['0–60', '60–130', '45 SEC', 'TOP SPEED'];
+  const [view, setView] = useState<'stage' | 'inbox'>('stage');
   const [format, setFormat] = useState(formats[1]);
   const [opponents, setOpponents] = useState<string[]>([]);
   const [wager, setWager] = useState(500);
@@ -683,10 +706,16 @@ function RaceScreen() {
   const [schedule, setSchedule] = useState<'now' | 'later'>('now');
   const [contractStatus, setContractStatus] = useState('STAGE CONTRACT');
   const subscription = useRef<Location.LocationSubscription | null>(null);
-  const liveDrivers = useLiveNetworkStore(state => state.drivers);
-  const drivers: Driver[] = liveDrivers.map(driver => ({ id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record, rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery, latitude: driver.latitude, longitude: driver.longitude }));
+  const { pilots, races, challengeTargetId, loadPilots, loadRaces, respondToRace, setChallengeTarget } = useContentStore();
 
-  useEffect(() => () => subscription.current?.remove(), []);
+  useEffect(() => {
+    if (challengeTargetId) {
+      setOpponents([challengeTargetId]);
+      setChallengeTarget(null);
+    }
+    void Promise.all([loadPilots(),loadRaces()]);
+    return () => subscription.current?.remove();
+  }, []);
 
   const toggleOpponent = (id: string) => {
     setOpponents(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
@@ -727,10 +756,11 @@ function RaceScreen() {
     const type = format === '0–60' ? 'Drag Race' : format === 'TOP SPEED' ? 'Time Attack' : 'Roll Race';
     try {
       const data = await cloudflareApi.request<{ id: string }>('/api/races', { method: 'POST', body: JSON.stringify({
-        opponentIds: opponents.map(id => liveDrivers.find(driver => driver.id === id)?.userId).filter(Boolean), raceType: type, routeName: format,
+        opponentIds: opponents, raceType: type, routeName: format,
         distanceMiles: format === '0–60' ? .25 : .5, rules: `${format} GPS-verified run`, startsAt: new Date(Date.now() + (schedule === 'later' ? 3600000 : 0)).toISOString(), wagerCredits: wager,
       }) });
       setContractStatus(`CONTRACT ${data.id.slice(0, 8).toUpperCase()}`);
+      await loadRaces(); setView('inbox');
     } catch (error) {
       setContractStatus((error instanceof Error ? error.message : 'CONTRACT FAILED').toUpperCase().slice(0, 32));
     }
@@ -739,9 +769,12 @@ function RaceScreen() {
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
       <View style={styles.raceHeader}>
-        <View><Text style={styles.eyebrow}>NEW CONTRACT</Text><Text style={styles.raceTitle}>STAGE A RUN</Text></View>
+        <View><Text style={styles.eyebrow}>RACE NETWORK</Text><Text style={styles.raceTitle}>{view === 'stage' ? 'STAGE A RUN' : 'CHALLENGES'}</Text></View>
         <View style={styles.secureMark}><LockKeyhole size={16} color={accent} /><Text style={styles.secureText}>SECURE</Text></View>
       </View>
+      <View style={styles.raceViewTabs}><Pressable onPress={() => setView('stage')} style={[styles.raceViewTab,view==='stage'&&styles.raceViewTabActive]}><Swords size={15} color={view==='stage'?accent:muted}/><Text style={[styles.segmentText,view==='stage'&&styles.segmentTextActive]}>NEW CHALLENGE</Text></Pressable><Pressable onPress={() => setView('inbox')} style={[styles.raceViewTab,view==='inbox'&&styles.raceViewTabActive]}><Bell size={15} color={view==='inbox'?accent:muted}/><Text style={[styles.segmentText,view==='inbox'&&styles.segmentTextActive]}>RACE INBOX · {races.length}</Text></Pressable></View>
+
+      {view === 'inbox' ? <>{races.map(race => { const myEntry=race.participants.find(item=>item.userId===useContentStore.getState().userId); const canRespond=!race.isChallenger&&myEntry?.status==='invited'; return <GlassPanel key={race.id} style={styles.raceContractCard} glow={canRespond}><View style={styles.raceContractTop}><View><Text style={styles.eyebrow}>{race.status.toUpperCase()}</Text><Text style={styles.raceContractTitle}>{race.raceType.toUpperCase()} / {race.routeName}</Text></View><CreditsToken value={race.wagerCredits} compact /></View><Text style={styles.raceContractMeta}>{race.challengerName.toUpperCase()} · {new Date(race.startsAt).toLocaleString()} · {race.participants.length+1} PILOTS</Text><View style={styles.raceParticipantRail}>{race.participants.map(pilot=><View key={pilot.userId} style={styles.raceParticipant}><Text style={styles.raceParticipantName}>{pilot.username.toUpperCase()}</Text><Text style={styles.raceParticipantStatus}>{pilot.status.toUpperCase()} · REP {pilot.reputation}</Text></View>)}</View><View style={styles.sheetActions}>{canRespond?<><GlassButton label="ACCEPT" icon={Check} onPress={async()=>Alert.alert('Race updated',(await respondToRace(race.id,'accept')).toUpperCase())} active grow/><GlassButton label="DECLINE" icon={X} onPress={async()=>Alert.alert('Race updated',(await respondToRace(race.id,'decline')).toUpperCase())} grow/></>:null}<GlassButton label="+1H" icon={CalendarDays} onPress={async()=>Alert.alert('Race rescheduled',(await respondToRace(race.id,'reschedule',new Date(Date.parse(race.startsAt)+3600000).toISOString())).toUpperCase())} grow/></View></GlassPanel>;})}{races.length===0?<GlassPanel style={styles.emptyState}><Swords size={28} color={accent}/><Text style={styles.emptyTitle}>NO RACE CONTRACTS</Text><Text style={styles.emptyCopy}>Stage a GPS-verified challenge and it will appear here for every invited pilot.</Text></GlassPanel>:null}</> : <>
 
       <SectionTitle label="FORMAT" />
       <View style={styles.formatGrid}>
@@ -756,15 +789,16 @@ function RaceScreen() {
       <View style={styles.segmentedControl}>{(['now', 'later'] as const).map(item => <Pressable key={item} onPress={() => setSchedule(item)} style={[styles.segment, schedule === item && styles.segmentActive]}><Text style={[styles.segmentText, schedule === item && styles.segmentTextActive]}>{item === 'now' ? 'RACE NOW' : 'SCHEDULE +1H'}</Text></Pressable>)}</View>
 
       <SectionTitle label="OPPONENTS" action={`${opponents.length} SELECTED`} />
-      {drivers.map(driver => (
-        <Pressable key={driver.id} onPress={() => toggleOpponent(driver.id)} style={[styles.opponentRow, opponents.includes(driver.id) && styles.opponentRowActive]}>
-          <View style={[styles.opponentAvatar, driver.mystery && styles.mysteryAvatar]}><Text style={styles.opponentAvatarText}>{driver.mystery ? '?' : driver.alias.slice(0, 1)}</Text></View>
-          <View style={styles.commandCopy}><Text style={styles.commandTitle}>{driver.alias}</Text><Text style={styles.commandMeta}>{driver.car}</Text></View>
-          <View style={[styles.checkRing, opponents.includes(driver.id) && styles.checkRingActive]}>{opponents.includes(driver.id) ? <View style={styles.checkCore} /> : null}</View>
+      {pilots.map(pilot => (
+        <Pressable key={pilot.id} onPress={() => toggleOpponent(pilot.id)} style={[styles.opponentRow, opponents.includes(pilot.id) && styles.opponentRowActive]}>
+          <View style={styles.opponentAvatar}>{pilot.photoUrl?<Image source={{uri:pilot.photoUrl}} style={styles.opponentPhoto}/>:<Text style={styles.opponentAvatarText}>{pilot.alias.slice(0, 1)}</Text>}</View>
+          <View style={styles.commandCopy}><Text style={styles.commandTitle}>{pilot.alias}</Text><Text style={styles.commandMeta}>{pilot.vehicle||'GARAGE PRIVATE'} · {pilot.wins}–{pilot.losses} · REP {pilot.reputation}</Text></View>
+          <View style={[styles.checkRing, opponents.includes(pilot.id) && styles.checkRingActive]}>{opponents.includes(pilot.id) ? <View style={styles.checkCore} /> : null}</View>
         </Pressable>
       ))}
+      {pilots.length===0?<GlassPanel style={styles.emptyState}><Users size={28} color={accent}/><Text style={styles.emptyTitle}>NO OTHER PILOTS YET</Text><Text style={styles.emptyCopy}>New accounts automatically enter the pilot directory and become challengeable.</Text></GlassPanel>:null}
 
-      <SectionTitle label="CONTRACT WAGER" />
+      <SectionTitle label="CONTRACT WAGER / EACH PILOT" />
       <GlassPanel glow>
         <View style={styles.wagerRow}>
           <Pressable onPress={() => setWager(Math.max(0, wager - 100))} style={styles.wagerControl}><Text style={styles.wagerControlText}>−</Text></Pressable>
@@ -786,6 +820,7 @@ function RaceScreen() {
         </Pressable>
       </GlassPanel>
       <GlassButton label={contractStatus} icon={LockKeyhole} onPress={stageContract} active />
+      </>}
     </ScrollView>
   );
 }
@@ -869,7 +904,7 @@ function AuthPanel({ onClose }: { onClose: () => void }) {
       setStatus((error instanceof Error ? error.message : 'CONNECTION FAILED').toUpperCase());
     }
   };
-  return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill} /><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{mode === 'signin' ? 'ENTER NETWORK' : 'CREATE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>{hasCloudflareBackend ? <><TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={muted} style={styles.authInput} /><TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="Password" placeholderTextColor={muted} style={styles.authInput} onSubmitEditing={submit} /><GlassButton label={mode === 'signin' ? 'SIGN IN' : 'CREATE ACCOUNT'} icon={LockKeyhole} onPress={submit} active /><Pressable onPress={() => setMode(value => value === 'signin' ? 'signup' : 'signin')}><Text style={styles.authSwitch}>{mode === 'signin' ? 'NEW PILOT / CREATE ACCOUNT' : 'EXISTING PILOT / SIGN IN'}</Text></Pressable></> : <View style={styles.emptyNotification}><Radio size={26} color={accent} /><Text style={styles.emptyTitle}>BACKEND CONNECTION REQUIRED</Text><Text style={styles.emptyCopy}>The app will not invent an account or local network data.</Text></View>}{status ? <Text style={styles.networkError}>{status}</Text> : null}</GlassPanel></View>;
+  return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill} /><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{mode === 'signin' ? 'ENTER NETWORK' : 'CREATE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>{hasCloudflareBackend ? <>{mode==='signup'?<View style={styles.freeAccountBanner}><ShieldCheck size={17} color={accent}/><View><Text style={styles.freeAccountTitle}>FREE EMAIL ACCOUNT</Text><Text style={styles.freeAccountMeta}>NO SUBSCRIPTION · NO PAYMENT · INSTANT ACCESS</Text></View></View>:null}<TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={muted} style={styles.authInput} /><TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="Password" placeholderTextColor={muted} style={styles.authInput} onSubmitEditing={submit} /><GlassButton label={mode === 'signin' ? 'SIGN IN' : 'CREATE FREE ACCOUNT'} icon={LockKeyhole} onPress={submit} active /><Pressable onPress={() => {setMode(value => value === 'signin' ? 'signup' : 'signin');setStatus('');}}><Text style={styles.authSwitch}>{mode === 'signin' ? 'NEW PILOT / CREATE FREE ACCOUNT' : 'EXISTING PILOT / SIGN IN'}</Text></Pressable></> : <View style={styles.emptyNotification}><Radio size={26} color={accent} /><Text style={styles.emptyTitle}>BACKEND CONNECTION REQUIRED</Text><Text style={styles.emptyCopy}>The app will not invent an account or local network data.</Text></View>}{status ? <Text style={styles.networkError}>{status}</Text> : null}</GlassPanel></View>;
 }
 
 export function ApexDesignPreview() {
@@ -930,6 +965,7 @@ export function ApexDesignPreview() {
         </View>
         <View style={styles.headerRight}>
           <Pressable onPress={() => setAuthOpen(true)} style={styles.signal}><View style={styles.liveDot} /><Text style={styles.signalText}>{userId ? 'ENCRYPTED' : 'SIGN IN'}</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Open leaderboard" onPress={() => setTab('leaderboard')} style={styles.iconButton}><Trophy size={17} color={paper} /></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={() => setNotificationsOpen(true)} style={styles.iconButton}><Bell size={18} color={paper} />{unreadCount > 0 ? <View style={styles.headerUnread} /> : null}</Pressable>
         </View>
       </View>
@@ -995,10 +1031,10 @@ const styles = StyleSheet.create({
   glassShell: { borderRadius: 12, borderWidth: 1, borderColor: border, overflow: 'hidden', backgroundColor: surface, shadowColor: '#000', shadowOpacity: .36, shadowRadius: 18 },
   glassGlow: { borderColor: 'rgba(145,185,133,.42)', shadowColor: accent, shadowOpacity: 0.12, shadowRadius: 20, elevation: 4 },
   glassBlur: { padding: 14, backgroundColor: 'rgba(4,7,5,.58)' },
-  glassButtonShell: { minHeight: 43, minWidth: 0, flexShrink: 1, borderRadius: 13, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.26)', backgroundColor: 'rgba(255,255,255,.05)', shadowColor: '#FFFFFF', shadowOpacity: .08, shadowRadius: 14 },
+  glassButtonShell: { minHeight: 43, minWidth: 0, flexShrink: 1, borderRadius: 13, overflow: 'hidden', shadowColor: '#FFFFFF', shadowOpacity: .10, shadowRadius: 16 },
   glassButtonGrow: { flex: 1 },
-  glassButton: { minHeight: 41, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,.065)', position: 'relative', overflow: 'hidden' },
-  glassButtonActive: { backgroundColor: 'rgba(126,164,117,.14)', borderColor: 'rgba(218,255,210,.26)' },
+  glassButton: { minHeight: 43, paddingHorizontal: 14, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,.28)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,.075)', position: 'relative', overflow: 'hidden' },
+  glassButtonActive: { backgroundColor: 'rgba(126,164,117,.16)', borderColor: 'rgba(218,255,210,.44)' },
   glassButtonCompact: { minHeight: 36 },
   glassButtonText: { color: paper, fontSize: 9, fontWeight: '900', letterSpacing: 0.8, flexShrink: 1 },
   glassButtonTextActive: { color: paper },
@@ -1032,9 +1068,11 @@ const styles = StyleSheet.create({
   tokenWrap: { flexDirection: 'row', alignItems: 'center', gap: 12, position: 'relative' },
   tokenWrapCompact: { gap: 8 },
   tokenAura: { position: 'absolute', width: 58, height: 58, borderRadius: 29, backgroundColor: 'rgba(145,185,133,.12)' },
-  token: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,.7)' },
+  tokenOrbit: { position: 'absolute', width: 52, height: 52, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)' },
+  token: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,.86)', transform: [{ rotate: '45deg' }], shadowColor: '#B7FFAA', shadowOpacity: .35, shadowRadius: 12 },
   tokenCompact: { width: 36, height: 36, borderRadius: 18 },
-  tokenLetter: { color: '#081006', fontSize: 22, fontWeight: '900', fontStyle: 'italic' },
+  tokenInner: { width: '72%', height: '72%', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(3,8,4,.28)', alignItems: 'center', justifyContent: 'center' },
+  tokenLetter: { color: '#081006', fontSize: 22, fontWeight: '900', fontStyle: 'italic', transform: [{ rotate: '-45deg' }] },
   tokenLetterCompact: { fontSize: 17 },
   tokenValue: { color: paper, fontSize: 17, fontWeight: '900', letterSpacing: 0.5 },
   tokenLabel: { color: muted, fontSize: 7, fontWeight: '900', letterSpacing: 0.9, marginTop: 2 },
@@ -1043,6 +1081,10 @@ const styles = StyleSheet.create({
   commandCopy: { flex: 1, minWidth: 0 },
   commandTitle: { color: paper, fontSize: 11, fontWeight: '900', letterSpacing: 0.6 },
   commandMeta: { color: muted, fontSize: 8, fontWeight: '700', marginTop: 4, letterSpacing: 0.3 },
+  leaderPreview: { borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', borderRadius: 11, backgroundColor: 'rgba(7,10,8,.82)', paddingHorizontal: 12 },
+  leaderPreviewRow: { minHeight: 52, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.09)', flexDirection: 'row', alignItems: 'center', gap: 11 },
+  leaderPreviewRank: { width: 22, color: accent, fontSize: 12, fontWeight: '900' },
+  leaderPreviewOpen: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   badgeRail: { gap: 8, paddingRight: 14 },
   rewardBadge: { width: 145 },
   rewardIcon: { width: 42, height: 42, borderRadius: 21, borderWidth: 1, borderColor: 'rgba(145,185,133,.28)', backgroundColor: 'rgba(145,185,133,.07)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
@@ -1068,6 +1110,8 @@ const styles = StyleSheet.create({
   driverPinText: { color: accent, fontSize: 13, fontWeight: '900' },
   nativePin: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#0A0C0A', borderWidth: 2, borderColor: paper, alignItems: 'center', justifyContent: 'center' },
   nativePinText: { color: accent, fontWeight: '900' },
+  nativeSelfPin: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(125,255,105,.18)', alignItems: 'center', justifyContent: 'center' },
+  nativeSelfCore: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#7DFF69', borderWidth: 3, borderColor: paper },
   driverSheet: { position: 'absolute', left: 14, right: 14, bottom: 88 },
   driverSheetHeader: { flexDirection: 'row', alignItems: 'center' },
   driverAvatar: { width: 48, height: 48, borderRadius: 11, backgroundColor: accent, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
@@ -1089,7 +1133,8 @@ const styles = StyleSheet.create({
   activeRouteTitle: { color: paper, fontSize: 8, fontWeight: '900' },
   activeRouteMeta: { color: accent, fontSize: 7, fontWeight: '800', marginTop: 3 },
   routeClose: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
-  routeButton: { width: 42, minHeight: 39, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(255,255,255,.06)', alignItems: 'center', justifyContent: 'center' },
+  routeButton: { minWidth: 104, minHeight: 39, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(255,255,255,.06)', flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center' },
+  routeButtonText: { color: paper, fontSize: 7, fontWeight: '900' },
   routePanel: { position: 'absolute', left: 14, right: 14, bottom: 248, zIndex: 20 },
   routeComposer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   routeInput: { flex: 1, minWidth: 0, minHeight: 44, color: paper, borderRadius: 10, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.05)', paddingHorizontal: 12, fontSize: 10 },
@@ -1123,6 +1168,17 @@ const styles = StyleSheet.create({
   fitmentIcon: { width: 45, height: 45, borderRadius: 10, backgroundColor: 'rgba(145,185,133,.1)', alignItems: 'center', justifyContent: 'center', marginRight: 11 },
   raceHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
   raceTitle: { color: paper, fontSize: 29, fontWeight: '900', letterSpacing: 1, marginTop: 3 },
+  raceViewTabs: { flexDirection: 'row', gap: 7, marginBottom: 10 },
+  raceViewTab: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: border, borderRadius: 10, backgroundColor: 'rgba(255,255,255,.035)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  raceViewTabActive: { borderColor: 'rgba(145,185,133,.4)', backgroundColor: 'rgba(145,185,133,.10)' },
+  raceContractCard: { marginBottom: 10 },
+  raceContractTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  raceContractTitle: { color: paper, fontSize: 15, fontWeight: '900', marginTop: 5 },
+  raceContractMeta: { color: muted, fontSize: 8, lineHeight: 14, marginTop: 10 },
+  raceParticipantRail: { marginTop: 11, borderTopWidth: 1, borderTopColor: border },
+  raceParticipant: { minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.07)' },
+  raceParticipantName: { color: paper, fontSize: 8, fontWeight: '900' },
+  raceParticipantStatus: { color: accent, fontSize: 7, fontWeight: '800' },
   secureMark: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(145,185,133,.3)', backgroundColor: 'rgba(145,185,133,.07)', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
   secureText: { color: accent, fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
   formatGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -1134,6 +1190,7 @@ const styles = StyleSheet.create({
   opponentRowActive: { borderColor: 'rgba(145,185,133,.42)', backgroundColor: 'rgba(145,185,133,.055)' },
   opponentAvatar: { width: 42, height: 42, borderRadius: 9, backgroundColor: '#1D231D', borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
   opponentAvatarText: { color: accent, fontSize: 14, fontWeight: '900' },
+  opponentPhoto: { width: '100%', height: '100%', resizeMode: 'cover' },
   checkRing: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: muted, alignItems: 'center', justifyContent: 'center' },
   checkRingActive: { borderColor: accent },
   checkCore: { width: 12, height: 12, borderRadius: 6, backgroundColor: accent },
@@ -1269,6 +1326,28 @@ const styles = StyleSheet.create({
   utilityRow: { minHeight: 66, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center' },
   utilityIndex: { color: accent, fontSize: 9, fontWeight: '900', width: 34 },
   utilityText: { color: paper, fontSize: 9, fontWeight: '900', flex: 1 },
+  leaderboardHero: { minHeight: 104, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  podium: { minHeight: 190, flexDirection: 'row', alignItems: 'flex-end', gap: 7, marginBottom: 8 },
+  podiumPilot: { flex: 1, minWidth: 0, height: 145, borderWidth: 1, borderColor: border, borderRadius: 10, backgroundColor: 'rgba(255,255,255,.045)', alignItems: 'center', justifyContent: 'center', padding: 8 },
+  podiumFirst: { height: 180, borderColor: 'rgba(145,185,133,.48)', backgroundColor: 'rgba(145,185,133,.10)' },
+  podiumPlace: { color: accent, fontSize: 10, fontWeight: '900', marginBottom: 8 },
+  podiumAvatar: { width: 46, height: 46, borderRadius: 23, overflow: 'hidden', borderWidth: 1, borderColor: paper, alignItems: 'center', justifyContent: 'center' },
+  podiumName: { color: paper, fontSize: 8, fontWeight: '900', marginTop: 9, textAlign: 'center' },
+  podiumPoints: { color: accent, fontSize: 7, fontWeight: '900', marginTop: 4 },
+  leaderboardRow: { minHeight: 66, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8 },
+  leaderboardRowTop: { backgroundColor: 'rgba(145,185,133,.045)' },
+  leaderboardRank: { width: 36, color: accent, fontSize: 11, fontWeight: '900' },
+  leaderboardPoints: { color: paper, fontSize: 9, fontWeight: '900' },
+  meetDetailHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 13 },
+  meetLocation: { color: paper, fontSize: 15, fontWeight: '900', marginBottom: 9 },
+  meetRules: { color: '#B8C0B8', fontSize: 9, lineHeight: 15, marginTop: 8 },
+  meetRoleGrid: { flexDirection: 'row', gap: 7, marginBottom: 10 },
+  meetRole: { flex: 1, minHeight: 43, borderRadius: 10, borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center' },
+  meetRoleActive: { borderColor: 'rgba(145,185,133,.45)', backgroundColor: 'rgba(145,185,133,.12)' },
+  meetRegistration: { minHeight: 66, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center' },
+  meetCreatePanel: { marginBottom: 11 },
+  meetTextArea: { minHeight: 74, paddingTop: 12, textAlignVertical: 'top' },
+  meetCard: { minHeight: 76, padding: 11, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(7,10,8,.82)', flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   notificationOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 120, backgroundColor: 'rgba(0,0,0,.56)', alignItems: 'flex-end', paddingTop: 58, paddingRight: 10 },
   notificationPanel: { width: '94%', maxWidth: 410 },
   notificationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -1317,6 +1396,9 @@ const styles = StyleSheet.create({
   authPanel: { width: '100%', maxWidth: 420 },
   authInput: { minHeight: 48, color: paper, borderRadius: 11, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(255,255,255,.05)', paddingHorizontal: 12, fontSize: 11, marginTop: 10 },
   authSwitch: { color: accent, fontSize: 8, fontWeight: '900', textAlign: 'center', paddingTop: 14 },
+  freeAccountBanner: { minHeight: 52, marginTop: 12, paddingHorizontal: 11, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(145,185,133,.36)', backgroundColor: 'rgba(145,185,133,.08)', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  freeAccountTitle: { color: paper, fontSize: 9, fontWeight: '900' },
+  freeAccountMeta: { color: accent, fontSize: 6, fontWeight: '800', marginTop: 3 },
   messageScreen: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center', paddingBottom: 88 },
   messageHeader: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center', gap: 12 },
   messageList: { padding: 14, gap: 8, flexGrow: 1, justifyContent: 'flex-end' },

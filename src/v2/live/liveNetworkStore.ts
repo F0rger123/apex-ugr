@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cloudflareApi } from '../../config/cloudflareApi';
+
+const LOCATION_KEY='apex.last-location';
 
 export type LiveCoordinate={latitude:number;longitude:number;accuracy:number|null;altitude:number|null;heading:number;speedKph:number;timestamp:number};
 export type LiveDriver={id:string;userId:string;alias:string;avatarUrl:string|null;vehicle:string|null;latitude:number;longitude:number;heading:number;speedKph:number;driveMode:boolean;cruiseId:string|null;updatedAt:string;mystery:boolean;tier:'Bronze'|'Silver'|'Master'|'Platinum';record:string};
@@ -23,7 +26,8 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
   location:null,drivers:[],events:[],cruises:[],route:null,networkStatus:'offline',error:null,isDriving:false,unit:'mph',distanceKm:0,maxSpeedKph:0,startedAt:null,_watch:null,_poll:null,_userId:null,
   initialize:async()=>{
     get()._poll&&clearInterval(get()._poll!);
-    const session=await cloudflareApi.session();
+    const [session,cached]=await Promise.all([cloudflareApi.session(),AsyncStorage.getItem(LOCATION_KEY)]);
+    if(cached){try{const location=JSON.parse(cached) as LiveCoordinate;if(Number.isFinite(location.latitude)&&Number.isFinite(location.longitude))set({location});}catch{await AsyncStorage.removeItem(LOCATION_KEY);}}
     if(!session){set({_userId:null,networkStatus:'auth_required'});return;}
     set({_userId:session.user.id,networkStatus:'live',error:null});await get().refreshNetwork();
     const poll=setInterval(()=>{void get().refreshNetwork();},5000);set({_poll:poll});
@@ -31,7 +35,7 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
   lockLocation:async()=>{
     set({error:null});const permission=await Location.requestForegroundPermissionsAsync();
     if(permission.status!=='granted'){set({networkStatus:'gps_required',error:'Precise location permission is required for Radar and Drive Mode.'});return;}
-    const next=coordinate(await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.BestForNavigation}));set({location:next,networkStatus:get()._userId?'live':'gps_locked'});
+    const next=coordinate(await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.BestForNavigation}));set({location:next,networkStatus:get()._userId?'live':'gps_locked'});await AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(next));
     if(get()._userId) await publish(next,false).catch(error=>set({error:error instanceof Error?error.message:'Location publish failed'}));
   },
   startDrive:async()=>{
@@ -41,6 +45,7 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
     const watch=await Location.watchPositionAsync({accuracy:Location.Accuracy.BestForNavigation,timeInterval:500,distanceInterval:1},position=>{
       const next=coordinate(position);const previous=get().location;const distance=previous&&next.accuracy!==null&&next.accuracy<=65?segmentKm(previous,next):0;
       set(state=>({location:next,distanceKm:state.distanceKm+Math.min(distance,.5),maxSpeedKph:Math.max(state.maxSpeedKph,next.speedKph),networkStatus:state._userId?'live':'gps_locked'}));
+      void AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(next));
       if(get()._userId) void publish(next,true).catch(error=>set({error:error instanceof Error?error.message:'Live position failed'}));
     });set({_watch:watch});
   },
