@@ -76,24 +76,16 @@ export const playEngineSound = (engineType: string = 'VR38DETT Twin-Turbo') => {
   }
 };
 
-export const playInterfaceSound = (kind: 'select' | 'unlock' | 'error' = 'select') => {
+export const playInterfaceSound = (kind: 'select' | 'unlock' | 'error' | 'key' | 'toggle' | 'drive' | 'reward' = 'select') => {
   if (typeof window === 'undefined' || !('AudioContext' in window || 'webkitAudioContext' in window)) return;
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     const context = new AudioContextClass();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
     const now = context.currentTime;
-    oscillator.type = kind === 'unlock' ? 'sine' : kind === 'error' ? 'sawtooth' : 'triangle';
-    oscillator.frequency.setValueAtTime(kind === 'unlock' ? 340 : kind === 'error' ? 190 : 180, now);
-    oscillator.frequency.exponentialRampToValueAtTime(kind === 'unlock' ? 980 : kind === 'error' ? 48 : 290, now + (kind === 'unlock' ? .28 : kind === 'error' ? .22 : .08));
-    gain.gain.setValueAtTime(.0001, now);
-    gain.gain.exponentialRampToValueAtTime(kind === 'unlock' ? .09 : .035, now + .015);
-    gain.gain.exponentialRampToValueAtTime(.0001, now + (kind === 'unlock' ? .34 : kind === 'error' ? .26 : .11));
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + (kind === 'unlock' ? .36 : kind === 'error' ? .28 : .12));
+    const notes=kind==='reward'?[440,660,990]:kind==='drive'?[72,108]:[kind==='unlock'?340:kind==='error'?190:kind==='key'?520:kind==='toggle'?260:180];
+    const duration=kind==='reward'?.42:kind==='unlock'?.34:kind==='error'?.26:kind==='drive'?.3:kind==='key'?.045:.11;
+    notes.forEach((frequency,index)=>{const oscillator=context.createOscillator(),gain=context.createGain(),start=now+index*(kind==='reward'?.07:.018);oscillator.type=kind==='error'?'sawtooth':kind==='drive'?'sawtooth':kind==='unlock'||kind==='reward'?'sine':'triangle';oscillator.frequency.setValueAtTime(frequency,start);oscillator.frequency.exponentialRampToValueAtTime(kind==='error'?48:frequency*(kind==='key'?.92:1.34),start+duration);gain.gain.setValueAtTime(.0001,start);gain.gain.exponentialRampToValueAtTime(kind==='key'?.009:kind==='reward'?.055:kind==='drive'?.045:kind==='unlock'?.09:.028,start+.012);gain.gain.exponentialRampToValueAtTime(.0001,start+duration);oscillator.connect(gain);gain.connect(context.destination);oscillator.start(start);oscillator.stop(start+duration+.02);});
+    setTimeout(()=>void context.close(),Math.ceil((duration+notes.length*.08)*1000));
   } catch {
     // Audio remains optional when a browser blocks playback.
   }
