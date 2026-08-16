@@ -11,7 +11,7 @@ export type RaceContract={id:string;challengerId:string;challengerName:string;ra
 
 interface ContentState {
   userId:string|null;
-  profile:{alias:string;displayName:string;credits:number;points:number;tier:string;wins:number;entered:number;reputation:number}|null;
+  profile:{alias:string;displayName:string;credits:number;points:number;tier:string;wins:number;entered:number;reputation:number;isDeveloper:boolean}|null;
   posts:LivePost[]; rankings:Ranking[]; pilots:PilotDirectoryEntry[]; races:RaceContract[]; vehicles:ActiveVehicle[]; activeVehicleId:string|null; challengeTargetId:string|null; radarTargetId:string|null;
   products:ProviderProduct[]; providers:ProviderLink[]; loading:boolean; error:string|null;
   initialize:()=>Promise<void>; loadFeed:()=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>; toggleFollow:(userId:string)=>Promise<void>;
@@ -25,7 +25,7 @@ export const useContentStore=create<ContentState>((set,get)=>({
     const session=await cloudflareApi.session();
     if(!session){set({userId:null,profile:null,posts:[],rankings:[],vehicles:[]});return;}
     const user=session.user;
-    set({userId:user.id,profile:{alias:user.username,displayName:user.displayName,credits:user.credits,points:user.points,tier:user.tier,wins:user.wins,entered:user.wins+user.losses,reputation:user.reputation},error:null});
+    set({userId:user.id,profile:{alias:user.username,displayName:user.displayName,credits:user.credits,points:user.points,tier:user.tier,wins:user.wins,entered:user.wins+user.losses,reputation:user.reputation,isDeveloper:Boolean(user.isDeveloper)},error:null});
     await Promise.all([get().loadFeed(),get().loadRankings(),get().loadPilots(),get().loadRaces(),get().loadVehicles()]);
   },
   loadFeed:async()=>{

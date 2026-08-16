@@ -5,7 +5,7 @@ const configuredBase = process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') 
 
 export type CloudflareSession = {
   token: string;
-  user: { id: string; email: string; username: string; displayName: string; avatarUrl: string | null; credits: number; points: number; tier: string; wins: number; losses: number; reputation: number; declineStreak: number };
+  user: { id: string; email: string; username: string; displayName: string; avatarUrl: string | null; credits: number; points: number; tier: string; wins: number; losses: number; reputation: number; declineStreak: number; isDeveloper:boolean };
 };
 
 async function token() {
@@ -29,8 +29,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const cloudflareApi = {
   request,
-  async signUp(email: string, password: string) {
-    const session = await request<CloudflareSession>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password }) });
+  async signUp(email: string, password: string, inviteCode?:string) {
+    const session = await request<CloudflareSession>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, inviteCode }) });
     await AsyncStorage.setItem(TOKEN_KEY, session.token);
     return session;
   },

@@ -95,7 +95,7 @@ if (Platform.OS !== 'web') {
   NativePolyline = maps.Polyline;
 }
 
-type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard';
+type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard' | 'access';
 type IconType = any;
 
 interface Driver {
@@ -129,24 +129,26 @@ const rankColors: Record<Driver['rank'], string> = {
   Platinum: '#FFFFFF',
 };
 
-function GridBackdrop() {
-  const scan = useRef(new Animated.Value(-80)).current;
+function AtmosphereBackdrop() {
+  const drift = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const animation = Animated.loop(
       Animated.sequence([
-        Animated.timing(scan, { toValue: 900, duration: 6200, useNativeDriver: true }),
-        Animated.timing(scan, { toValue: -80, duration: 0, useNativeDriver: true }),
+        Animated.timing(drift, { toValue: 1, duration: 14000, useNativeDriver: true }),
+        Animated.timing(drift, { toValue: 0, duration: 14000, useNativeDriver: true }),
       ])
     );
     animation.start();
     return () => animation.stop();
-  }, [scan]);
+  }, [drift]);
 
   return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <View style={styles.gridVerticals}>{[0, 1, 2, 3, 4].map(line => <View key={line} style={styles.gridVertical} />)}</View>
-      <View style={styles.gridHorizontals}>{Array.from({ length: 12 }, (_, line) => <View key={line} style={styles.gridHorizontal} />)}</View>
-      <Animated.View style={[styles.scanline, { transform: [{ translateY: scan }] }]} />
+    <View pointerEvents="none" style={styles.atmosphere}>
+      <Animated.Image source={require('./assets/apex-access-scene.png')} style={[styles.atmosphereImage,{transform:[{scale:drift.interpolate({inputRange:[0,1],outputRange:[1.02,1.09]})},{translateX:drift.interpolate({inputRange:[0,1],outputRange:[-8,8]})}]}]}/>
+      <LinearGradient colors={['rgba(0,0,0,.10)','rgba(1,3,2,.82)','#010201']} style={StyleSheet.absoluteFill}/>
+      <Animated.View style={[styles.lightShard,styles.lightShardOne,{opacity:drift.interpolate({inputRange:[0,1],outputRange:[.08,.24]})}]}/>
+      <Animated.View style={[styles.lightShard,styles.lightShardTwo,{opacity:drift.interpolate({inputRange:[0,1],outputRange:[.18,.05]})}]}/>
+      <View style={styles.filmGrain}/>
     </View>
   );
 }
@@ -400,28 +402,6 @@ function RadarMap({
   );
 }
 
-function RadarScanner() {
-  const sweep = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const animation = Animated.loop(Animated.timing(sweep, { toValue: 1, duration: 3200, useNativeDriver: true }));
-    animation.start();
-    return () => animation.stop();
-  }, [sweep]);
-  const rotation = sweep.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  return (
-    <View pointerEvents="none" style={styles.scannerField}>
-      <View style={[styles.scannerRing, styles.scannerRingOuter]} />
-      <View style={[styles.scannerRing, styles.scannerRingMiddle]} />
-      <View style={[styles.scannerRing, styles.scannerRingInner]} />
-      <View style={styles.scannerAxisHorizontal} />
-      <View style={styles.scannerAxisVertical} />
-      <Animated.View style={[styles.scannerSweep, { transform: [{ rotate: rotation }] }]}>
-        <LinearGradient colors={['rgba(145,185,133,0)', 'rgba(145,185,133,.30)']} style={styles.scannerBeam} />
-      </Animated.View>
-    </View>
-  );
-}
-
 function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [selected, setSelected] = useState<Driver | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<LiveEvent | null>(null);
@@ -613,10 +593,12 @@ function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const networkStatus = useLiveNetworkStore(state => state.networkStatus);
   const location = useLiveNetworkStore(state => state.location);
   const userId = useContentStore(state => state.userId);
+  const isDeveloper = useContentStore(state => Boolean(state.profile?.isDeveloper));
   const modules: { tab: TabKey; label: string; meta: string; icon: IconType }[] = [
     { tab: 'race', label: 'RACE CONTROL', meta: 'Stage, track, spectate', icon: Swords }, { tab: 'meets', label: 'MEETS', meta: 'Routes and live locations', icon: MapPin },
     { tab: 'shop', label: 'PARTS VAULT', meta: 'Verified vehicle fitment', icon: ShoppingBag }, { tab: 'leaderboard', label: 'RANKINGS', meta: 'Season tiers and records', icon: Trophy },
     { tab: 'messages', label: 'COMMS', meta: 'Groups and direct messages', icon: MessagesSquare }, { tab: 'vault', label: 'CREDITS', meta: 'Rewards, wagers, badges', icon: WalletCards },
+    ...(isDeveloper?[{tab:'access' as TabKey,label:'ACCESS CONTROL',meta:'Codes, limits, new pilots',icon:LockKeyhole}]:[]),
   ];
   return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.moreHeader}><Text style={styles.eyebrow}>PILOT SYSTEMS</Text><Text style={styles.feedTitle}>ACCESS GRID</Text><Text style={styles.moreCopy}>All network tools. One encrypted identity.</Text></View><View style={styles.moduleGrid}>{modules.map(module => { const Icon = module.icon; return <Pressable key={module.tab} onPress={() => onTab(module.tab)} style={({ pressed }) => [styles.moduleCard, pressed && styles.pressed]}><View style={styles.moduleIcon}><Icon size={23} color={accent} /></View><Text style={styles.moduleTitle}>{module.label}</Text><Text style={styles.moduleMeta}>{module.meta}</Text><ChevronRight size={17} color={muted} style={styles.moduleChevron} /></Pressable>; })}</View><SectionTitle label="NETWORK HEALTH" /><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>GPS PROOF</Text><Text style={location ? styles.healthGood : styles.healthOffline}>{location ? 'LOCKED' : 'NOT GRANTED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>ENCRYPTED COMMS</Text><Text style={userId ? styles.healthGood : styles.healthOffline}>{userId ? 'LIVE' : 'SIGN IN REQUIRED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>LIVE NETWORK</Text><Text style={networkStatus === 'live' ? styles.healthGood : styles.healthOffline}>{networkStatus.replace('_', ' ').toUpperCase()}</Text></View></GlassPanel></ScrollView>;
 }
@@ -958,18 +940,43 @@ function NotificationCenter({ onClose, onOpen }: { onClose: () => void; onOpen: 
   );
 }
 
-function AuthPanel({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+type InviteCodeRow={id:string;code:string;label:string;max_uses:number;use_count:number;expires_at:string|null;is_active:number;created_at:string};
+type InviteRedemption={code_id:string;email:string;redeemed_at:string;user_id:string;username:string;display_name:string;avatar_url:string|null};
+
+function DeveloperAccessScreen(){
+  const isDeveloper=useContentStore(state=>Boolean(state.profile?.isDeveloper));
+  const [codes,setCodes]=useState<InviteCodeRow[]>([]);const [redemptions,setRedemptions]=useState<InviteRedemption[]>([]);const [label,setLabel]=useState('NIGHT ACCESS');const [limit,setLimit]=useState(10);const [duration,setDuration]=useState<'24h'|'7d'|'30d'|'none'>('7d');const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+  const load=async()=>{try{const data=await cloudflareApi.request<{codes:InviteCodeRow[];redemptions:InviteRedemption[]}>('/api/admin/invites');setCodes(data.codes);setRedemptions(data.redemptions);setError('');}catch(reason){setError(reason instanceof Error?reason.message:'Access control failed.');}};
+  useEffect(()=>{if(isDeveloper)void load();},[isDeveloper]);
+  const create=async()=>{setBusy(true);try{const hours=duration==='24h'?24:duration==='7d'?168:duration==='30d'?720:null;await cloudflareApi.request('/api/admin/invites',{method:'POST',body:JSON.stringify({label,maxUses:limit,expiresAt:hours?new Date(Date.now()+hours*3600000).toISOString():null})});await load();}catch(reason){setError(reason instanceof Error?reason.message:'Code creation failed.');}finally{setBusy(false);}};
+  const toggle=async(id:string)=>{await cloudflareApi.request(`/api/admin/invites/${id}/toggle`,{method:'POST'});await load();};
+  const copyCode=async(code:string)=>{if(Platform.OS==='web'&&navigator.clipboard)await navigator.clipboard.writeText(code);Alert.alert('Access code',`${code}\n\nCopied to clipboard.`);};
+  if(!isDeveloper)return <View style={styles.centeredGate}><LockKeyhole size={32} color={muted}/><Text style={styles.emptyTitle}>DEVELOPER ACCESS REQUIRED</Text></View>;
+  return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.raceHeader}><View><Text style={styles.eyebrow}>DEVELOPER CHANNEL</Text><Text style={styles.feedTitle}>ACCESS CONTROL</Text></View><View style={styles.adminLive}><View style={styles.liveDot}/><Text style={styles.adminLiveText}>OWNER</Text></View></View><GlassPanel glow><Text style={styles.identityLabel}>CREATE PRIVATE CODE</Text><TextInput value={label} onChangeText={setLabel} placeholder="Code label" placeholderTextColor={muted} style={styles.authInput}/><View style={styles.limitRow}><Pressable onPress={()=>setLimit(value=>Math.max(1,value-1))} style={styles.limitButton}><Text style={styles.limitButtonText}>−</Text></Pressable><View style={styles.limitValue}><Text style={styles.creditNumber}>{limit}</Text><Text style={styles.identityLabel}>REDEMPTIONS</Text></View><Pressable onPress={()=>setLimit(value=>Math.min(500,value+1))} style={styles.limitButton}><Plus size={19} color={paper}/></Pressable></View><View style={styles.durationRow}>{(['24h','7d','30d','none'] as const).map(item=><Pressable key={item} onPress={()=>setDuration(item)} style={[styles.durationChoice,duration===item&&styles.durationChoiceActive]}><Text style={[styles.segmentText,duration===item&&styles.segmentTextActive]}>{item.toUpperCase()}</Text></Pressable>)}</View><GlassButton label={busy?'GENERATING':'GENERATE CODE'} icon={LockKeyhole} onPress={()=>void create()} active/></GlassPanel>{error?<Text style={styles.networkError}>{error.toUpperCase()}</Text>:null}<SectionTitle label="ACTIVE CODES" action={`${codes.filter(code=>code.is_active).length} LIVE`}/>{codes.map(code=><View key={code.id} style={[styles.accessCodeCard,!code.is_active&&styles.accessCodeCardDisabled]}><View style={styles.accessCodeTop}><View style={styles.commandCopy}><Text style={styles.accessCode}>{code.code}</Text><Text style={styles.commandMeta}>{code.label} · {code.expires_at?`EXPIRES ${new Date(code.expires_at).toLocaleDateString()}`:'NO EXPIRY'}</Text></View><Pressable onPress={()=>void copyCode(code.code)} style={styles.iconButton}><LockKeyhole size={16} color={paper}/></Pressable></View><View style={styles.codeUsageTrack}><View style={[styles.codeUsageFill,{width:`${Math.min(100,(code.use_count/code.max_uses)*100)}%`}]}/></View><View style={styles.codeUsageRow}><Text style={styles.codeUsage}>{code.use_count} / {code.max_uses} JOINED</Text><Pressable onPress={()=>void toggle(code.id)}><Text style={code.is_active?styles.codeDisable:styles.codeEnable}>{code.is_active?'DISABLE':'ENABLE'}</Text></Pressable></View></View>)}<SectionTitle label="NEW PILOTS" action={`${redemptions.length} TOTAL`}/>{redemptions.map(entry=><View key={entry.user_id} style={styles.joinedPilot}><View style={styles.opponentAvatar}>{entry.avatar_url?<Image source={{uri:entry.avatar_url}} style={styles.opponentPhoto}/>:<Text style={styles.opponentAvatarText}>{entry.username.slice(0,1)}</Text>}</View><View style={styles.commandCopy}><Text style={styles.commandTitle}>{entry.display_name||entry.username}</Text><Text style={styles.commandMeta}>{entry.email} · {new Date(entry.redeemed_at).toLocaleString()}</Text></View><Check size={17} color={accent}/></View>)}</ScrollView>;
+}
+
+function AccessPortal({onUnlock,onExisting}:{onUnlock:(code:string)=>void;onExisting:()=>void}){
+  const [code,setCode]=useState('');const [status,setStatus]=useState('PRIVATE NETWORK');const [unlocking,setUnlocking]=useState(false);const videoRef=useRef<Video|null>(null);const reveal=useRef(new Animated.Value(0)).current;
+  useEffect(()=>{Animated.timing(reveal,{toValue:1,duration:900,useNativeDriver:true}).start();},[reveal]);
+  const verify=async()=>{if(code.replace(/\W/g,'').length<8){setStatus('ENTER A COMPLETE ACCESS CODE');return;}setStatus('VERIFYING CREDENTIAL');try{await cloudflareApi.request('/api/invite/verify',{method:'POST',body:JSON.stringify({code})});setUnlocking(true);setStatus('IDENTITY SLOT UNLOCKED');await videoRef.current?.setPositionAsync(0);await videoRef.current?.playAsync();setTimeout(()=>onUnlock(code.trim().toUpperCase()),5200);}catch(reason){setStatus((reason instanceof Error?reason.message:'ACCESS DENIED').toUpperCase());}};
+  return <View style={styles.accessPortal}><Video ref={videoRef} source={require('./assets/apex-access-unlock.mp4')} style={StyleSheet.absoluteFill} resizeMode={ResizeMode.COVER} isMuted shouldPlay={false}/><LinearGradient colors={['rgba(0,0,0,.18)','rgba(0,0,0,.40)','rgba(0,0,0,.92)']} style={StyleSheet.absoluteFill}/><Animated.View style={[styles.accessPortalContent,{opacity:reveal,transform:[{translateY:reveal.interpolate({inputRange:[0,1],outputRange:[18,0]})}]}]}><View style={styles.accessTop}><ApexLogo/><View><Text style={styles.brand}>APEX UGR</Text><Text style={styles.brandSub}>INVITATION-ONLY NETWORK</Text></View></View><View style={styles.characterPlate}><Text style={styles.characterIndex}>CLASSIFIED // 001</Text><Text style={styles.characterTitle}>{unlocking?'ACCESS GRANTED':'UNKNOWN PILOT'}</Text><Text style={styles.characterMeta}>{unlocking?'INITIALIZING PRIVATE CHANNEL':'NO PUBLIC REGISTRATION · CREDENTIAL REQUIRED'}</Text></View><BlurView intensity={48} tint="dark" style={styles.lockConsole}><View style={styles.lockStatus}><View style={[styles.lockStatusDot,unlocking&&styles.lockStatusDotOpen]}/><Text style={styles.lockStatusText}>{status}</Text></View><TextInput value={code} onChangeText={value=>setCode(value.toUpperCase())} editable={!unlocking} autoCapitalize="characters" autoCorrect={false} placeholder="APEX-XXXX-XXXX" placeholderTextColor="#707672" style={styles.codeInput} onSubmitEditing={()=>void verify()}/><GlassButton label={unlocking?'UNLOCKING':'UNLOCK NETWORK'} icon={unlocking?Check:LockKeyhole} onPress={()=>void verify()} active/><Pressable onPress={onExisting} disabled={unlocking}><Text style={styles.existingAccess}>EXISTING PILOT / SECURE SIGN IN</Text></Pressable></BlurView></Animated.View>{unlocking?<View pointerEvents="none" style={styles.unlockFlash}><View style={styles.unlockBar}/><Text style={styles.unlockStamp}>CREDENTIAL ACCEPTED</Text></View>:null}</View>;
+}
+
+function AuthPanel({ onClose, initialMode='signin', inviteCode }: { onClose: () => void;initialMode?:'signin'|'signup';inviteCode?:string|null }) {
+  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState('');
+  const signedInProfile=useContentStore(state=>state.profile);
+  const signedInId=useContentStore(state=>state.userId);
+  const signOut=async()=>{await cloudflareApi.signOut();useLiveNetworkStore.getState().dispose();await Promise.all([useContentStore.getState().initialize(),useLiveNetworkStore.getState().initialize()]);onClose();};
   const submit = async () => {
     if (!hasCloudflareBackend) { setStatus('APEX BACKEND HAS NOT BEEN PROVISIONED'); return; }
     if (!email.trim() || password.length < 8) { setStatus('ENTER AN EMAIL AND 8+ CHARACTER PASSWORD'); return; }
     setStatus('CONNECTING');
     try {
       if (mode === 'signin') await cloudflareApi.signIn(email.trim(), password);
-      else await cloudflareApi.signUp(email.trim(), password);
+      else await cloudflareApi.signUp(email.trim(), password,inviteCode||undefined);
       await Promise.all([useContentStore.getState().initialize(), useLiveNetworkStore.getState().initialize()]);
       const userId = useContentStore.getState().userId;
       if (userId) await Promise.all([useNotificationStore.getState().fetchNotifications(userId), useMessageStore.getState().fetchConversations(userId)]);
@@ -978,26 +985,30 @@ function AuthPanel({ onClose }: { onClose: () => void }) {
       setStatus((error instanceof Error ? error.message : 'CONNECTION FAILED').toUpperCase());
     }
   };
-  return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill} /><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{mode === 'signin' ? 'ENTER NETWORK' : 'CREATE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>{hasCloudflareBackend ? <>{mode==='signup'?<View style={styles.freeAccountBanner}><ShieldCheck size={17} color={accent}/><View><Text style={styles.freeAccountTitle}>FREE EMAIL ACCOUNT</Text><Text style={styles.freeAccountMeta}>NO SUBSCRIPTION · NO PAYMENT · INSTANT ACCESS</Text></View></View>:null}<TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={muted} style={styles.authInput} /><TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="Password" placeholderTextColor={muted} style={styles.authInput} onSubmitEditing={submit} /><GlassButton label={mode === 'signin' ? 'SIGN IN' : 'CREATE FREE ACCOUNT'} icon={LockKeyhole} onPress={submit} active /><Pressable onPress={() => {setMode(value => value === 'signin' ? 'signup' : 'signin');setStatus('');}}><Text style={styles.authSwitch}>{mode === 'signin' ? 'NEW PILOT / CREATE FREE ACCOUNT' : 'EXISTING PILOT / SIGN IN'}</Text></Pressable></> : <View style={styles.emptyNotification}><Radio size={26} color={accent} /><Text style={styles.emptyTitle}>BACKEND CONNECTION REQUIRED</Text><Text style={styles.emptyCopy}>The app will not invent an account or local network data.</Text></View>}{status ? <Text style={styles.networkError}>{status}</Text> : null}</GlassPanel></View>;
+  if(signedInId)return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill}/><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{signedInProfile?.displayName||'ACTIVE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper}/></Pressable></View><View style={styles.freeAccountBanner}><ShieldCheck size={17} color={accent}/><View><Text style={styles.freeAccountTitle}>PRIVATE CHANNEL ACTIVE</Text><Text style={styles.freeAccountMeta}>{signedInProfile?.isDeveloper?'DEVELOPER AUTHORITY':'INVITED MEMBER'}</Text></View></View><View style={styles.identityDivider}/><GlassButton label="SIGN OUT + LOCK" icon={LockKeyhole} onPress={()=>void signOut()}/></GlassPanel></View>;
+  return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill} /><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{mode === 'signin' ? 'ENTER NETWORK' : 'CREATE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>{hasCloudflareBackend ? <>{mode==='signup'?<View style={styles.freeAccountBanner}><ShieldCheck size={17} color={accent}/><View><Text style={styles.freeAccountTitle}>{inviteCode?'PRIVATE SLOT RESERVED':'DEVELOPER REGISTRATION'}</Text><Text style={styles.freeAccountMeta}>{inviteCode||'OWNER EMAIL REQUIRED'}</Text></View></View>:null}<TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={muted} style={styles.authInput} /><TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="Password" placeholderTextColor={muted} style={styles.authInput} onSubmitEditing={submit} /><GlassButton label={mode === 'signin' ? 'SIGN IN' : 'CREATE PILOT'} icon={LockKeyhole} onPress={submit} active /><Pressable onPress={() => {setMode(value => value === 'signin' ? 'signup' : 'signin');setStatus('');}}><Text style={styles.authSwitch}>{mode === 'signin' ? 'DEVELOPER OR INVITED PILOT / CREATE ACCOUNT' : 'EXISTING PILOT / SIGN IN'}</Text></Pressable></> : <View style={styles.emptyNotification}><Radio size={26} color={accent} /><Text style={styles.emptyTitle}>BACKEND CONNECTION REQUIRED</Text><Text style={styles.emptyCopy}>The app will not invent an account or local network data.</Text></View>}{status ? <Text style={styles.networkError}>{status}</Text> : null}</GlassPanel></View>;
 }
 
 export function ApexDesignPreview() {
   const [tab, setTab] = useState<TabKey>('command');
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authMode,setAuthMode]=useState<'signin'|'signup'>('signin');
+  const [inviteCode,setInviteCode]=useState<string|null>(null);
+  const [booted,setBooted]=useState(false);
   const unreadCount = useNotificationStore(state => state.unreadCount);
   const userId = useContentStore(state => state.userId);
   const entrance = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     const initialize = async () => {
-      await Promise.all([useLiveNetworkStore.getState().initialize(), useContentStore.getState().initialize()]);
-      const userId = useContentStore.getState().userId;
-      if (userId) {
-        await useNotificationStore.getState().fetchNotifications(userId);
-        useNotificationStore.getState().subscribeToNotifications(userId);
-        await useMessageStore.getState().fetchConversations(userId);
-      }
+      try{await Promise.all([useLiveNetworkStore.getState().initialize(), useContentStore.getState().initialize()]);
+        const userId = useContentStore.getState().userId;
+        if (userId) {
+          await useNotificationStore.getState().fetchNotifications(userId);
+          useNotificationStore.getState().subscribeToNotifications(userId);
+          await useMessageStore.getState().fetchConversations(userId);
+        }}finally{setBooted(true);}
     };
     initialize();
     if (Platform.OS !== 'web') return () => useLiveNetworkStore.getState().dispose();
@@ -1026,20 +1037,24 @@ export function ApexDesignPreview() {
     if (tab === 'vault') return <VaultScreen />;
     if (tab === 'shop') return <ShopScreen />;
     if (tab === 'leaderboard') return <LeaderboardScreen />;
+    if (tab === 'access') return <DeveloperAccessScreen />;
     if (tab === 'meets' || tab === 'messages') return <UtilityScreen kind={tab} />;
     return <CommandScreen onTab={setTab} />;
   }, [tab]);
 
+  if(!booted)return <SafeAreaView style={styles.app}><AtmosphereBackdrop/><View style={styles.bootScreen}><ApexLogo/><Text style={styles.bootLabel}>ESTABLISHING PRIVATE CHANNEL</Text></View></SafeAreaView>;
+  if(!userId)return <SafeAreaView style={styles.app}><AccessPortal onUnlock={code=>{setInviteCode(code);setAuthMode('signup');setAuthOpen(true);}} onExisting={()=>{setInviteCode(null);setAuthMode('signin');setAuthOpen(true);}}/>{authOpen?<AuthPanel key={`${authMode}-${inviteCode||'owner'}`} onClose={()=>setAuthOpen(false)} initialMode={authMode} inviteCode={inviteCode}/>:null}</SafeAreaView>;
+
   return (
     <SafeAreaView style={styles.app}>
-      <GridBackdrop />
+      <AtmosphereBackdrop />
       <View style={styles.header}>
         <View style={styles.brandLockup}>
           <ApexLogo />
           <View><Text style={styles.brand}>APEX UGR</Text><Text style={styles.brandSub}>UNDERGROUND RACING NETWORK</Text></View>
         </View>
         <View style={styles.headerRight}>
-          <Pressable onPress={() => setAuthOpen(true)} style={styles.signal}><View style={styles.liveDot} /><Text style={styles.signalText}>{userId ? 'ENCRYPTED' : 'SIGN IN'}</Text></Pressable>
+          <Pressable onPress={() => {setAuthMode('signin');setAuthOpen(true);}} style={styles.signal}><View style={styles.liveDot} /><Text style={styles.signalText}>ENCRYPTED</Text></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Open leaderboard" onPress={() => setTab('leaderboard')} style={styles.iconButton}><Trophy size={17} color={paper} /></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={() => setNotificationsOpen(true)} style={styles.iconButton}><Bell size={18} color={paper} />{unreadCount > 0 ? <View style={styles.headerUnread} /> : null}</Pressable>
         </View>
@@ -1054,7 +1069,7 @@ export function ApexDesignPreview() {
           <BlurView intensity={42} tint="dark" style={styles.tabBar}>
             {tabs.map(item => {
               const Icon = item.icon;
-              const activeTab = tab === item.key || (item.key === 'more' && ['race', 'vault', 'shop', 'meets', 'messages', 'leaderboard'].includes(tab));
+              const activeTab = tab === item.key || (item.key === 'more' && ['race', 'vault', 'shop', 'meets', 'messages', 'leaderboard','access'].includes(tab));
               return (
                 <Pressable key={item.key} onPress={() => setTab(item.key)} style={styles.tabItem}>
                   <View style={[styles.tabIcon, activeTab && styles.tabIconActive]}><Icon size={19} color={activeTab ? accent : muted} strokeWidth={2.1} /></View>
@@ -1067,7 +1082,7 @@ export function ApexDesignPreview() {
       </View>
 
       {notificationsOpen ? <NotificationCenter onClose={() => setNotificationsOpen(false)} onOpen={setTab} /> : null}
-      {authOpen ? <AuthPanel onClose={() => setAuthOpen(false)} /> : null}
+      {authOpen ? <AuthPanel onClose={() => setAuthOpen(false)} initialMode={authMode} /> : null}
     </SafeAreaView>
   );
 }
@@ -1085,11 +1100,14 @@ const darkMapStyle = [
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: '#010201', overflow: 'hidden' },
   main: { flex: 1 },
-  gridVerticals: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', justifyContent: 'space-around', opacity: 0.18 },
-  gridVertical: { width: 1, height: '100%', backgroundColor: '#182019' },
-  gridHorizontals: { ...StyleSheet.absoluteFillObject, justifyContent: 'space-around', opacity: 0.14 },
-  gridHorizontal: { width: '100%', height: 1, backgroundColor: '#182019' },
-  scanline: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: accent, shadowColor: accent, shadowRadius: 10, shadowOpacity: 0.35 },
+  atmosphere: { ...StyleSheet.absoluteFillObject, overflow: 'hidden', backgroundColor: '#010201' },
+  atmosphereImage: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%', resizeMode: 'cover', opacity: .12 },
+  lightShard: { position: 'absolute', width: 1, height: '145%', backgroundColor: '#FFFFFF', top: '-18%', transform: [{rotate:'18deg'}], shadowColor: '#FFFFFF', shadowOpacity: .55, shadowRadius: 18 },
+  lightShardOne: { left: '22%' },
+  lightShardTwo: { right: '18%' },
+  filmGrain: { ...StyleSheet.absoluteFillObject, opacity: .16, borderWidth: 1, borderColor: 'rgba(255,255,255,.025)' },
+  bootScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  bootLabel: { color: muted, fontSize: 8, fontWeight: '900', letterSpacing: 1.5 },
   header: { height: 66, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: border, backgroundColor: 'rgba(1,3,2,.95)', zIndex: 20 },
   brandLockup: { flexDirection: 'row', alignItems: 'center' },
   brandMark: { width: 34, height: 34, borderWidth: 1, borderColor: accent, alignItems: 'center', justifyContent: 'center', marginRight: 10, transform: [{ rotate: '45deg' }] },
@@ -1362,25 +1380,16 @@ const styles = StyleSheet.create({
   ledgerMeta: { color: muted, fontSize: 7, fontWeight: '800', marginTop: 3 },
   ledgerValue: { color: paper, fontSize: 11, fontWeight: '900' },
   tabBarPositioner: { position: 'absolute', left: 0, right: 0, bottom: 10, alignItems: 'center', zIndex: 50 },
-  tabBarShell: { width: '95%', maxWidth: 700, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.20)', backgroundColor: 'rgba(2,4,3,.86)', shadowColor: '#000', shadowOpacity: .55, shadowRadius: 20 },
-  tabBar: { height: 68, flexDirection: 'row', backgroundColor: 'rgba(3,6,4,.67)', paddingHorizontal: 5 },
+  tabBarShell: { width: '95%', maxWidth: 700, borderRadius: 25, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.30)', backgroundColor: 'rgba(6,8,7,.52)', shadowColor: '#FFFFFF', shadowOpacity: .11, shadowRadius: 24 },
+  tabBar: { height: 70, flexDirection: 'row', backgroundColor: 'rgba(9,12,10,.48)', paddingHorizontal: 6 },
   tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  tabIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  tabIconActive: { backgroundColor: 'rgba(145,185,133,.14)', borderWidth: 1, borderColor: 'rgba(145,185,133,.32)' },
+  tabIcon: { width: 35, height: 35, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  tabIconActive: { backgroundColor: 'rgba(255,255,255,.13)', borderWidth: 1, borderColor: 'rgba(255,255,255,.42)', shadowColor:'#FFFFFF',shadowOpacity:.24,shadowRadius:12,transform:[{translateY:-2}] },
   tabLabel: { color: muted, fontSize: 6, fontWeight: '900', letterSpacing: 0.5, marginTop: 3 },
   tabLabelActive: { color: paper },
   rewardToast: { position: 'absolute', top: 78, alignSelf: 'center', backgroundColor: accent, borderRadius: 22, paddingHorizontal: 15, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 7, zIndex: 100, shadowColor: accent, shadowOpacity: 0.4, shadowRadius: 18 },
   rewardToastText: { color: '#050705', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
   headerUnread: { position: 'absolute', width: 7, height: 7, borderRadius: 4, backgroundColor: accent, right: 3, top: 2, borderWidth: 1, borderColor: '#020302' },
-  scannerField: { position: 'absolute', width: 260, height: 260, left: '50%', top: '50%', marginLeft: -130, marginTop: -130, alignItems: 'center', justifyContent: 'center', opacity: .82 },
-  scannerRing: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: 'rgba(145,185,133,.28)' },
-  scannerRingOuter: { width: 250, height: 250 },
-  scannerRingMiddle: { width: 166, height: 166 },
-  scannerRingInner: { width: 82, height: 82 },
-  scannerAxisHorizontal: { position: 'absolute', width: 250, height: 1, backgroundColor: 'rgba(145,185,133,.18)' },
-  scannerAxisVertical: { position: 'absolute', width: 1, height: 250, backgroundColor: 'rgba(145,185,133,.18)' },
-  scannerSweep: { width: 250, height: 250, position: 'absolute' },
-  scannerBeam: { position: 'absolute', left: 125, top: 0, width: 125, height: 125, borderTopRightRadius: 125 },
   radarFilters: { position: 'absolute', top: 103, left: 14, flexDirection: 'row', gap: 5 },
   radarFilter: { paddingHorizontal: 9, paddingVertical: 7, borderRadius: 9, borderWidth: 1, borderColor: border, backgroundColor: 'rgba(2,4,3,.82)' },
   radarFilterActive: { borderColor: 'rgba(145,185,133,.40)', backgroundColor: 'rgba(145,185,133,.12)' },
@@ -1567,6 +1576,45 @@ const styles = StyleSheet.create({
   freeAccountBanner: { minHeight: 52, marginTop: 12, paddingHorizontal: 11, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(145,185,133,.36)', backgroundColor: 'rgba(145,185,133,.08)', flexDirection: 'row', alignItems: 'center', gap: 10 },
   freeAccountTitle: { color: paper, fontSize: 9, fontWeight: '900' },
   freeAccountMeta: { color: accent, fontSize: 6, fontWeight: '800', marginTop: 3 },
+  accessPortal: { flex: 1, backgroundColor: '#010101', overflow: 'hidden' },
+  accessPortalContent: { flex: 1, justifyContent: 'space-between', paddingHorizontal: 18, paddingTop: 24, paddingBottom: 24, width: '100%', maxWidth: 560, alignSelf: 'center' },
+  accessTop: { flexDirection: 'row', alignItems: 'center' },
+  characterPlate: { marginTop: 'auto', marginBottom: 18, borderLeftWidth: 2, borderLeftColor: 'rgba(255,255,255,.72)', paddingLeft: 12 },
+  characterIndex: { color: '#A7AEA9', fontSize: 7, fontWeight: '900', letterSpacing: 1.4 },
+  characterTitle: { color: paper, fontSize: 30, fontWeight: '900', marginTop: 5 },
+  characterMeta: { color: '#A7AEA9', fontSize: 7, fontWeight: '900', letterSpacing: .8, marginTop: 5 },
+  lockConsole: { borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,.30)', backgroundColor: 'rgba(5,7,6,.54)', padding: 14 },
+  lockStatus: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
+  lockStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#6B716D' },
+  lockStatusDotOpen: { backgroundColor: accent, shadowColor: accent, shadowOpacity: .8, shadowRadius: 8 },
+  lockStatusText: { color: '#D7DBD8', fontSize: 7, fontWeight: '900', letterSpacing: 1 },
+  codeInput: { height: 58, color: paper, fontSize: 19, fontWeight: '900', letterSpacing: 2, textAlign: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,.25)', backgroundColor: 'rgba(255,255,255,.07)', borderRadius: 12, marginBottom: 10 },
+  existingAccess: { color: '#C2C7C3', fontSize: 7, fontWeight: '900', textAlign: 'center', paddingTop: 14, letterSpacing: .8 },
+  unlockFlash: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.04)' },
+  unlockBar: { position: 'absolute', left: 0, right: 0, height: 1, top: '50%', backgroundColor: '#FFFFFF', shadowColor: '#FFFFFF', shadowOpacity: 1, shadowRadius: 18 },
+  unlockStamp: { color: paper, borderWidth: 1, borderColor: 'rgba(255,255,255,.62)', backgroundColor: 'rgba(0,0,0,.76)', paddingHorizontal: 18, paddingVertical: 10, fontSize: 9, fontWeight: '900', letterSpacing: 1.8 },
+  centeredGate: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  adminLive: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: border, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7 },
+  adminLiveText: { color: paper, fontSize: 7, fontWeight: '900' },
+  limitRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginVertical: 13 },
+  limitButton: { width: 44, height: 44, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,.27)', backgroundColor: 'rgba(255,255,255,.07)', alignItems: 'center', justifyContent: 'center' },
+  limitButtonText: { color: paper, fontSize: 24, fontWeight: '700' },
+  limitValue: { minWidth: 110, alignItems: 'center' },
+  creditNumber: { color: paper, fontSize: 24, fontWeight: '900' },
+  durationRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
+  durationChoice: { flex: 1, minHeight: 38, borderRadius: 10, borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.035)' },
+  durationChoiceActive: { borderColor: 'rgba(255,255,255,.40)', backgroundColor: 'rgba(255,255,255,.12)' },
+  accessCodeCard: { borderWidth: 1, borderColor: 'rgba(255,255,255,.20)', borderRadius: 12, backgroundColor: 'rgba(7,10,8,.76)', padding: 12, marginBottom: 8 },
+  accessCodeCardDisabled: { opacity: .48 },
+  accessCodeTop: { flexDirection: 'row', alignItems: 'center' },
+  accessCode: { color: paper, fontSize: 17, fontWeight: '900', letterSpacing: 1.4 },
+  codeUsageTrack: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,.08)', marginTop: 13, overflow: 'hidden' },
+  codeUsageFill: { height: '100%', backgroundColor: '#EAF7E7' },
+  codeUsageRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 9 },
+  codeUsage: { color: muted, fontSize: 7, fontWeight: '900' },
+  codeDisable: { color: '#E0B0B0', fontSize: 7, fontWeight: '900' },
+  codeEnable: { color: accent, fontSize: 7, fontWeight: '900' },
+  joinedPilot: { minHeight: 66, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center' },
   messageScreen: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center', paddingBottom: 88 },
   messageHeader: { height: 54, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: border, flexDirection: 'row', alignItems: 'center', gap: 12 },
   messageList: { padding: 14, gap: 8, flexGrow: 1, justifyContent: 'flex-end' },

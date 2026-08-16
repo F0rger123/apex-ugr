@@ -18,6 +18,19 @@ const cors = {
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
 };
 
+const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
+
+function normalizeInviteCode(value: string) {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function createInviteCode() {
+  const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes=crypto.getRandomValues(new Uint8Array(8));
+  const value=Array.from(bytes,byte=>alphabet[byte%alphabet.length]).join('');
+  return `APEX-${value.slice(0,4)}-${value.slice(4)}`;
+}
+
 function json(body: unknown, status = 200) {
   return Response.json(body, { status, headers: cors });
 }
@@ -48,6 +61,7 @@ function publicUser(user: UserRow) {
     id: user.id, email: user.email, username: user.username, displayName: user.display_name,
     avatarUrl: user.avatar_url, credits: user.credits, points: user.points, tier: user.tier,
     wins: user.wins, losses: user.losses, reputation: user.reputation, declineStreak: user.decline_streak,
+    isDeveloper: user.email.toLowerCase() === DEVELOPER_EMAIL,
   };
 }
 
@@ -139,21 +153,37 @@ async function handle(request: Request, env: Env, path: string) {
     return new Response(object.body,{headers});
   }
 
+  if(path==='invite/verify'&&method==='POST'){
+    const body=await request.json<{code?:string}>();const code=normalizeInviteCode(body.code||'');
+    const invite=await env.DB.prepare(`SELECT label,max_uses,use_count,expires_at FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{label:string;max_uses:number;use_count:number;expires_at:string|null}>();
+    if(!invite)return json({error:'Access code is invalid, expired, or fully redeemed.'},404);
+    return json({valid:true,label:invite.label,remaining:invite.max_uses-invite.use_count,expiresAt:invite.expires_at});
+  }
+
   if (path === 'auth/signup' && method === 'POST') {
-    const body = await request.json<{ email?: string; password?: string }>();
+    const body = await request.json<{ email?: string; password?: string; inviteCode?:string }>();
     const email = body.email?.trim().toLowerCase() || '';
     if (!/^\S+@\S+\.\S+$/.test(email) || (body.password?.length || 0) < 8) return json({ error: 'Use a valid email and at least 8 password characters.' }, 400);
     const usernameBase = email.split('@')[0].replace(/[^a-z0-9_]/g, '').slice(0, 20) || 'pilot';
     const username = `${usernameBase}_${crypto.randomUUID().slice(0, 5)}`;
     const existing=await env.DB.prepare('SELECT 1 found FROM users WHERE email=?').bind(email).first();
     if(existing)return json({error:'An account already exists for that email. Sign in instead or use another email.'},409);
+    let invite:{id:string}|null=null;
+    if(email!==DEVELOPER_EMAIL){
+      const code=normalizeInviteCode(body.inviteCode||'');
+      invite=await env.DB.prepare(`SELECT id FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{id:string}>();
+      if(!invite)return json({error:'A valid private access code is required.'},403);
+      const reserved=await env.DB.prepare(`UPDATE invite_codes SET use_count=use_count+1 WHERE id=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(invite.id,new Date().toISOString()).run();
+      if(!reserved.meta.changes)return json({error:'This access code has reached its limit.'},409);
+    }
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const id = crypto.randomUUID();
     const hash=await passwordHash(body.password!,salt);
     try {
-      await env.DB.prepare(`INSERT INTO users(id,email,username,display_name,password_hash,password_salt) VALUES(?,?,?,?,?,?)`)
-        .bind(id, email, username, usernameBase.toUpperCase(), hash, bytesToBase64(salt)).run();
-    } catch(error) { console.error('signup_insert_failed',error); return json({ error: 'Account creation failed. Please try again.' }, 500); }
+      const statements=[env.DB.prepare(`INSERT INTO users(id,email,username,display_name,password_hash,password_salt) VALUES(?,?,?,?,?,?)`).bind(id,email,username,usernameBase.toUpperCase(),hash,bytesToBase64(salt))];
+      if(invite)statements.push(env.DB.prepare('INSERT INTO invite_redemptions(code_id,user_id,email) VALUES(?,?,?)').bind(invite.id,id,email));
+      await env.DB.batch(statements);
+    } catch(error) { if(invite)await env.DB.prepare('UPDATE invite_codes SET use_count=MAX(0,use_count-1) WHERE id=?').bind(invite.id).run();console.error('signup_insert_failed',error); return json({ error: 'Account creation failed. Please try again.' }, 500); }
     const user = await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?').bind(id).first<UserRow>();
     return json(await createSession(user!, env), 201);
   }
@@ -174,6 +204,25 @@ async function handle(request: Request, env: Env, path: string) {
     const bearer = request.headers.get('authorization')!.replace(/^Bearer\s+/i, '');
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await sha256(bearer)).run();
     return json({ success: true });
+  }
+
+  if(path==='admin/invites'&&method==='GET'){
+    if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
+    const [codes,redemptions]=await Promise.all([env.DB.prepare('SELECT * FROM invite_codes ORDER BY created_at DESC').all(),env.DB.prepare(`SELECT r.code_id,r.email,r.redeemed_at,u.id user_id,u.username,u.display_name,u.avatar_url FROM invite_redemptions r JOIN users u ON u.id=r.user_id ORDER BY r.redeemed_at DESC LIMIT 250`).all()]);
+    return json({codes:codes.results,redemptions:redemptions.results});
+  }
+  if(path==='admin/invites'&&method==='POST'){
+    if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
+    const body=await request.json<{label?:string;maxUses?:number;expiresAt?:string|null}>();const maxUses=Math.min(500,Math.max(1,Math.floor(Number(body.maxUses)||1)));const expiresAt=body.expiresAt&&Number.isFinite(Date.parse(body.expiresAt))?new Date(body.expiresAt).toISOString():null;
+    let code=createInviteCode();while(await env.DB.prepare('SELECT 1 found FROM invite_codes WHERE code=?').bind(code).first())code=createInviteCode();
+    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by) VALUES(?,?,?,?,?,?)').bind(id,code,body.label?.trim().slice(0,60)||'PRIVATE ACCESS',maxUses,expiresAt,user.id).run();
+    return json({id,code,label:body.label?.trim()||'PRIVATE ACCESS',maxUses,expiresAt},201);
+  }
+  const inviteToggle=path.match(/^admin\/invites\/([^/]+)\/toggle$/);
+  if(inviteToggle&&method==='POST'){
+    if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
+    await env.DB.prepare('UPDATE invite_codes SET is_active=CASE is_active WHEN 1 THEN 0 ELSE 1 END WHERE id=?').bind(inviteToggle[1]).run();
+    return json({updated:true});
   }
 
   if (path === 'vehicles' && method === 'GET') {
