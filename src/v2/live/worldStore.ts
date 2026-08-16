@@ -8,17 +8,25 @@ export type RoadReport={id:string;type:'fixed_camera'|'hazard'|'closure'|'danger
 export type Crew={id:string;owner_id:string;name:string;tag:string;member_status:string|null;member_role:string|null;member_count:number};
 export type CrewRequest={crew_id:string;user_id:string;username:string;avatar_url:string|null;created_at:string};
 export type Season={id:string;name:string;starts_at:string;ends_at:string;status:string;reward_credits:number;points:number|null;joined:number};
+export type SafeHouse={id:string;vehicle_id:string|null;name:string;latitude:number;longitude:number;created_at:string};
+export type GameBadge={id:string;name:string;description:string;icon:string;reward_credits:number;earned:number;earned_at:string|null};
+export type Contract={id:string;title:string;description:string;metric:string;target:number;reward_credits:number;badge_id:string|null;progress:number|null;progress_status:string|null;accepted_at:string|null;completed_at:string|null};
 
-interface WorldState{discoveries:Discovery[];territories:Territory[];drops:DeadDrop[];reports:RoadReport[];crews:Crew[];crewRequests:CrewRequest[];seasons:Season[];loading:boolean;error:string|null;
-  refresh:()=>Promise<void>;report:(type:RoadReport['type'],note:string,latitude:number,longitude:number)=>Promise<boolean>;createCrew:(name:string,tag:string)=>Promise<boolean>;joinCrew:(id:string)=>Promise<void>;approveMember:(crewId:string,userId:string)=>Promise<void>;createTerritory:(crewId:string,data:{name:string;latitude:number;longitude:number;radiusM:number;requiredCells:number})=>Promise<boolean>;joinSeason:(id:string)=>Promise<void>;
+interface WorldState{discoveries:Discovery[];territories:Territory[];drops:DeadDrop[];reports:RoadReport[];crews:Crew[];crewRequests:CrewRequest[];seasons:Season[];safeHouses:SafeHouse[];badges:GameBadge[];contracts:Contract[];heat:number;loading:boolean;error:string|null;
+  refresh:()=>Promise<void>;report:(type:RoadReport['type'],note:string,latitude:number,longitude:number)=>Promise<boolean>;createCrew:(name:string,tag:string)=>Promise<boolean>;joinCrew:(id:string)=>Promise<void>;approveMember:(crewId:string,userId:string)=>Promise<void>;createTerritory:(crewId:string,data:{name:string;latitude:number;longitude:number;radiusM:number;requiredCells:number})=>Promise<boolean>;joinSeason:(id:string)=>Promise<void>;createSafeHouse:(data:{name:string;latitude:number;longitude:number;vehicleId?:string|null})=>Promise<boolean>;deleteSafeHouse:(id:string)=>Promise<void>;acceptContract:(id:string)=>Promise<void>;
 }
 
-export const useWorldStore=create<WorldState>((set,get)=>({discoveries:[],territories:[],drops:[],reports:[],crews:[],crewRequests:[],seasons:[],loading:false,error:null,
-  refresh:async()=>{set({loading:true});try{const data=await cloudflareApi.request<Omit<WorldState,'refresh'|'report'|'createCrew'|'joinCrew'|'approveMember'|'createTerritory'|'joinSeason'|'loading'|'error'>>('/api/world');set({...data,loading:false,error:null});}catch(error){set({loading:false,error:error instanceof Error?error.message:'World sync failed.'});}},
+type WorldData=Pick<WorldState,'discoveries'|'territories'|'drops'|'reports'|'crews'|'crewRequests'|'seasons'|'safeHouses'|'badges'|'contracts'|'heat'>;
+
+export const useWorldStore=create<WorldState>((set,get)=>({discoveries:[],territories:[],drops:[],reports:[],crews:[],crewRequests:[],seasons:[],safeHouses:[],badges:[],contracts:[],heat:0,loading:false,error:null,
+  refresh:async()=>{set({loading:true});try{const data=await cloudflareApi.request<WorldData>('/api/world');set({...data,loading:false,error:null});}catch(error){set({loading:false,error:error instanceof Error?error.message:'World sync failed.'});}},
   report:async(type,note,latitude,longitude)=>{try{await cloudflareApi.request('/api/road-reports',{method:'POST',body:JSON.stringify({type,note,latitude,longitude})});await get().refresh();return true;}catch(error){set({error:error instanceof Error?error.message:'Safety report failed.'});return false;}},
   createCrew:async(name,tag)=>{try{await cloudflareApi.request('/api/crews',{method:'POST',body:JSON.stringify({name,tag})});await get().refresh();return true;}catch(error){set({error:error instanceof Error?error.message:'Crew creation failed.'});return false;}},
   joinCrew:async id=>{await cloudflareApi.request(`/api/crews/${id}/join`,{method:'POST'});await get().refresh();},
   approveMember:async(crewId,userId)=>{await cloudflareApi.request(`/api/crews/${crewId}/members/${userId}/approve`,{method:'POST'});await get().refresh();},
   createTerritory:async(crewId,data)=>{try{await cloudflareApi.request(`/api/crews/${crewId}/territories`,{method:'POST',body:JSON.stringify(data)});await get().refresh();return true;}catch(error){set({error:error instanceof Error?error.message:'Territory creation failed.'});return false;}},
   joinSeason:async id=>{await cloudflareApi.request(`/api/seasons/${id}/join`,{method:'POST'});await get().refresh();},
+  createSafeHouse:async data=>{try{await cloudflareApi.request('/api/safe-houses',{method:'POST',body:JSON.stringify(data)});await get().refresh();return true;}catch(error){set({error:error instanceof Error?error.message:'Safe-house registration failed.'});return false;}},
+  deleteSafeHouse:async id=>{await cloudflareApi.request(`/api/safe-houses/${id}`,{method:'DELETE'});await get().refresh();},
+  acceptContract:async id=>{await cloudflareApi.request(`/api/contracts/${id}/accept`,{method:'POST'});await get().refresh();},
 }));

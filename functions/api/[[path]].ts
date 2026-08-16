@@ -92,6 +92,26 @@ async function createSession(user: UserRow, env: Env) {
   return { token, user: publicUser(user) };
 }
 
+async function syncGameProgress(userId:string,env:Env){
+  const [discoveries,drops,territories,safeHouses]=await Promise.all([
+    env.DB.prepare('SELECT COUNT(*) count FROM map_discoveries WHERE user_id=?').bind(userId).first<{count:number}>(),
+    env.DB.prepare('SELECT COUNT(*) count FROM dead_drop_claims WHERE user_id=?').bind(userId).first<{count:number}>(),
+    env.DB.prepare('SELECT COUNT(*) count FROM territory_unlocks WHERE user_id=?').bind(userId).first<{count:number}>(),
+    env.DB.prepare('SELECT COUNT(*) count FROM safe_houses WHERE user_id=?').bind(userId).first<{count:number}>(),
+  ]);
+  const counts:Record<string,number>={discoveries:discoveries?.count||0,drops:drops?.count||0,territories:territories?.count||0,safe_houses:safeHouses?.count||0};
+  if(counts.discoveries>0)await env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'first-trace')").bind(userId).run();
+  const active=await env.DB.prepare(`SELECT p.contract_id,p.status,c.metric,c.target,c.reward_credits,c.badge_id FROM contract_progress p JOIN contracts c ON c.id=p.contract_id WHERE p.user_id=? AND p.status<>'completed'`).bind(userId).all<{contract_id:string;status:string;metric:string;target:number;reward_credits:number;badge_id:string|null}>();
+  const completed:string[]=[];
+  for(const contract of active.results){
+    const progress=Math.min(Number(contract.target),counts[contract.metric]||0);
+    if(progress<Number(contract.target)){await env.DB.prepare('UPDATE contract_progress SET progress=? WHERE contract_id=? AND user_id=?').bind(progress,contract.contract_id,userId).run();continue;}
+    const result=await env.DB.prepare("UPDATE contract_progress SET progress=?,status='completed',completed_at=CURRENT_TIMESTAMP WHERE contract_id=? AND user_id=? AND status<>'completed'").bind(progress,contract.contract_id,userId).run();
+    if(result.meta.changes){const statements=[env.DB.prepare('UPDATE users SET credits=credits+?,points=points+? WHERE id=?').bind(Number(contract.reward_credits),Math.max(10,Math.floor(Number(contract.reward_credits)/10)),userId)];if(contract.badge_id)statements.push(env.DB.prepare('INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,?)').bind(userId,contract.badge_id));await env.DB.batch(statements);completed.push(contract.contract_id);}
+  }
+  return {counts,completed};
+}
+
 function providerSearches(vehicle: Record<string, string | number>, query: string) {
   const terms = encodeURIComponent(`${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''} ${query}`.replace(/\s+/g, ' ').trim());
   const make = String(vehicle.make).toLowerCase();
@@ -300,7 +320,8 @@ async function handle(request: Request, env: Env, path: string) {
       .bind(user.id,body.vehicleId||null,user.id,Number(body.latitude),Number(body.longitude),body.accuracy??null,body.altitude??null,body.speedKph||0,body.heading||0,body.driveMode?1:0,body.cruiseId||null,expires).run();
     await env.DB.prepare('UPDATE users SET top_speed_kph=MAX(top_speed_kph,?) WHERE id=?').bind(Math.max(0,Number(body.speedKph)||0),user.id).run();
     const latitude=Number(body.latitude),longitude=Number(body.longitude),cellLat=Math.round(latitude*500),cellLng=Math.round(longitude*500);
-    await env.DB.prepare('INSERT OR IGNORE INTO map_discoveries(user_id,cell_lat,cell_lng,latitude,longitude) VALUES(?,?,?,?,?)').bind(user.id,cellLat,cellLng,latitude,longitude).run();
+    const discovery=await env.DB.prepare('INSERT OR IGNORE INTO map_discoveries(user_id,cell_lat,cell_lng,latitude,longitude) VALUES(?,?,?,?,?)').bind(user.id,cellLat,cellLng,latitude,longitude).run();
+    if(discovery.meta.changes)await env.DB.prepare("UPDATE users SET heat=MIN(100,heat+2),heat_updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(user.id).run();
     const nearbyDrops=await env.DB.prepare(`SELECT d.* FROM dead_drops d LEFT JOIN dead_drop_claims c ON c.drop_id=d.id AND c.user_id=? WHERE d.is_active=1 AND c.drop_id IS NULL`).bind(user.id).all<Record<string,unknown>>();
     const reachedDrops=nearbyDrops.results.filter(drop=>distanceMeters(latitude,longitude,Number(drop.latitude),Number(drop.longitude))<=Number(drop.radius_m));const claimed:Record<string,unknown>[]=[];
     for(const drop of reachedDrops){const result=await env.DB.prepare('INSERT OR IGNORE INTO dead_drop_claims(drop_id,user_id) VALUES(?,?)').bind(drop.id,user.id).run();if(result.meta.changes){await env.DB.prepare('UPDATE users SET credits=credits+? WHERE id=?').bind(Number(drop.credits),user.id).run();claimed.push(drop);}}
@@ -308,12 +329,13 @@ async function handle(request: Request, env: Env, path: string) {
     const availableTerritories=await env.DB.prepare(`SELECT t.* FROM territories t JOIN crew_members m ON m.crew_id=t.crew_id AND m.user_id=? AND m.status='approved' LEFT JOIN territory_unlocks u ON u.territory_id=t.id AND u.user_id=? WHERE u.territory_id IS NULL`).bind(user.id,user.id).all<Record<string,unknown>>();
     const unlocked=availableTerritories.results.filter(territory=>(discoveryCount?.count||0)>=Number(territory.required_cells)&&distanceMeters(latitude,longitude,Number(territory.latitude),Number(territory.longitude))<=Number(territory.radius_m));
     if(unlocked.length)await env.DB.batch(unlocked.map(territory=>env.DB.prepare('INSERT OR IGNORE INTO territory_unlocks(territory_id,user_id) VALUES(?,?)').bind(territory.id,user.id)));
-    return json({ success: true,expiresAt:expires,shareMinutes,discoveredCells:discoveryCount?.count||1,claimedDrops:claimed.map(drop=>({id:drop.id,title:drop.title,credits:Number(drop.credits)})),unlockedTerritories:unlocked.map(territory=>({id:territory.id,name:territory.name})) });
+    const progress=await syncGameProgress(user.id,env);
+    return json({ success: true,expiresAt:expires,shareMinutes,discoveredCells:discoveryCount?.count||1,claimedDrops:claimed.map(drop=>({id:drop.id,title:drop.title,credits:Number(drop.credits)})),unlockedTerritories:unlocked.map(territory=>({id:territory.id,name:territory.name})),completedContracts:progress.completed });
   }
   if(path==='location'&&method==='DELETE'){await env.DB.prepare('DELETE FROM driver_locations WHERE user_id=?').bind(user.id).run();return json({hidden:true});}
 
   if(path==='world'&&method==='GET'){
-    const [discoveries,territories,drops,reports,crews,seasons,requests]=await Promise.all([
+    const [discoveries,territories,drops,reports,crews,seasons,requests,safeHouses,badges,contracts,heatRow]=await Promise.all([
       env.DB.prepare('SELECT latitude,longitude,discovered_at FROM map_discoveries WHERE user_id=? ORDER BY discovered_at DESC LIMIT 1200').bind(user.id).all(),
       env.DB.prepare(`SELECT t.*,c.name crew_name,c.tag,EXISTS(SELECT 1 FROM territory_unlocks u WHERE u.territory_id=t.id AND u.user_id=?) unlocked FROM territories t JOIN crews c ON c.id=t.crew_id`).bind(user.id).all(),
       env.DB.prepare(`SELECT d.*,EXISTS(SELECT 1 FROM dead_drop_claims c WHERE c.drop_id=d.id AND c.user_id=?) claimed FROM dead_drops d WHERE d.is_active=1`).bind(user.id).all(),
@@ -321,8 +343,23 @@ async function handle(request: Request, env: Env, path: string) {
       env.DB.prepare(`SELECT c.*,m.status member_status,m.role member_role,(SELECT COUNT(*) FROM crew_members x WHERE x.crew_id=c.id AND x.status='approved') member_count FROM crews c LEFT JOIN crew_members m ON m.crew_id=c.id AND m.user_id=? ORDER BY member_count DESC`).bind(user.id).all(),
       env.DB.prepare(`SELECT s.*,e.points,CASE WHEN e.user_id IS NULL THEN 0 ELSE 1 END joined FROM seasons s LEFT JOIN season_entries e ON e.season_id=s.id AND e.user_id=? WHERE s.ends_at>? ORDER BY s.starts_at`).bind(user.id,new Date().toISOString()).all(),
       env.DB.prepare(`SELECT m.crew_id,m.user_id,m.created_at,u.username,u.avatar_url FROM crew_members m JOIN crews c ON c.id=m.crew_id AND c.owner_id=? JOIN users u ON u.id=m.user_id WHERE m.status='pending' ORDER BY m.created_at`).bind(user.id).all(),
+      env.DB.prepare('SELECT id,vehicle_id,name,latitude,longitude,created_at FROM safe_houses WHERE user_id=? ORDER BY created_at DESC').bind(user.id).all(),
+      env.DB.prepare(`SELECT b.*,CASE WHEN ub.user_id IS NULL THEN 0 ELSE 1 END earned,ub.earned_at FROM badges b LEFT JOIN user_badges ub ON ub.badge_id=b.id AND ub.user_id=? ORDER BY earned DESC,b.name`).bind(user.id).all(),
+      env.DB.prepare(`SELECT c.*,p.progress,p.status progress_status,p.accepted_at,p.completed_at FROM contracts c LEFT JOIN contract_progress p ON p.contract_id=c.id AND p.user_id=? WHERE c.status='live' ORDER BY c.title`).bind(user.id).all(),
+      env.DB.prepare(`SELECT MAX(0,heat-CAST((julianday('now')-julianday(COALESCE(heat_updated_at,CURRENT_TIMESTAMP)))*24 AS INTEGER)) heat FROM users WHERE id=?`).bind(user.id).first<{heat:number}>(),
     ]);
-    return json({discoveries:discoveries.results,territories:territories.results,drops:drops.results,reports:reports.results,crews:crews.results,seasons:seasons.results,crewRequests:requests.results});
+    return json({discoveries:discoveries.results,territories:territories.results,drops:drops.results,reports:reports.results,crews:crews.results,seasons:seasons.results,crewRequests:requests.results,safeHouses:safeHouses.results,badges:badges.results,contracts:contracts.results,heat:heatRow?.heat||0});
+  }
+  if(path==='safe-houses'&&method==='POST'){
+    const body=await request.json<{name?:string;latitude?:number;longitude?:number;vehicleId?:string|null}>();if(!body.name?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Safe-house name and current GPS point are required.'},400);
+    const count=await env.DB.prepare('SELECT COUNT(*) count FROM safe_houses WHERE user_id=?').bind(user.id).first<{count:number}>();if((count?.count||0)>=8)return json({error:'Safe-house limit reached.'},409);
+    if(body.vehicleId){const owned=await env.DB.prepare('SELECT 1 found FROM vehicles WHERE id=? AND user_id=?').bind(body.vehicleId,user.id).first();if(!owned)return json({error:'Vehicle is not in your garage.'},403);}
+    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO safe_houses(id,user_id,vehicle_id,name,latitude,longitude) VALUES(?,?,?,?,?,?)').bind(id,user.id,body.vehicleId||null,body.name.trim().slice(0,60),body.latitude,body.longitude).run();await syncGameProgress(user.id,env);return json({id},201);
+  }
+  const safeHouseDelete=path.match(/^safe-houses\/([^/]+)$/);if(safeHouseDelete&&method==='DELETE'){await env.DB.prepare('DELETE FROM safe_houses WHERE id=? AND user_id=?').bind(safeHouseDelete[1],user.id).run();return json({deleted:true});}
+  const contractAccept=path.match(/^contracts\/([^/]+)\/accept$/);if(contractAccept&&method==='POST'){
+    const contract=await env.DB.prepare("SELECT 1 found FROM contracts WHERE id=? AND status='live'").bind(contractAccept[1]).first();if(!contract)return json({error:'Contract is no longer available.'},404);
+    await env.DB.prepare("INSERT INTO contract_progress(contract_id,user_id,status) VALUES(?,?,'active') ON CONFLICT(contract_id,user_id) DO NOTHING").bind(contractAccept[1],user.id).run();const progress=await syncGameProgress(user.id,env);return json({accepted:true,completed:progress.completed.includes(contractAccept[1])});
   }
   if(path==='road-reports'&&method==='POST'){
     const body=await request.json<{type?:string;note?:string;latitude?:number;longitude?:number}>();if(!['fixed_camera','hazard','closure','dangerous_road'].includes(body.type||'')||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Choose a supported safety report and valid map point.'},400);
@@ -400,6 +437,7 @@ async function handle(request: Request, env: Env, path: string) {
       statements.push(env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(),opponentId,'race_challenge','RACE CHALLENGE',`${user.username} staged a ${body.raceType} run`,JSON.stringify({raceId:id})));
     }
     await env.DB.batch(statements);
+    await env.DB.prepare("UPDATE users SET heat=MIN(100,heat+8),heat_updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(user.id).run();
     return json({id,status:'pending'},201);
   }
   if(path==='races'&&method==='GET'){

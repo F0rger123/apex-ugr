@@ -7,84 +7,70 @@ export const playEngineSound = (engineType: string = 'VR38DETT Twin-Turbo') => {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     const audioCtx = new AudioContextClass();
-
-    // Primary Engine Fundamental Frequency Oscillator
-    const osc1 = audioCtx.createOscillator();
-    const osc2 = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    const filter = audioCtx.createBiquadFilter();
-
-    // Turbocharger Whistle Oscillator
-    const turboOsc = audioCtx.createOscillator();
-    const turboGain = audioCtx.createGain();
-
-    // Base Pitch based on Engine Type
-    let baseFreq = 80;
-    let revFreq = 420;
-    if (engineType.includes('Flat-6') || engineType.includes('GT3')) {
-      baseFreq = 110;
-      revFreq = 680; // High revving NA Flat-6
-    } else if (engineType.includes('2JZ')) {
-      baseFreq = 95;
-      revFreq = 520;
-    } else if (engineType.includes('V8')) {
-      baseFreq = 65;
-      revFreq = 380;
-    }
-
-    osc1.type = 'sawtooth';
-    osc2.type = 'square';
-    turboOsc.type = 'sine';
-
-    osc1.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
-    osc2.frequency.setValueAtTime(baseFreq * 0.5, audioCtx.currentTime);
-    turboOsc.frequency.setValueAtTime(1200, audioCtx.currentTime);
-
-    // Filter settings for throaty exhaust growl
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(800, audioCtx.currentTime);
-
-    // Dynamic Rev Sweep envelope (Idle -> Redline Rev -> Pop & Blow-off -> Return to Idle)
     const now = audioCtx.currentTime;
-    
-    // Rev Up
-    osc1.frequency.exponentialRampToValueAtTime(revFreq, now + 0.8);
-    osc2.frequency.exponentialRampToValueAtTime(revFreq * 0.5, now + 0.8);
-    turboOsc.frequency.exponentialRampToValueAtTime(3200, now + 0.8);
-    filter.frequency.exponentialRampToValueAtTime(3500, now + 0.8);
-
-    // Rev Down with exhaust deceleration pops
-    osc1.frequency.exponentialRampToValueAtTime(baseFreq, now + 1.8);
-    osc2.frequency.exponentialRampToValueAtTime(baseFreq * 0.5, now + 1.8);
-    turboOsc.frequency.exponentialRampToValueAtTime(1000, now + 1.8);
-    filter.frequency.exponentialRampToValueAtTime(600, now + 1.8);
-
-    // Master Volume Envelope
-    gainNode.gain.setValueAtTime(0.01, now);
-    gainNode.gain.linearRampToValueAtTime(0.25, now + 0.4);
-    gainNode.gain.linearRampToValueAtTime(0.4, now + 0.8);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.9);
-
-    turboGain.gain.setValueAtTime(0.001, now);
-    turboGain.gain.linearRampToValueAtTime(0.08, now + 0.8);
-    turboGain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
-
-    // Connect Audio Pipeline
-    osc1.connect(filter);
-    osc2.connect(filter);
-    filter.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-
-    turboOsc.connect(turboGain);
-    turboGain.connect(audioCtx.destination);
-
-    osc1.start(now);
-    osc2.start(now);
-    turboOsc.start(now);
-
-    osc1.stop(now + 2.0);
-    osc2.stop(now + 2.0);
-    turboOsc.stop(now + 2.0);
+    const master = audioCtx.createGain();
+    const compressor = audioCtx.createDynamicsCompressor();
+    const exhaust = audioCtx.createBiquadFilter();
+    const body = audioCtx.createBiquadFilter();
+    let idle = 46;
+    let redline = 168;
+    if (engineType.includes('V8')) { idle = 38; redline = 132; }
+    if (engineType.includes('Flat-6') || engineType.includes('GT3')) { idle = 56; redline = 228; }
+    if (engineType.includes('I4') || engineType.includes('2JZ')) { idle = 52; redline = 194; }
+    master.gain.setValueAtTime(.0001, now);
+    master.gain.exponentialRampToValueAtTime(.13, now + .12);
+    master.gain.setValueAtTime(.13, now + .55);
+    master.gain.linearRampToValueAtTime(.22, now + 1.35);
+    master.gain.exponentialRampToValueAtTime(.0001, now + 2.65);
+    compressor.threshold.value = -22;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 5;
+    compressor.attack.value = .005;
+    compressor.release.value = .16;
+    exhaust.type = 'lowpass';
+    exhaust.frequency.setValueAtTime(520, now);
+    exhaust.frequency.exponentialRampToValueAtTime(2200, now + 1.35);
+    exhaust.frequency.exponentialRampToValueAtTime(680, now + 2.5);
+    body.type = 'peaking';
+    body.frequency.value = 118;
+    body.Q.value = 1.4;
+    body.gain.value = 9;
+    exhaust.connect(body);
+    body.connect(compressor);
+    compressor.connect(master);
+    master.connect(audioCtx.destination);
+    [1, 2, 3.03, 4.1].forEach((harmonic, index) => {
+      const oscillator = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      oscillator.type = index === 0 ? 'sawtooth' : index === 1 ? 'triangle' : 'sine';
+      oscillator.frequency.setValueAtTime(idle * harmonic, now);
+      oscillator.frequency.setValueAtTime(idle * harmonic * 1.05, now + .55);
+      oscillator.frequency.exponentialRampToValueAtTime(redline * harmonic, now + 1.35);
+      oscillator.frequency.exponentialRampToValueAtTime(idle * harmonic * .92, now + 2.5);
+      gain.gain.value = [.72, .34, .16, .08][index];
+      oscillator.connect(gain);
+      gain.connect(exhaust);
+      oscillator.start(now);
+      oscillator.stop(now + 2.7);
+    });
+    const buffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 2.7), audioCtx.sampleRate);
+    const samples = buffer.getChannelData(0);
+    for (let i = 0; i < samples.length; i += 1) samples[i] = (Math.random() * 2 - 1) * (i % 160 < 14 ? .7 : .12);
+    const texture = audioCtx.createBufferSource();
+    const textureGain = audioCtx.createGain();
+    const textureFilter = audioCtx.createBiquadFilter();
+    texture.buffer = buffer;
+    textureFilter.type = 'bandpass';
+    textureFilter.frequency.setValueAtTime(92, now);
+    textureFilter.frequency.exponentialRampToValueAtTime(430, now + 1.35);
+    textureGain.gain.setValueAtTime(.025, now);
+    textureGain.gain.linearRampToValueAtTime(.075, now + 1.3);
+    textureGain.gain.exponentialRampToValueAtTime(.0001, now + 2.6);
+    texture.connect(textureFilter);
+    textureFilter.connect(textureGain);
+    textureGain.connect(compressor);
+    texture.start(now);
+    texture.stop(now + 2.7);
   } catch (err) {
     console.log('Audio synth playback error:', err);
   }
