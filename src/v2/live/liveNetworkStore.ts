@@ -5,6 +5,7 @@ import { cloudflareApi } from '../../config/cloudflareApi';
 import {playInterfaceSound} from '../../utils/soundSynthesizer';
 
 const LOCATION_KEY='apex.last-location';
+const REVEAL_ORIGIN_KEY='apex.reveal-origin';
 
 export type LiveCoordinate={latitude:number;longitude:number;accuracy:number|null;altitude:number|null;heading:number;speedKph:number;timestamp:number};
 export type LiveDriver={id:string;userId:string;alias:string;avatarUrl:string|null;vehicle:string|null;latitude:number;longitude:number;heading:number;speedKph:number;driveMode:boolean;cruiseId:string|null;updatedAt:string;mystery:boolean;isLive:boolean;tier:'Bronze'|'Silver'|'Master'|'Platinum';record:string};
@@ -31,8 +32,11 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
   location:null,revealOrigin:null,drivers:[],events:[],cruises:[],route:null,activeCruiseId:null,savedPlaces:[],savedRoutes:[],suggestions:[],networkStatus:'offline',error:null,isDriving:false,unit:'mph',distanceKm:0,maxSpeedKph:0,startedAt:null,shareMinutes:15,shareExpiresAt:null,_watch:null,_poll:null,_userId:null,_driveSessionId:null,
   initialize:async()=>{
     get()._poll&&clearInterval(get()._poll!);
-    const [session,cached]=await Promise.all([cloudflareApi.session(),AsyncStorage.getItem(LOCATION_KEY)]);
-    if(cached){try{const location=JSON.parse(cached) as LiveCoordinate;if(Number.isFinite(location.latitude)&&Number.isFinite(location.longitude))set({location,revealOrigin:location});}catch{await AsyncStorage.removeItem(LOCATION_KEY);}}
+    const [session,cached,cachedOrigin]=await Promise.all([cloudflareApi.session(),AsyncStorage.getItem(LOCATION_KEY),AsyncStorage.getItem(REVEAL_ORIGIN_KEY)]);
+    let location:LiveCoordinate|null=null,revealOrigin:LiveCoordinate|null=null;
+    if(cached){try{const parsed=JSON.parse(cached) as LiveCoordinate;if(Number.isFinite(parsed.latitude)&&Number.isFinite(parsed.longitude))location=parsed;}catch{await AsyncStorage.removeItem(LOCATION_KEY);}}
+    if(cachedOrigin){try{const parsed=JSON.parse(cachedOrigin) as LiveCoordinate;if(Number.isFinite(parsed.latitude)&&Number.isFinite(parsed.longitude))revealOrigin=parsed;}catch{await AsyncStorage.removeItem(REVEAL_ORIGIN_KEY);}}
+    if(location)set({location,revealOrigin:revealOrigin||location});
     if(!session){set({_userId:null,networkStatus:'auth_required'});return;}
     set({_userId:session.user.id,networkStatus:'live',error:null});await Promise.all([get().refreshNetwork(),get().loadNavigation()]);
     const poll=setInterval(()=>{void get().refreshNetwork();},5000);set({_poll:poll});
@@ -40,13 +44,13 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
   lockLocation:async()=>{
     set({error:null});const permission=await Location.requestForegroundPermissionsAsync();
     if(permission.status!=='granted'){set({networkStatus:'gps_required',error:'Precise location permission is required for Radar and Drive Mode.'});return;}
-    const next=coordinate(await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.BestForNavigation}));const shareExpiresAt=Date.now()+get().shareMinutes*60_000;set({location:next,revealOrigin:next,shareExpiresAt,networkStatus:get()._userId?'live':'gps_locked'});await AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(next));
+    const next=coordinate(await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.BestForNavigation}));const shareExpiresAt=Date.now()+get().shareMinutes*60_000;const origin=get().revealOrigin||next;set({location:next,revealOrigin:origin,shareExpiresAt,networkStatus:get()._userId?'live':'gps_locked'});await Promise.all([AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(next)),AsyncStorage.setItem(REVEAL_ORIGIN_KEY,JSON.stringify(origin))]);
     if(get()._userId) await publish(next,false,get().shareMinutes,shareExpiresAt).catch(error=>set({error:error instanceof Error?error.message:'Location publish failed'}));
   },
   startDrive:async()=>{
     if(get().isDriving)return;const permission=await Location.requestForegroundPermissionsAsync();
     if(permission.status!=='granted'){set({networkStatus:'gps_required',error:'Drive Mode cannot start without precise location access.'});return;}
-    get()._watch?.remove();const shareExpiresAt=Date.now()+get().shareMinutes*60_000,driveSessionId=`drive-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;playInterfaceSound('drive');set({isDriving:true,revealOrigin:get().location,distanceKm:0,maxSpeedKph:0,startedAt:Date.now(),shareExpiresAt,error:null,_driveSessionId:driveSessionId});
+    get()._watch?.remove();const initial=get().location||coordinate(await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.BestForNavigation}));const origin=get().revealOrigin||initial;const shareExpiresAt=Date.now()+get().shareMinutes*60_000,driveSessionId=`drive-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;playInterfaceSound('drive');set({location:initial,isDriving:true,revealOrigin:origin,distanceKm:0,maxSpeedKph:0,startedAt:Date.now(),shareExpiresAt,error:null,_driveSessionId:driveSessionId});await Promise.all([AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(initial)),AsyncStorage.setItem(REVEAL_ORIGIN_KEY,JSON.stringify(origin))]);
     const watch=await Location.watchPositionAsync({accuracy:Location.Accuracy.BestForNavigation,timeInterval:500,distanceInterval:1},position=>{
       const next=coordinate(position);const previous=get().location;const distance=previous&&next.accuracy!==null&&next.accuracy<=65?segmentKm(previous,next):0;
       set(state=>({location:next,distanceKm:state.distanceKm+Math.min(distance,.5),maxSpeedKph:Math.max(state.maxSpeedKph,next.speedKph),networkStatus:state._userId?'live':'gps_locked'}));

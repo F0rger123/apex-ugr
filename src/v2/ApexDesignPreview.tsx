@@ -101,6 +101,19 @@ if (Platform.OS !== 'web') {
 type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard' | 'access' | 'world';
 type IconType = any;
 
+const tabPaths:Record<TabKey,string>={
+  command:'/app/command',radar:'/app/radar',feed:'/app/feed',garage:'/app/garage',more:'/app/more',
+  race:'/app/competition/races',vault:'/app/rewards/vault',shop:'/app/garage/parts',meets:'/app/events/meets',
+  messages:'/app/social/messages',leaderboard:'/app/competition/leaderboards',access:'/app/settings/access',world:'/app/world',
+};
+const pathTabs=Object.entries(tabPaths).reduce<Record<string,TabKey>>((routes,[tab,path])=>({...routes,[path]:tab as TabKey}),{});
+function routeState(){
+  if(Platform.OS!=='web'||typeof window==='undefined')return{tab:'command' as TabKey,started:false};
+  const path=window.location.pathname.replace(/\/$/,'')||'/';
+  const tab=pathTabs[path];
+  return{tab:tab||'command',started:Boolean(tab)};
+}
+
 interface Driver {
   id: string;
   alias: string;
@@ -423,7 +436,7 @@ function RadarMap({
     const safeEvents = JSON.stringify(events).replace(/</g, '\\u003c');
     const safeRoute = JSON.stringify(routeCoordinates).replace(/</g, '\\u003c');
     const safeRouteStops=JSON.stringify(routeStops).replace(/</g,'\\u003c');
-    const revealZones=[...discoveries.map(point=>({...point,radiusM:650})),...events.map(event=>({latitude:event.latitude,longitude:event.longitude,radiusM:Math.max(1600,event.radiusM*3)})),...drops.filter(drop=>!drop.claimed).map(drop=>({latitude:drop.latitude,longitude:drop.longitude,radiusM:Math.max(850,drop.radius_m*6)})),...rewards.map(reward=>({latitude:reward.latitude,longitude:reward.longitude,radiusM:Math.max(850,reward.radius_m*6)})),...(revealOrigin?[{latitude:revealOrigin.latitude,longitude:revealOrigin.longitude,radiusM:16093.4}]:[])];
+    const revealZones=[...discoveries.map(point=>({...point,radiusM:650})),...events.map(event=>({latitude:event.latitude,longitude:event.longitude,radiusM:Math.max(1600,event.radiusM*3)})),...drops.filter(drop=>!drop.claimed).map(drop=>({latitude:drop.latitude,longitude:drop.longitude,radiusM:Math.max(850,drop.radius_m*6)})),...rewards.map(reward=>({latitude:reward.latitude,longitude:reward.longitude,radiusM:Math.max(850,reward.radius_m*6)})),...(location?[{latitude:location.latitude,longitude:location.longitude,radiusM:1600}]:[]),...(revealOrigin?[{latitude:revealOrigin.latitude,longitude:revealOrigin.longitude,radiusM:16093.4}]:[])];
     const safeDiscoveries=JSON.stringify(revealZones).replace(/</g,'\\u003c');
     const safeTerritories=JSON.stringify(territories).replace(/</g,'\\u003c');
     const safeDrops=JSON.stringify(drops).replace(/</g,'\\u003c');
@@ -439,8 +452,8 @@ function RadarMap({
     return (
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
-          key: `${mode}-${followRevision}-${fitAll}-${revealOrigin?.latitude.toFixed(4)||'none'}-${rewards.length}-${drops.length}`,
-          srcDoc: mapDocument.replace('</body>',worldOverlay.replace('t.unlocked?.16:.28','t.unlocked?0.16:0.28').replace('1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .82 0','0 0 0 0 .08 0 0 0 0 .11 0 0 0 0 .09 0 0 0 .84 0').replace('<rect width="100%" height="100%" fill="#050806" opacity=".92"/>','<rect width="100%" height="100%" fill="#050806" opacity=".92" mask="url(#unlocked)"/>').replace("c.setAttribute('r','110')","c.setAttribute('r',String(Math.max(2,Math.abs(map.latLngToContainerPoint(L.latLng(d.latitude,d.longitude).toBounds((d.radiusM||650)*2).getEast()).x-p.x))))")+rewardReplayOverlay+'</body>'),
+          key: `${mode}-${followRevision}-${fitAll}-${revealOrigin?.latitude.toFixed(4)||'none'}-${discoveries.length}-${rewards.length}-${drops.length}`,
+          srcDoc: mapDocument.replace('</body>',worldOverlay.replace('t.unlocked?.16:.28','t.unlocked?0.16:0.28').replace('1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .82 0','0 0 0 0 .08 0 0 0 0 .11 0 0 0 0 .09 0 0 0 .84 0').replace('opacity=".75"','opacity=".48"').replace('<rect width="100%" height="100%" fill="#050806" opacity=".92"/>','<rect width="100%" height="100%" fill="#050806" opacity=".82" mask="url(#unlocked)"/>').replace("c.setAttribute('r','110')","c.setAttribute('r',String(Math.max(2,Math.abs(map.latLngToContainerPoint(L.latLng(d.latitude,d.longitude).toBounds((d.radiusM||650)*2).getEast()).x-p.x))))")+rewardReplayOverlay+'</body>'),
           title: 'Apex Radar',
           style: { width: '100%', height: '100%', border: 0 },
         })}
@@ -500,6 +513,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeStops,setRouteStops]=useState<Array<{id:string;name:string;latitude:number;longitude:number;type:string}>>([]);
   const [alongPlaces,setAlongPlaces]=useState<Array<{id:string;name:string;latitude:number;longitude:number;type:string}>>([]);
+  const [liveTrail,setLiveTrail]=useState<Array<{latitude:number;longitude:number}>>([]);
   const { location, revealOrigin, drivers: liveDrivers, events, cruises, route, savedPlaces, savedRoutes, suggestions, networkStatus, error, isDriving, unit, distanceKm, maxSpeedKph, shareMinutes, shareExpiresAt, lockLocation, startDrive, stopDrive, toggleUnit, setShareMinutes, hideLocation, setRoute, setMultiStopRoute, setRouteToPoint, restoreRoute, createConvoy, joinConvoy, startConvoy, saveCurrentRoute, savePlace, deletePlace, deleteSavedRoute, suggestAddresses, clearRoute } = useLiveNetworkStore();
   const {radarTargetId,setRadarTarget}=useContentStore();
   const {discoveries,territories,drops,reports,rewards,ghostReplays,refresh:refreshWorld}=useWorldStore();
@@ -511,9 +525,11 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const crewTracks=cruises.map(cruise=>{const members=drivers.filter(driver=>driver.cruiseId===cruise.id);if(!members.length)return null;return{id:cruise.id,title:cruise.title,members,latitude:members.reduce((sum,item)=>sum+item.latitude,0)/members.length,longitude:members.reduce((sum,item)=>sum+item.longitude,0)/members.length,status:cruise.status};}).filter(Boolean) as Array<{id:string;title:string;members:Driver[];latitude:number;longitude:number;status:string}>;
   const selectedCrew=crewTracks.find(crew=>crew.id===selectedCrewId)||null;
   const selectedReplay=ghostReplays.find(replay=>replay.sessionId===selectedReplayId)||null;
+  const revealedCells=useMemo(()=>[...discoveries,...liveTrail],[discoveries,liveTrail]);
   const ghostProgress=useMemo(()=>{if(!selectedReplay||!location||!ghostRaceStartedAt)return null;let nearest=0,best=Infinity;selectedReplay.points.forEach((point,index)=>{const score=(point.latitude-location.latitude)**2+(point.longitude-location.longitude)**2;if(score<best){best=score;nearest=index;}});const point=selectedReplay.points[nearest],ghostElapsed=Date.parse(point.captured_at)-Date.parse(selectedReplay.startedAt),liveElapsed=Date.now()-ghostRaceStartedAt;return{progress:Math.round((nearest/Math.max(1,selectedReplay.points.length-1))*100),deltaSeconds:(liveElapsed-ghostElapsed)/1000};},[selectedReplay,location,ghostRaceStartedAt]);
   useEffect(() => { if (!location) lockLocation(); }, []);
   useEffect(()=>{void refreshWorld();const timer=setInterval(()=>void refreshWorld(),15000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{if(!isDriving||!location)return;setLiveTrail(points=>{const last=points[points.length-1];if(last&&Math.abs(last.latitude-location.latitude)<.0007&&Math.abs(last.longitude-location.longitude)<.0007)return points;return[...points,{latitude:location.latitude,longitude:location.longitude}].slice(-400);});},[isDriving,location?.latitude,location?.longitude]);
   useEffect(() => { const timer=setTimeout(()=>void suggestAddresses(destination),280); return()=>clearTimeout(timer); }, [destination]);
   useEffect(()=>{if(!radarTargetId)return;const target=drivers.find(item=>item.id===radarTargetId);if(target){setSelected(target);setFitAll(false);setFollowRevision(value=>value+1);setRadarTarget(null);}},[radarTargetId,drivers.length]);
   useEffect(()=>{setSelected(current=>current?drivers.find(driver=>driver.id===current.id)||current:null);},[liveDrivers]);
@@ -553,7 +569,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
 
   return (
     <View style={styles.radarScreen}>
-      <RadarMap location={location} revealOrigin={revealOrigin||location} mode={mode} onSelect={driver => { playInterfaceSound();setFitAll(false); setSelected(driver); setSelectedEvent(null);setSelectedCrewId(null);setSelectedReplayId(null); setFollowRevision(value => value + 1); }} onSelectEvent={event => { playInterfaceSound();setFitAll(false); setSelectedEvent(event); setSelected(null);setSelectedCrewId(null);setSelectedReplayId(null); setFollowRevision(value => value + 1); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} routeStops={route?.stops||[]} followRevision={followRevision} focus={selected ? { latitude: selected.latitude, longitude: selected.longitude } : selectedEvent ? { latitude: selectedEvent.latitude, longitude: selectedEvent.longitude } : selectedCrew ? {latitude:selectedCrew.latitude,longitude:selectedCrew.longitude}:selectedReplay?.points[0]?{latitude:selectedReplay.points[0].latitude,longitude:selectedReplay.points[0].longitude}:null} fitAll={fitAll} discoveries={discoveries} territories={territories} drops={drops} reports={reports} rewards={rewards} ghostReplay={selectedReplay} />
+      <RadarMap location={location} revealOrigin={revealOrigin||location} mode={mode} onSelect={driver => { playInterfaceSound();setFitAll(false); setSelected(driver); setSelectedEvent(null);setSelectedCrewId(null);setSelectedReplayId(null); setFollowRevision(value => value + 1); }} onSelectEvent={event => { playInterfaceSound();setFitAll(false); setSelectedEvent(event); setSelected(null);setSelectedCrewId(null);setSelectedReplayId(null); setFollowRevision(value => value + 1); }} drivers={shownDrivers} events={shownEvents} routeCoordinates={route?.coordinates || []} routeStops={route?.stops||[]} followRevision={followRevision} focus={selected ? { latitude: selected.latitude, longitude: selected.longitude } : selectedEvent ? { latitude: selectedEvent.latitude, longitude: selectedEvent.longitude } : selectedCrew ? {latitude:selectedCrew.latitude,longitude:selectedCrew.longitude}:selectedReplay?.points[0]?{latitude:selectedReplay.points[0].latitude,longitude:selectedReplay.points[0].longitude}:null} fitAll={fitAll} discoveries={revealedCells} territories={territories} drops={drops} reports={reports} rewards={rewards} ghostReplay={selectedReplay} />
       <View style={styles.radarTopControls}>
         <View style={styles.segmentedControl}>
           {(['street', 'satellite'] as const).map(item => (
@@ -1166,8 +1182,9 @@ function AuthPanel({ onClose, initialMode='signin', inviteCode }: { onClose: () 
 }
 
 export function ApexDesignPreview() {
-  const [tab, setTab] = useState<TabKey>('command');
-  const [gameStarted,setGameStarted]=useState(false);
+  const initialRoute=useMemo(routeState,[]);
+  const [tab, setTab] = useState<TabKey>(initialRoute.tab);
+  const [gameStarted,setGameStarted]=useState(initialRoute.started);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode,setAuthMode]=useState<'signin'|'signup'>('signin');
@@ -1176,6 +1193,8 @@ export function ApexDesignPreview() {
   const unreadCount = useNotificationStore(state => state.unreadCount);
   const userId = useContentStore(state => state.userId);
   const entrance = useRef(new Animated.Value(1)).current;
+  const handlingHistory=useRef(false);
+  const pendingDeepLink=useRef(initialRoute.started);
 
   useEffect(() => {
     const initialize = async () => {
@@ -1201,7 +1220,23 @@ export function ApexDesignPreview() {
     return () => { window.removeEventListener('keydown', onKeyDown); useLiveNetworkStore.getState().dispose(); useNotificationStore.getState().unsubscribeFromNotifications(); };
   }, []);
 
-  useEffect(()=>{if(!userId)setGameStarted(false);},[userId]);
+  useEffect(()=>{if(!booted)return;if(!userId){setGameStarted(false);return;}const deepLink=routeState();if(deepLink.started){pendingDeepLink.current=false;setTab(deepLink.tab);setGameStarted(true);}},[userId,booted]);
+
+  useEffect(()=>{
+    if(Platform.OS!=='web'||!booted)return;
+    if(!userId&&window.location.pathname.startsWith('/app/'))return;
+    const target=!userId?(pendingDeepLink.current?tabPaths[tab]:'/'):gameStarted?tabPaths[tab]:'/play';
+    if(window.location.pathname===target){handlingHistory.current=false;return;}
+    if(handlingHistory.current){handlingHistory.current=false;return;}
+    window.history.pushState({tab,gameStarted},'',target);
+  },[tab,gameStarted,userId,booted]);
+
+  useEffect(()=>{
+    if(Platform.OS!=='web')return;
+    const onPopState=()=>{const next=routeState();handlingHistory.current=true;setTab(next.tab);setGameStarted(next.started);};
+    window.addEventListener('popstate',onPopState);
+    return()=>window.removeEventListener('popstate',onPopState);
+  },[]);
 
   useEffect(() => {
     entrance.setValue(0);

@@ -2,21 +2,50 @@
   "expo": {
     "name": "Apex UGR",
     "slug": "apex-ugr",
+    "scheme": "apexugr",
     "version": "1.0.0",
+    "icon": "./assets/apex-app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/apex-app-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#010201"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.apexugr.app"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.apexugr.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Apex UGR uses your location while the app is open to track drives, reveal the world map, show nearby events, and provide navigation.",
+        "NSCameraUsageDescription": "Apex UGR uses the camera when you add vehicle photos or race proof media.",
+        "NSPhotoLibraryUsageDescription": "Apex UGR uses your photo library when you choose vehicle photos or race videos to upload."
+      }
     },
     "android": {
-      "package": "com.apexugr.app"
+      "package": "com.apexugr.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/apex-app-icon.png",
+        "backgroundColor": "#010201"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO"
+      ]
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "name": "Apex UGR",
+      "shortName": "Apex UGR",
+      "themeColor": "#010201",
+      "backgroundColor": "#010201"
     },
     "plugins": [
       [
