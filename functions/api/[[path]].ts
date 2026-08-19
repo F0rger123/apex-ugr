@@ -31,6 +31,34 @@ function createInviteCode() {
   return Array.from(bytes,byte=>String(byte%10)).join('');
 }
 
+let ebayAccessToken:{value:string;expiresAt:number}|null=null;
+
+async function ebayApplicationToken(env:Env){
+  if(!env.EBAY_CLIENT_ID||!env.EBAY_CLIENT_SECRET)throw new Error('eBay is not configured.');
+  if(ebayAccessToken&&ebayAccessToken.expiresAt>Date.now()+60_000)return ebayAccessToken.value;
+  const credentials=btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
+  const response=await fetch('https://api.ebay.com/identity/v1/oauth2/token',{method:'POST',headers:{Authorization:`Basic ${credentials}`,'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope'});
+  const payload=await response.json<{access_token?:string;expires_in?:number;error_description?:string}>();
+  if(!response.ok||!payload.access_token)throw new Error(payload.error_description||'eBay authorization failed.');
+  ebayAccessToken={value:payload.access_token,expiresAt:Date.now()+Math.max(60,payload.expires_in||7200)*1000};
+  return ebayAccessToken.value;
+}
+
+function ebayCompatibilityFilter(vehicle:Record<string,string|number>){
+  const entries=[['Year',vehicle.year],['Make',vehicle.make],['Model',vehicle.model],['Trim',vehicle.trim],['Engine',vehicle.engine]].filter(([,value])=>String(value||'').trim());
+  return entries.map(([name,value])=>`${name}:${String(value).trim()}`).join(';');
+}
+
+async function ebayPartsSearch(env:Env,vehicle:Record<string,string|number>,query:string){
+  const token=await ebayApplicationToken(env);const params=new URLSearchParams({q:`${vehicle.year} ${vehicle.make} ${vehicle.model} ${query}`.slice(0,120),limit:'24',compatibility_filter:ebayCompatibilityFilter(vehicle)});
+  const response=await fetch(`https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`,{headers:{Authorization:`Bearer ${token}`,'X-EBAY-C-MARKETPLACE-ID':'EBAY_US','Accept':'application/json'}});
+  const payload=await response.json<{itemSummaries?:Array<any>;errors?:Array<{message?:string}>}>();
+  if(!response.ok)throw new Error(payload.errors?.[0]?.message||'eBay catalog search failed.');
+  return (payload.itemSummaries||[]).filter(item=>item.compatibilityMatch==='EXACT').map(item=>({
+    id:`ebay-${item.itemId}`,provider:'eBay Motors',title:String(item.title||'Untitled eBay listing'),imageUrl:item.image?.imageUrl||item.thumbnailImages?.[0]?.imageUrl||null,price:Number(item.price?.value||0),currency:String(item.price?.currency||'USD'),condition:item.condition||null,seller:item.seller?.username||null,shipping:item.shippingOptions?.[0]?.shippingCost?.value?`${item.shippingOptions[0].shippingCost.currency||'USD'} ${item.shippingOptions[0].shippingCost.value} shipping`:null,purchaseUrl:item.itemWebUrl||`https://www.ebay.com/itm/${String(item.itemId||'').replace(/^v1\|([^|]+).*/,'$1')}`,compatibility:'exact fitment',
+  }));
+}
+
 function distanceMeters(aLat:number,aLng:number,bLat:number,bLng:number){const rad=Math.PI/180;const dLat=(bLat-aLat)*rad,dLng=(bLng-aLng)*rad;const h=Math.sin(dLat/2)**2+Math.cos(aLat*rad)*Math.cos(bLat*rad)*Math.sin(dLng/2)**2;return 6371000*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}
 function destinationPoint(latitude:number,longitude:number,distance:number,bearing:number){const radius=6371000,delta=distance/radius,theta=bearing*Math.PI/180,lat1=latitude*Math.PI/180,lng1=longitude*Math.PI/180;const lat2=Math.asin(Math.sin(lat1)*Math.cos(delta)+Math.cos(lat1)*Math.sin(delta)*Math.cos(theta));const lng2=lng1+Math.atan2(Math.sin(theta)*Math.sin(delta)*Math.cos(lat1),Math.cos(delta)-Math.sin(lat1)*Math.sin(lat2));return{latitude:lat2*180/Math.PI,longitude:lng2*180/Math.PI};}
 
@@ -673,7 +701,8 @@ async function handle(request: Request, env: Env, path: string) {
     const body=await request.json<{vehicle?:Record<string,string|number>;query?:string}>();
     if(!body.vehicle?.year||!body.vehicle.make||!body.vehicle.model) return json({error:'Select a complete vehicle first.'},400);
     const query=(body.query||'performance parts').slice(0,80);
-    return json({products:[],providers:[{name:'eBay Motors',mode:env.EBAY_CLIENT_ID&&env.EBAY_CLIENT_SECRET?'live':'pending_approval'},...providerSearches(body.vehicle,query)]});
+    if(!env.EBAY_CLIENT_ID||!env.EBAY_CLIENT_SECRET)return json({products:[],providers:[{name:'eBay Motors',mode:'credentials_required'},...providerSearches(body.vehicle,query)]});
+    try{return json({products:await ebayPartsSearch(env,body.vehicle,query),providers:[{name:'eBay Motors',mode:'live'},...providerSearches(body.vehicle,query)]});}catch(error){return json({products:[],providers:[{name:'eBay Motors',mode:'connection_error'},...providerSearches(body.vehicle,query)],error:error instanceof Error?error.message:'eBay search failed.'},502);}
   }
 
   if(path==='address-suggestions'&&method==='GET'){
