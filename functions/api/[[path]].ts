@@ -298,6 +298,10 @@ async function handle(request: Request, env: Env, path: string) {
   if(path==='ghost/equip'&&method==='POST'){
     const body=await request.json<{itemId?:string}>();const item=await env.DB.prepare(`SELECT s.id,s.category FROM ghost_shop_items s JOIN ghost_inventory i ON i.item_id=s.id WHERE s.id=? AND i.user_id=?`).bind(body.itemId||'',user.id).first<{id:string;category:string}>();if(!item)return json({error:'You do not own this cosmetic.'},403);await env.DB.prepare(`INSERT INTO ghost_equipped_items(user_id,category,item_id) VALUES(?,?,?) ON CONFLICT(user_id,category) DO UPDATE SET item_id=excluded.item_id,equipped_at=CURRENT_TIMESTAMP`).bind(user.id,item.category,item.id).run();return json({equipped:true,category:item.category,itemId:item.id});
   }
+  const ghostUnequip=path.match(/^ghost\/equip\/([^/]+)$/);if(ghostUnequip&&method==='DELETE'){
+    await env.DB.prepare('DELETE FROM ghost_equipped_items WHERE user_id=? AND category=?').bind(user.id,ghostUnequip[1]).run();
+    return json({unequipped:true,category:ghostUnequip[1]});
+  }
   if(path==='rank'&&method==='GET'){
     const userRank=await refreshRank(user.id,env);const [userRow,thresholds,history]=await Promise.all([env.DB.prepare('SELECT points,tier FROM users WHERE id=?').bind(user.id).first<{points:number;tier:string}>(),env.DB.prepare('SELECT * FROM rank_thresholds ORDER BY minimum_rep').all(),env.DB.prepare('SELECT * FROM rank_history WHERE user_id=? ORDER BY awarded_at DESC LIMIT 20').bind(user.id).all()]);const next=thresholds.results.find((row:any)=>Number(row.minimum_rep)>Number(userRow?.points||0)) as any;return json({rank:userRank.rank,rep:userRow?.points||0,nextRank:next?.rank||null,repToNext:next?Math.max(0,Number(next.minimum_rep)-Number(userRow?.points||0)):0,thresholds:thresholds.results,history:history.results});
   }
