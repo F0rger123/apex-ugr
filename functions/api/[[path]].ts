@@ -690,6 +690,19 @@ async function handle(request: Request, env: Env, path: string) {
     return json({places:places.results,routes:routes.results.map((row:any)=>({...row,coordinates:JSON.parse(row.coordinates_json||'[]'),stops:JSON.parse(row.stops_json||'[]')}))});
   }
 
+  if(path==='drives/summary'&&method==='GET'){
+    const sessionId=new URL(request.url).searchParams.get('sessionId')?.slice(0,80)||'';
+    if(!sessionId)return json({error:'Drive session is required.'},400);
+    const [trace,week]=await Promise.all([
+      env.DB.prepare('SELECT latitude,longitude,speed_kph,captured_at FROM drive_trace_points WHERE user_id=? AND session_id=? ORDER BY captured_at').bind(user.id,sessionId).all<{latitude:number;longitude:number;speed_kph:number;captured_at:string}>(),
+      env.DB.prepare("SELECT MAX(speed_kph) top_speed FROM drive_trace_points WHERE user_id=? AND captured_at>=datetime('now','-7 days')").bind(user.id).first<{top_speed:number|null}>(),
+    ]);
+    const rows=trace.results;let distanceKm=0;
+    for(let index=1;index<rows.length;index+=1)distanceKm+=Math.min(.5,distanceMeters(rows[index-1].latitude,rows[index-1].longitude,rows[index].latitude,rows[index].longitude)/1000);
+    const startedAt=rows[0]?.captured_at||null,endedAt=rows[rows.length-1]?.captured_at||null,durationSeconds=startedAt&&endedAt?Math.max(0,Math.round((Date.parse(endedAt)-Date.parse(startedAt))/1000)):0,maxSpeedKph=Math.max(0,...rows.map(row=>Number(row.speed_kph)||0));
+    return json({sessionId,startedAt,endedAt,durationSeconds,distanceKm,maxSpeedKph,averageSpeedKph:durationSeconds?distanceKm/(durationSeconds/3600):0,points:rows.map(row=>({latitude:Number(row.latitude),longitude:Number(row.longitude)})),weeklyTopSpeedKph:Math.max(Number(week?.top_speed)||0,maxSpeedKph)});
+  }
+
   if(path==='places'&&method==='POST'){
     const body=await request.json<{label?:string;locationName?:string;latitude?:number;longitude?:number;isFavorite?:boolean}>();
     if(!body.label?.trim()||!body.locationName?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'A label and valid location are required.'},400);
@@ -710,6 +723,7 @@ async function handle(request: Request, env: Env, path: string) {
   }
   const deleteRoute=path.match(/^routes\/([^/]+)$/);
   if(deleteRoute&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_routes WHERE id=? AND user_id=?').bind(deleteRoute[1],user.id).run();return json({deleted:true});}
+  if(deleteRoute&&method==='PUT'){const body=await request.json<{name?:string}>();const name=body.name?.trim();if(!name)return json({error:'A route name is required.'},400);await env.DB.prepare('UPDATE saved_routes SET name=? WHERE id=? AND user_id=?').bind(name.slice(0,80),deleteRoute[1],user.id).run();return json({updated:true});}
 
   if (path === 'routes' && method === 'POST') {
     const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string;target?:{latitude:number;longitude:number};stops?:Array<{name?:string;latitude?:number;longitude?:number}>}>();// Exact coordinates are used for pins and queued route stops.
@@ -718,7 +732,7 @@ async function handle(request: Request, env: Env, path: string) {
     if(requested.length){stops=requested.filter(stop=>stop.name&&Number.isFinite(stop.latitude)&&Number.isFinite(stop.longitude)).map(stop=>({name:String(stop.name).slice(0,300),latitude:Number(stop.latitude),longitude:Number(stop.longitude)}));if(stops.length!==requested.length)return json({error:'Every route stop needs a name and valid coordinates.'},400);}
     else {if(!body.destination?.trim())return json({error:'Add at least one route stop.'},400);const target=Number.isFinite(body.target?.latitude)&&Number.isFinite(body.target?.longitude)?{latitude:Number(body.target!.latitude),longitude:Number(body.target!.longitude),name:body.destination.trim()}:await geocode(body.destination,body.origin);if(!target)return json({error:'Destination not found.'},404);stops=[target];}
     const target=stops[stops.length-1],coordinates:Array<{latitude:number;longitude:number}>=[];let distance=0,duration=0,start=body.origin;
-    for(let index=0;index<stops.length;index+=20){const segmentStops=stops.slice(index,index+20),routePath=[start,...segmentStops].map(point=>`${point.longitude},${point.latitude}`).join(';');const routeUrl=`https://router.project-osrm.org/route/v1/driving/${routePath}?overview=full&geometries=geojson&steps=false`;const routed=await fetch(routeUrl);const data=await routed.json<{routes?:Array<{distance:number;duration:number;geometry:{coordinates:number[][]}}>}>();const segment=data.routes?.[0];if(!segment)return json({error:`No drivable route found near stop ${index+1}.`},404);distance+=segment.distance;duration+=segment.duration;const points=segment.geometry.coordinates.map(([longitude,latitude])=>({latitude,longitude}));coordinates.push(...(coordinates.length?points.slice(1):points));start=segmentStops[segmentStops.length-1];}
+    for(let index=0;index<stops.length;index+=20){const segmentStops=stops.slice(index,index+20),routePath=[start,...segmentStops].map(point=>`${point.longitude},${point.latitude}`).join(';');const routeUrl=`https://router.project-osrm.org/route/v1/driving/${routePath}?overview=full&geometries=geojson&steps=false`;let segment: {distance:number;duration:number;geometry:{coordinates:number[][]}}|undefined;try{const routed=await fetch(routeUrl);if(routed.ok){const data=await routed.json<{routes?:Array<{distance:number;duration:number;geometry:{coordinates:number[][]}}>}>();segment=data.routes?.[0];}}catch{}if(!segment)return json({error:`Route service is unavailable near stop ${index+1}. Try a nearby address or retry in a moment.`},502);distance+=segment.distance;duration+=segment.duration;const points=segment.geometry.coordinates.map(([longitude,latitude])=>({latitude,longitude}));coordinates.push(...(coordinates.length?points.slice(1):points));start=segmentStops[segmentStops.length-1];}
     return json({destination:target,stops,distanceKm:distance/1000,durationMinutes:duration/60,coordinates});
   }
 
