@@ -237,6 +237,13 @@ async function handle(request: Request, env: Env, path: string) {
   if (!user) return json({ error: 'Authentication required.' }, 401);
 
   if (path === 'session' && method === 'GET') return json({ user: publicUser(user) });
+  if(path==='profile'&&method==='PUT'){
+    const body=await request.json<{displayName?:string}>();const displayName=body.displayName?.trim();
+    if(!displayName||displayName.length<2)return json({error:'Use a display name with at least 2 characters.'},400);
+    await env.DB.prepare('UPDATE users SET display_name=? WHERE id=?').bind(displayName.slice(0,40),user.id).run();
+    const updated=await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?').bind(user.id).first<UserRow>();
+    return json({user:publicUser(updated!)});
+  }
   if (path === 'auth/signout' && method === 'POST') {
     const bearer = request.headers.get('authorization')!.replace(/^Bearer\s+/i, '');
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await sha256(bearer)).run();

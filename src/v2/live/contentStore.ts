@@ -15,7 +15,7 @@ interface ContentState {
   posts:LivePost[]; rankings:Ranking[]; pilots:PilotDirectoryEntry[]; races:RaceContract[]; vehicles:ActiveVehicle[]; activeVehicleId:string|null; challengeTargetId:string|null; radarTargetId:string|null;
   products:ProviderProduct[]; providers:ProviderLink[]; loading:boolean; error:string|null;
   initialize:()=>Promise<void>; loadFeed:()=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>; toggleFollow:(userId:string)=>Promise<void>;
-  addComment:(id:string,text:string)=>Promise<boolean>; createPost:(uri:string,caption:string,type:'photo'|'video')=>Promise<boolean>;
+  addComment:(id:string,text:string)=>Promise<boolean>; createPost:(uri:string,caption:string,type:'photo'|'video')=>Promise<boolean>; updateProfile:(displayName:string)=>Promise<boolean>;
   loadRankings:()=>Promise<void>; loadPilots:()=>Promise<void>; loadRaces:()=>Promise<void>; respondToRace:(id:string,action:'accept'|'decline'|'reschedule',startsAt?:string)=>Promise<string>; startRace:(id:string)=>Promise<string>; checkRace:(id:string,location:{latitude:number;longitude:number;accuracy:number|null})=>Promise<string>; setChallengeTarget:(id:string|null)=>void; setRadarTarget:(id:string|null)=>void; loadVehicles:()=>Promise<void>; addVehicle:(vehicle:{nickname:string;year:number;make:string;model:string;trim:string;engine:string;drivetrain:string;horsepower:number;color:string},photoUri:string|null)=>Promise<boolean>; setActiveVehicle:(id:string)=>void; searchParts:(query:string)=>Promise<void>;
 }
 
@@ -48,6 +48,9 @@ export const useContentStore=create<ContentState>((set,get)=>({
   createPost:async(uri,caption,type)=>{
     set({loading:true,error:null});
     try{const upload=await cloudflareApi.upload(uri,type);await cloudflareApi.request('/api/posts',{method:'POST',body:JSON.stringify({mediaUrl:upload.url,mediaType:type,caption})});await get().loadFeed();set({loading:false});return true;}catch(error){set({loading:false,error:error instanceof Error?error.message:'Upload failed'});return false;}
+  },
+  updateProfile:async displayName=>{
+    try{const data=await cloudflareApi.request<{user:any}>('/api/profile',{method:'PUT',body:JSON.stringify({displayName})});const user=data.user;set(state=>({profile:state.profile?{...state.profile,displayName:user.displayName}:state.profile}));return true;}catch(error){set({error:error instanceof Error?error.message:'Profile update failed'});return false;}
   },
   loadRankings:async()=>{
     if(!get().userId)return;
