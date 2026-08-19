@@ -17,7 +17,12 @@ jobs:
       - id: token
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: echo "configured=$([ -n \"$EXPO_TOKEN\" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
 
   build-and-publish:
     needs: check-expo-token
