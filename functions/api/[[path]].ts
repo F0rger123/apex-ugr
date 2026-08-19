@@ -20,7 +20,7 @@ const cors = {
 
 const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
 const ROOT_ACCESS_CODE = 'APEXUGR26';
-const ANDROID_PREVIEW_URL = 'https://expo.dev/artifacts/eas/5JGLX8lBct1ieu1lpZoDBv59Awi_8Ds3wATj05Zm7r4.apk';
+const ANDROID_PREVIEW_URL = 'https://expo.dev/artifacts/eas/8mHbX5pjjkEavbxC8xQUfwRNEmBrFyM6RtlKpjHnwxA.apk';
 
 function normalizeInviteCode(value: string) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
