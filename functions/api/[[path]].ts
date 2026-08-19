@@ -19,7 +19,7 @@ const cors = {
 };
 
 const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
-const ROOT_ACCESS_CODE = 'APEXUGR26';
+const ROOT_ACCESS_CODE = '081926';
 const ANDROID_PREVIEW_URL = 'https://expo.dev/artifacts/eas/iPtj2pYxn93szF5QMyT44jcB_5no8K9emsFUjvawW-0.apk';
 
 function normalizeInviteCode(value: string) {
@@ -27,10 +27,8 @@ function normalizeInviteCode(value: string) {
 }
 
 function createInviteCode() {
-  const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes=crypto.getRandomValues(new Uint8Array(8));
-  const value=Array.from(bytes,byte=>alphabet[byte%alphabet.length]).join('');
-  return `APEX-${value.slice(0,4)}-${value.slice(4)}`;
+  const bytes=crypto.getRandomValues(new Uint8Array(6));
+  return Array.from(bytes,byte=>String(byte%10)).join('');
 }
 
 function distanceMeters(aLat:number,aLng:number,bLat:number,bLng:number){const rad=Math.PI/180;const dLat=(bLat-aLat)*rad,dLng=(bLng-aLng)*rad;const h=Math.sin(dLat/2)**2+Math.cos(aLat*rad)*Math.cos(bLat*rad)*Math.sin(dLng/2)**2;return 6371000*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}

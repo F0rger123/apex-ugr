@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { ResizeMode, Video } from 'expo-av';
+import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
@@ -78,6 +79,9 @@ import {
   X,
   Zap,
 } from 'lucide-react-native';
+
+const hapticTick=()=>{if(Platform.OS!=='web')void Haptics.selectionAsync().catch(()=>undefined);};
+const hapticResult=(kind:'success'|'error')=>{if(Platform.OS!=='web')void Haptics.notificationAsync(kind==='success'?Haptics.NotificationFeedbackType.Success:Haptics.NotificationFeedbackType.Error).catch(()=>undefined);};
 
 const accent = '#A7E59A';
 const paper = '#F7F9F7';
@@ -1191,11 +1195,11 @@ function AccessPortal({onUnlock,onExisting}:{onUnlock:(code:string)=>void;onExis
   const [code,setCode]=useState('');const [status,setStatus]=useState('PRIVATE NETWORK');const [unlocking,setUnlocking]=useState(false);const [denied,setDenied]=useState(false);const reveal=useRef(new Animated.Value(0)).current;const shake=useRef(new Animated.Value(0)).current;
   useEffect(()=>{Animated.timing(reveal,{toValue:1,duration:900,useNativeDriver:true}).start();},[reveal]);
   useEffect(()=>{if(!code||denied)return;playInterfaceSound('key');shake.setValue(0);Animated.sequence([Animated.timing(shake,{toValue:1,duration:24,useNativeDriver:true}),Animated.timing(shake,{toValue:-1,duration:24,useNativeDriver:true}),Animated.timing(shake,{toValue:0,duration:28,useNativeDriver:true})]).start();},[code]);
-  const reject=(message:string)=>{setStatus(message.toUpperCase());setDenied(true);playInterfaceSound('error');shake.setValue(0);Animated.sequence([4,-4,3,-3,2,0].map(value=>Animated.timing(shake,{toValue:value,duration:55,useNativeDriver:true}))).start();setTimeout(()=>setDenied(false),950);};
-  const verify=async()=>{if(code.replace(/\W/g,'').length<8){reject('Enter a complete access code');return;}setStatus('VERIFYING CREDENTIAL');try{await cloudflareApi.request('/api/invite/verify',{method:'POST',body:JSON.stringify({code})});playInterfaceSound('unlock');setUnlocking(true);setTimeout(()=>onUnlock(code.trim().toUpperCase()),3600);}catch(reason){reject(reason instanceof Error?reason.message:'Access denied');}};
-  const enterKey=(key:string)=>{if(key==='CLEAR'){setCode('');setDenied(false);return;}if(key==='UNLOCK'){void verify();return;}setCode(current=>(current+key).slice(0,16));setDenied(false);};
+  const reject=(message:string)=>{setStatus(message.toUpperCase());setDenied(true);playInterfaceSound('error');hapticResult('error');shake.setValue(0);Animated.sequence([4,-4,3,-3,2,0].map(value=>Animated.timing(shake,{toValue:value,duration:55,useNativeDriver:true}))).start();setTimeout(()=>setDenied(false),950);};
+  const verify=async()=>{if(!/^\d{6}$/.test(code)){reject('Enter all six digits');return;}setStatus('VERIFYING CREDENTIAL');try{await cloudflareApi.request('/api/invite/verify',{method:'POST',body:JSON.stringify({code})});playInterfaceSound('unlock');hapticResult('success');setUnlocking(true);setTimeout(()=>onUnlock(code),3600);}catch(reason){reject(reason instanceof Error?reason.message:'Access denied');}};
+  const enterKey=(key:string)=>{hapticTick();if(key==='CLEAR'){setCode('');setDenied(false);return;}if(key==='UNLOCK'){void verify();return;}setCode(current=>(current+key).slice(0,6));setDenied(false);};
   if(unlocking)return <CredentialTransition/>;
-  return <View style={[styles.accessPortal,denied&&styles.accessPortalDenied]}><Image source={require('./assets/apex-lock-reference.png')} style={styles.lockReferenceImage} resizeMode="cover"/><LinearGradient colors={denied?['rgba(74,0,8,.52)','rgba(0,0,0,.12)']:['transparent','rgba(0,0,0,.03)']} style={StyleSheet.absoluteFill}/><Animated.View style={[styles.photoLockControls,{opacity:reveal,transform:[{translateX:shake}]}]}><TextInput value={code} onChangeText={value=>{setCode(value.toUpperCase());if(denied)setDenied(false);}} autoCapitalize="characters" autoCorrect={false} placeholder="—  —  —  —  —  —" placeholderTextColor="rgba(226,255,246,.55)" style={[styles.photoLockCode,denied&&styles.photoLockCodeDenied]} onSubmitEditing={()=>void verify()}/><View style={styles.photoKeypad} pointerEvents="box-none">{['1','2','3','4','5','6','7','8','9','CLEAR','0','UNLOCK'].map(key=><Pressable key={key} accessibilityLabel={key==='UNLOCK'?'Unlock network':key==='CLEAR'?'Clear access code':`Enter ${key}`} onPress={()=>enterKey(key)} style={({pressed})=>[styles.photoKeyHit,pressed&&styles.photoKeyHitPressed]}/>)}</View><Pressable accessibilityLabel="Existing pilot sign in" onPress={onExisting} style={styles.photoExistingHit}><Text style={styles.photoExistingText}>EXISTING PILOT / SIGN IN</Text></Pressable></Animated.View>{denied?<View pointerEvents="none" style={styles.deniedGlitch}><View style={[styles.glitchLine,{top:'62%'}]}/><Text style={styles.deniedStamp}>ERR // INVALID CREDENTIAL</Text></View>:null}</View>;
+  return <View style={[styles.accessPortal,denied&&styles.accessPortalDenied]}><Image source={require('./assets/apex-lock-reference.png')} style={styles.lockReferenceImage} resizeMode="cover"/><LinearGradient colors={denied?['rgba(74,0,8,.52)','rgba(0,0,0,.12)']:['transparent','rgba(0,0,0,.03)']} style={StyleSheet.absoluteFill}/><Animated.View style={[styles.photoLockControls,{opacity:reveal,transform:[{translateX:shake}]}]}><View style={styles.photoCodeSlots} pointerEvents="none">{Array.from({length:6},(_,index)=><Text key={index} style={[styles.photoCodeDigit,denied&&styles.photoLockCodeDenied]}>{code[index]||'—'}</Text>)}</View><TextInput value={code} onChangeText={value=>{setCode(value.replace(/\D/g,'').slice(0,6));setDenied(false);hapticTick();}} keyboardType="number-pad" maxLength={6} caretHidden style={styles.photoLockNativeInput} onSubmitEditing={()=>void verify()}/><View style={styles.photoKeypad} pointerEvents="box-none">{['1','2','3','4','5','6','7','8','9','CLEAR','0','UNLOCK'].map(key=><Pressable key={key} accessibilityLabel={key==='UNLOCK'?'Unlock network':key==='CLEAR'?'Clear access code':`Enter ${key}`} onPress={()=>enterKey(key)} style={({pressed})=>[styles.photoKeyHit,pressed&&styles.photoKeyHitPressed]}/>)}</View><Pressable accessibilityLabel="Existing pilot sign in" onPress={onExisting} style={styles.photoExistingHit}><Text style={styles.photoExistingText}>EXISTING PILOT / SIGN IN</Text></Pressable></Animated.View>{denied?<View pointerEvents="none" style={styles.deniedGlitch}><View style={[styles.glitchLine,{top:'62%'}]}/><Text style={styles.deniedStamp}>ERR // INVALID CREDENTIAL</Text></View>:null}</View>;
 }
 
 function AuthPanel({ onClose, onOpen, initialMode='signin', inviteCode }: { onClose: () => void;onOpen?: (tab:TabKey)=>void;initialMode?:'signin'|'signup';inviteCode?:string|null }) {
@@ -1961,7 +1965,9 @@ const styles = StyleSheet.create({
   accessPortal: { flex: 1, backgroundColor: '#010101', overflow: 'hidden' },
   lockReferenceImage: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%', opacity: 1 },
   photoLockControls: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
-  photoLockCode: { position: 'absolute', top: '61.2%', left: '18%', right: '18%', height: '5.8%', color: paper, fontSize: 18, fontWeight: '900', letterSpacing: 3, textAlign: 'center', borderWidth: 0, backgroundColor: 'transparent' },
+  photoCodeSlots: { position: 'absolute', top: '62.05%', left: '19.5%', right: '19.5%', height: '3.4%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  photoCodeDigit: { width: '14%', color: paper, fontSize: 18, fontWeight: '900', textAlign: 'center', textShadowColor: '#B9FFF2', textShadowRadius: 4 },
+  photoLockNativeInput: { position: 'absolute', top: '60.7%', left: '16%', right: '16%', height: '6.5%', opacity: 0.01, color: 'transparent' },
   photoLockCodeDenied: { color: '#FFB1B8', textShadowColor: '#FF3344', textShadowRadius: 12 },
   photoKeypad: { position: 'absolute', top: '68.1%', left: '17%', right: '17%', height: '22.2%', flexDirection: 'row', flexWrap: 'wrap' },
   photoKeyHit: { width: '33.333%', height: '25%' },
