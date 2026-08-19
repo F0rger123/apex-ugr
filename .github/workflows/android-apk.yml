@@ -1,0 +1,48 @@
+name: Publish Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    if: github.actor != 'github-actions[bot]' && secrets.EXPO_TOKEN != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      - name: Build the installable APK
+        run: eas build --platform android --profile preview --non-interactive --wait --json > build.json
+
+      - name: Point the stable download route at this build
+        id: apk
+        run: |
+          APK_URL="$(node -e "const build=require('./build.json'); process.stdout.write(build.artifacts.buildUrl)")"
+          node scripts/setAndroidBuildUrl.mjs "$APK_URL"
+          echo "url=$APK_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the new stable download target
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- 'functions/api/[[path]].ts'
+          git commit -m "chore: publish Android APK"
+          git push
