@@ -9,8 +9,19 @@ permissions:
   contents: write
 
 jobs:
+  check-expo-token:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.token.outputs.configured }}
+    steps:
+      - id: token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: echo "configured=$([ -n \"$EXPO_TOKEN\" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
   build-and-publish:
-    if: github.actor != 'github-actions[bot]' && secrets.EXPO_TOKEN != ''
+    needs: check-expo-token
+    if: github.actor != 'github-actions[bot]' && needs.check-expo-token.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
