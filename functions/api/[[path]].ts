@@ -20,7 +20,7 @@ const cors = {
 
 const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
 const ROOT_ACCESS_CODE = 'APEXUGR26';
-const ANDROID_PREVIEW_URL = 'https://expo.dev/artifacts/eas/868YfWC1yP1WjiaWF3TMyNHv9tN5ZeoyHhJJH-uWDOY.apk';
+const ANDROID_PREVIEW_URL = 'https://expo.dev/artifacts/eas/5JGLX8lBct1ieu1lpZoDBv59Awi_8Ds3wATj05Zm7r4.apk';
 
 function normalizeInviteCode(value: string) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -190,7 +190,7 @@ async function handle(request: Request, env: Env, path: string) {
 
   if(path==='invite/verify'&&method==='POST'){
     const body=await request.json<{code?:string}>();const code=normalizeInviteCode(body.code||'');
-    if(code===ROOT_ACCESS_CODE)return json({valid:true,label:'ORIGIN ACCESS',remaining:9999,expiresAt:null});
+    if(code===ROOT_ACCESS_CODE)return json({valid:true,label:'APEX ROOT ACCESS',remaining:9999,expiresAt:null});
     const invite=await env.DB.prepare(`SELECT label,max_uses,use_count,expires_at FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{label:string;max_uses:number;use_count:number;expires_at:string|null}>();
     if(!invite)return json({error:'Access code is invalid, expired, or fully redeemed.'},404);
     return json({valid:true,label:invite.label,remaining:invite.max_uses-invite.use_count,expiresAt:invite.expires_at});
