@@ -140,6 +140,17 @@ async function syncGameProgress(userId:string,env:Env){
   return {counts,completed};
 }
 
+async function ghostProfile(userId:string,env:Env){
+  await env.DB.prepare('INSERT OR IGNORE INTO ghost_profiles(user_id) VALUES(?)').bind(userId).run();
+  return env.DB.prepare('SELECT * FROM ghost_profiles WHERE user_id=?').bind(userId).first<{credits:number;current_streak:number;best_streak:number;activities_completed:number;drops_claimed:number;trails_completed:number;bounty_escapes:number;bounty_claims:number}>();
+}
+
+async function grantGhostCredits(userId:string,amount:number,source:string,activityId:string|undefined,env:Env){
+  const profile=await ghostProfile(userId,env);const before=Number(profile?.credits||0),after=before+Math.max(0,Math.floor(amount));
+  await env.DB.batch([env.DB.prepare('UPDATE ghost_profiles SET credits=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(after,userId),env.DB.prepare('INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),userId,after-before,source,activityId||null,before,after)]);
+  return after;
+}
+
 function providerSearches(vehicle: Record<string, string | number>, query: string) {
   const terms = encodeURIComponent(`${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''} ${query}`.replace(/\s+/g, ' ').trim());
   const make = String(vehicle.make).toLowerCase();
@@ -270,6 +281,18 @@ async function handle(request: Request, env: Env, path: string) {
     const updated=await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?').bind(user.id).first<UserRow>();
     return json({user:publicUser(updated!)});
   }
+  if(path==='ghost/profile'&&method==='GET'){
+    const profile=await ghostProfile(user.id,env);const [transactions,inventory,equipped]=await Promise.all([env.DB.prepare('SELECT * FROM ghost_credit_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 50').bind(user.id).all(),env.DB.prepare(`SELECT i.*,s.name,s.category,s.rarity,s.metadata_json FROM ghost_inventory i JOIN ghost_shop_items s ON s.id=i.item_id WHERE i.user_id=? ORDER BY i.acquired_at DESC`).bind(user.id).all(),env.DB.prepare('SELECT category,item_id FROM ghost_equipped_items WHERE user_id=?').bind(user.id).all()]);return json({profile,transactions:transactions.results,inventory:inventory.results,equipped:equipped.results});
+  }
+  if(path==='ghost/shop'&&method==='GET'){
+    const profile=await ghostProfile(user.id,env);const items=await env.DB.prepare(`SELECT s.*,EXISTS(SELECT 1 FROM ghost_inventory i WHERE i.user_id=? AND i.item_id=s.id) owned FROM ghost_shop_items s WHERE s.is_active=1 AND (s.available_from IS NULL OR s.available_from<=?) AND (s.available_until IS NULL OR s.available_until>?) ORDER BY s.rarity DESC,s.price_gc`).bind(user.id,new Date().toISOString(),new Date().toISOString()).all();return json({credits:profile?.credits||0,streak:profile?.current_streak||0,items:items.results});
+  }
+  const ghostPurchase=path.match(/^ghost\/shop\/([^/]+)\/purchase$/);if(ghostPurchase&&method==='POST'){
+    const profile=await ghostProfile(user.id,env);const item=await env.DB.prepare(`SELECT * FROM ghost_shop_items WHERE id=? AND is_active=1 AND (available_from IS NULL OR available_from<=?) AND (available_until IS NULL OR available_until>?)`).bind(ghostPurchase[1],new Date().toISOString(),new Date().toISOString()).first<any>();if(!item)return json({error:'This Ghost Shop item is unavailable.'},404);if(item.requirement_type==='streak'&&Number(profile?.current_streak||0)<Number(item.requirement_value))return json({error:`Requires Ghost Streak x${item.requirement_value}.`},403);const owned=await env.DB.prepare('SELECT 1 found FROM ghost_inventory WHERE user_id=? AND item_id=?').bind(user.id,item.id).first();if(owned)return json({error:'You already own this item.'},409);const cost=Number(item.price_gc);const result=await env.DB.prepare('UPDATE ghost_profiles SET credits=credits-?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND credits>=?').bind(cost,user.id,cost).run();if(!result.meta.changes)return json({error:'Not enough Ghost Credits.'},409);const balance=Number(profile?.credits||0)-cost;await env.DB.batch([env.DB.prepare('INSERT INTO ghost_inventory(user_id,item_id,acquired_source,purchase_price_gc) VALUES(?,?,?,?)').bind(user.id,item.id,'ghost_shop',cost),env.DB.prepare('INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user.id,-cost,'GHOST SHOP',item.id,Number(profile?.credits||0),balance)]);return json({purchased:true,balance});
+  }
+  if(path==='ghost/equip'&&method==='POST'){
+    const body=await request.json<{itemId?:string}>();const item=await env.DB.prepare(`SELECT s.id,s.category FROM ghost_shop_items s JOIN ghost_inventory i ON i.item_id=s.id WHERE s.id=? AND i.user_id=?`).bind(body.itemId||'',user.id).first<{id:string;category:string}>();if(!item)return json({error:'You do not own this cosmetic.'},403);await env.DB.prepare(`INSERT INTO ghost_equipped_items(user_id,category,item_id) VALUES(?,?,?) ON CONFLICT(user_id,category) DO UPDATE SET item_id=excluded.item_id,equipped_at=CURRENT_TIMESTAMP`).bind(user.id,item.category,item.id).run();return json({equipped:true,category:item.category,itemId:item.id});
+  }
   if (path === 'auth/signout' && method === 'POST') {
     const bearer = request.headers.get('authorization')!.replace(/^Bearer\s+/i, '');
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await sha256(bearer)).run();
@@ -369,7 +392,7 @@ async function handle(request: Request, env: Env, path: string) {
     if(rewardsToSpawn){const rewardStatements=[];for(let index=0;index<rewardsToSpawn;index++){const point=destinationPoint(latitude,longitude,900+Math.random()*4200,Math.random()*360),lifeHours=index%2===0?1:2;rewardStatements.push(env.DB.prepare('INSERT INTO map_rewards(id,owner_id,title,latitude,longitude,radius_m,credits,expires_at) VALUES(?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user.id,index===0?'SIGNAL CACHE':'GHOST COIN',point.latitude,point.longitude,70,50+Math.floor(Math.random()*5)*25,new Date(Date.now()+lifeHours*3600000).toISOString()));}await env.DB.batch(rewardStatements);}
     const activeRewards=await env.DB.prepare(`SELECT r.* FROM map_rewards r LEFT JOIN map_reward_claims c ON c.reward_id=r.id AND c.user_id=? WHERE r.owner_id=? AND r.expires_at>? AND c.reward_id IS NULL`).bind(user.id,user.id,new Date().toISOString()).all<Record<string,unknown>>();
     const reachedRewards=activeRewards.results.filter(reward=>distanceMeters(latitude,longitude,Number(reward.latitude),Number(reward.longitude))<=Number(reward.radius_m));const claimedRewards:Record<string,unknown>[]=[];
-    for(const reward of reachedRewards){const result=await env.DB.prepare('INSERT OR IGNORE INTO map_reward_claims(reward_id,user_id) VALUES(?,?)').bind(reward.id,user.id).run();if(result.meta.changes){await env.DB.prepare('UPDATE users SET credits=credits+? WHERE id=?').bind(Number(reward.credits),user.id).run();claimedRewards.push(reward);}}
+    for(const reward of reachedRewards){const result=await env.DB.prepare('INSERT OR IGNORE INTO map_reward_claims(reward_id,user_id) VALUES(?,?)').bind(reward.id,user.id).run();if(result.meta.changes){await env.DB.prepare('UPDATE users SET credits=credits+? WHERE id=?').bind(Number(reward.credits),user.id).run();await grantGhostCredits(user.id,Math.max(10,Math.floor(Number(reward.credits)/5)),'GHOST CACHE',String(reward.id),env);await env.DB.prepare('UPDATE ghost_profiles SET current_streak=current_streak+1,best_streak=MAX(best_streak,current_streak+1),activities_completed=activities_completed+1,drops_claimed=drops_claimed+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(user.id).run();claimedRewards.push(reward);}}
     const discoveryCount=await env.DB.prepare('SELECT COUNT(*) count FROM map_discoveries WHERE user_id=?').bind(user.id).first<{count:number}>();
     const availableTerritories=await env.DB.prepare(`SELECT t.* FROM territories t JOIN crew_members m ON m.crew_id=t.crew_id AND m.user_id=? AND m.status='approved' LEFT JOIN territory_unlocks u ON u.territory_id=t.id AND u.user_id=? WHERE u.territory_id IS NULL`).bind(user.id,user.id).all<Record<string,unknown>>();
     const unlocked=availableTerritories.results.filter(territory=>(discoveryCount?.count||0)>=Number(territory.required_cells)&&distanceMeters(latitude,longitude,Number(territory.latitude),Number(territory.longitude))<=Number(territory.radius_m));

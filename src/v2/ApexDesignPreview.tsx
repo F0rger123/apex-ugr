@@ -1111,6 +1111,11 @@ function RaceScreen() {
 function VaultScreen() {
   const profile = useContentStore(state => state.profile);
   const balance = profile?.credits || 0;
+  const [ghost,setGhost]=useState<any|null>(null);const [shop,setShop]=useState<any[]>([]);const [loading,setLoading]=useState(true);const [status,setStatus]=useState('');
+  const load=async()=>{setLoading(true);try{const [profileData,shopData]=await Promise.all([cloudflareApi.request<any>('/api/ghost/profile'),cloudflareApi.request<any>('/api/ghost/shop')]);setGhost(profileData);setShop(shopData.items||[]);setStatus('');}catch(error){setStatus(error instanceof Error?error.message:'Ghost network unavailable.');}finally{setLoading(false);}};
+  useEffect(()=>{void load();},[]);
+  const purchase=async(id:string)=>{try{await cloudflareApi.request(`/api/ghost/shop/${id}/purchase`,{method:'POST'});playInterfaceSound('unlock');await load();}catch(error){setStatus(error instanceof Error?error.message:'Purchase failed.');playInterfaceSound('error');}};
+  const equip=async(id:string)=>{try{await cloudflareApi.request('/api/ghost/equip',{method:'POST',body:JSON.stringify({itemId:id})});setStatus('COSMETIC EQUIPPED');await load();}catch(error){setStatus(error instanceof Error?error.message:'Equip failed.');}};
   return (
     <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
       <LinearGradient colors={['rgba(145,185,133,.15)', 'rgba(9,12,10,.94)', 'rgba(2,3,2,.98)']} style={styles.vaultCard}>
@@ -1123,6 +1128,13 @@ function VaultScreen() {
       <View style={styles.badgeGrid}>
         {profile ? <VaultBadge icon={Medal} title={profile.tier.toUpperCase()} subtitle="CURRENT TIER" /> : null}
       </View>
+      <SectionTitle label="GHOST CREDITS" action={loading?'SYNCING':'SERVER LEDGER'} />
+      <GlassPanel glow><View style={styles.vaultTop}><View><Text style={styles.commandTitle}>{Number(ghost?.profile?.credits||0).toLocaleString()} GC</Text><Text style={styles.commandMeta}>GHOST STREAK x{ghost?.profile?.current_streak||0} · BEST x{ghost?.profile?.best_streak||0}</Text></View><Gem size={23} color={accent}/></View><View style={styles.identityDivider}/><Text style={styles.commandMeta}>{ghost?.profile?.activities_completed||0} ACTIVITIES · {ghost?.profile?.drops_claimed||0} CACHES · {ghost?.profile?.bounty_escapes||0} SURVIVALS</Text></GlassPanel>
+      <SectionTitle label="GHOST SHOP" action={`${shop.length} SIGNALS`} />
+      {shop.map(item=><GlassPanel key={item.id} style={styles.worldCard} glow={item.rarity==='ELITE'||item.rarity==='APEX'}><View style={styles.worldCardTop}><View style={styles.commandCopy}><Text style={styles.commandTitle}>{String(item.name).toUpperCase()}</Text><Text style={styles.commandMeta}>{item.description}</Text><Text style={styles.commandMeta}>{item.rarity} · {item.category.replace('_',' ').toUpperCase()}{item.requirement_type?` · ${item.requirement_type.toUpperCase()} x${item.requirement_value}`:''}</Text></View><Text style={styles.contractReward}>{item.price_gc} GC</Text></View><GlassButton label={item.owned?'EQUIP':'ACQUIRE'} icon={item.owned?Check:ShoppingBag} onPress={()=>void (item.owned?equip(item.id):purchase(item.id))} active={!item.owned}/></GlassPanel>)}
+      <SectionTitle label="GHOST LEDGER" action="LAST 50" />
+      {(ghost?.transactions||[]).slice(0,8).map((entry:any)=><LedgerRow key={entry.id} icon={entry.amount>0?Gift:ShoppingBag} title={entry.source} meta={new Date(entry.created_at).toLocaleString()} value={`${entry.amount>0?'+':''}${entry.amount} GC`}/>)}
+      {status?<Text style={styles.networkError}>{status.toUpperCase()}</Text>:null}
       {!profile ? <GlassPanel style={styles.emptyState}><LockKeyhole size={28} color={accent} /><Text style={styles.emptyTitle}>SIGN IN TO OPEN THE VAULT</Text></GlassPanel> : null}
     </ScrollView>
   );
