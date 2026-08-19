@@ -795,6 +795,7 @@ async function handle(request: Request, env: Env, path: string) {
   }
   const deletePlace=path.match(/^places\/([^/]+)$/);
   if(deletePlace&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_places WHERE id=? AND user_id=?').bind(deletePlace[1],user.id).run();return json({deleted:true});}
+  if(deletePlace&&method==='PUT'){const body=await request.json<{label?:string}>();const label=body.label?.trim();if(!label)return json({error:'A custom nickname is required.'},400);await env.DB.prepare('UPDATE saved_places SET label=? WHERE id=? AND user_id=?').bind(label.slice(0,60),deletePlace[1],user.id).run();return json({updated:true});}
 
   if(path==='routes/save'&&method==='POST'){
     const body=await request.json<{name?:string;route?:{destination:string;destinationLatitude:number;destinationLongitude:number;distanceKm:number;durationMinutes:number;coordinates:Array<{latitude:number;longitude:number}>;stops?:Array<{name:string;latitude:number;longitude:number}>}}>();
