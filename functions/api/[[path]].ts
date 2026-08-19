@@ -19,7 +19,8 @@ const cors = {
 };
 
 const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
-const ROOT_ACCESS_CODE = 'APEXORIGIN26';
+const ROOT_ACCESS_CODE = 'APEXUGR26';
+const ANDROID_PREVIEW_URL = 'https://expo.dev/artifacts/eas/868YfWC1yP1WjiaWF3TMyNHv9tN5ZeoyHhJJH-uWDOY.apk';
 
 function normalizeInviteCode(value: string) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -178,6 +179,7 @@ async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === 'OPTIONS') return new Response(null, { headers: cors });
   if (path === 'health') return json({ status: 'live', backend: 'cloudflare', storage: 'd1+r2' });
+  if(path==='download/android'&&method==='GET')return Response.redirect(ANDROID_PREVIEW_URL,302);
   if (path.startsWith('media/') && method === 'GET') {
     const key=decodeURIComponent(path.slice(6));
     const object=await env.MEDIA.get(key);
