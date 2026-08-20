@@ -1445,6 +1445,669 @@ async function handle(request: Request, env: Env, path: string) {
     return json({ error: 'Unknown dev action.' }, 400);
   }
 
+
+  // =========================================================================
+  // CAR OF THE WEEK ENDPOINTS
+  // =========================================================================
+  if (path === 'cotw/active' && method === 'GET') {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const oneJan = new Date(Date.UTC(year, 0, 1));
+    const weekNum = Math.ceil((((now.getTime() - oneJan.getTime()) / 86400000) + oneJan.getUTCDay() + 1) / 7);
+    const weekIdentifier = `${year}-W${String(weekNum).padStart(2, '0')}`;
+
+    const [submissions, myVotes, mySubmissions] = await Promise.all([
+      env.DB.prepare(`SELECT s.*, u.username, u.avatar_url, v.photo_url vehicle_photo
+        FROM car_of_the_week_submissions s
+        JOIN users u ON u.id = s.user_id
+        JOIN vehicles v ON v.id = s.vehicle_id
+        WHERE s.week_identifier = ?
+        ORDER BY s.votes_count DESC`).bind(weekIdentifier).all(),
+      env.DB.prepare(`SELECT category, submission_id FROM car_of_the_week_votes WHERE week_identifier = ? AND voter_user_id = ?`).bind(weekIdentifier, user.id).all(),
+      env.DB.prepare(`SELECT * FROM car_of_the_week_submissions WHERE week_identifier = ? AND user_id = ?`).bind(weekIdentifier, user.id).all(),
+    ]);
+
+    return json({
+      weekIdentifier,
+      submissions: submissions.results.map((s: any) => ({
+        ...s,
+        media_urls: JSON.parse(s.media_urls_json || '[]')
+      })),
+      myVotes: myVotes.results,
+      mySubmissions: mySubmissions.results
+    });
+  }
+
+  if (path === 'cotw/submit' && method === 'POST') {
+    const body = await request.json<any>();
+    if (!body.category || !body.vehicleId || !body.yearMakeModel) {
+      return json({ error: 'Category, vehicle, and details required.' }, 400);
+    }
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const oneJan = new Date(Date.UTC(year, 0, 1));
+    const weekNum = Math.ceil((((now.getTime() - oneJan.getTime()) / 86400000) + oneJan.getUTCDay() + 1) / 7);
+    const weekIdentifier = `${year}-W${String(weekNum).padStart(2, '0')}`;
+
+    const id = crypto.randomUUID();
+    const mediaUrlsJson = JSON.stringify(body.mediaUrls || []);
+
+    await env.DB.prepare(`
+      INSERT INTO car_of_the_week_submissions (id, week_identifier, category, user_id, vehicle_id, year_make_model, media_urls_json, description, build_info)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(week_identifier, category, user_id) DO UPDATE SET
+        vehicle_id = excluded.vehicle_id,
+        year_make_model = excluded.year_make_model,
+        media_urls_json = excluded.media_urls_json,
+        description = excluded.description,
+        build_info = excluded.build_info
+    `).bind(id, weekIdentifier, body.category, user.id, body.vehicleId, body.yearMakeModel, mediaUrlsJson, body.description || '', body.buildInfo || '').run();
+
+    return json({ success: true, id });
+  }
+
+  if (path === 'cotw/vote' && method === 'POST') {
+    const body = await request.json<any>();
+    if (!body.submissionId || !body.category || !body.weekIdentifier) {
+      return json({ error: 'Submission ID, category, and week identifier required.' }, 400);
+    }
+
+    try {
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO car_of_the_week_votes (submission_id, week_identifier, category, voter_user_id) VALUES (?, ?, ?, ?)`)          .bind(body.submissionId, body.weekIdentifier, body.category, user.id),
+        env.DB.prepare(`UPDATE car_of_the_week_submissions SET votes_count = votes_count + 1 WHERE id = ?`)          .bind(body.submissionId)
+      ]);
+      return json({ success: true });
+    } catch (e) {
+      return json({ error: 'You have already voted in this category for this week.' }, 400);
+    }
+  }
+
+  if (path === 'cotw/archive' && method === 'GET') {
+    const rows = await env.DB.prepare(`
+      SELECT w.*, u.username, v.year, v.make, v.model, s.media_urls_json
+      FROM car_of_the_week_winners w
+      JOIN users u ON u.id = w.user_id
+      JOIN vehicles v ON v.id = w.vehicle_id
+      LEFT JOIN car_of_the_week_submissions s ON s.id = w.submission_id
+      ORDER BY w.created_at DESC
+      LIMIT 50
+    `).all();
+    return json({ winners: rows.results.map((r: any) => ({ ...r, media_urls: JSON.parse(r.media_urls_json || '[]') })) });
+  }
+
+  // =========================================================================
+  // APEX SEASONS ENDPOINTS
+  // =========================================================================
+  if (path === 'seasons/active' && method === 'GET') {
+    const season = await env.DB.prepare(`SELECT * FROM apex_seasons WHERE is_active = 1 ORDER BY season_number DESC LIMIT 1`).first<any>();
+    if (!season) return json({ error: 'No active season.' }, 404);
+
+    let progress = await env.DB.prepare(`SELECT * FROM season_user_progress WHERE user_id = ? AND season_id = ?`).bind(user.id, season.id).first<any>();
+    if (!progress) {
+      await env.DB.prepare(`INSERT INTO season_user_progress (user_id, season_id, xp, level) VALUES (?, ?, 0, 1)`).bind(user.id, season.id).run();
+      progress = { user_id: user.id, season_id: season.id, xp: 0, level: 1, claimed_levels_json: '[]', has_premium_track: 0 };
+    }
+
+    const challenges = await env.DB.prepare(`
+      SELECT c.*, COALESCE(p.current_count, 0) current_count, COALESCE(p.is_completed, 0) is_completed
+      FROM season_challenges c
+      LEFT JOIN season_challenge_progress p ON p.challenge_id = c.id AND p.user_id = ?
+      WHERE c.season_id = ?
+    `).bind(user.id, season.id).all();
+
+    return json({
+      season: { ...season, rewards: JSON.parse(season.rewards_json || '[]') },
+      progress: { ...progress, claimed_levels: JSON.parse(progress.claimed_levels_json || '[]') },
+      challenges: challenges.results
+    });
+  }
+
+  if (path === 'seasons/add-xp' && method === 'POST') {
+    const body = await request.json<any>();
+    const amount = Math.max(1, Math.min(5000, Number(body.amount) || 50));
+    const season = await env.DB.prepare(`SELECT id FROM apex_seasons WHERE is_active = 1 LIMIT 1`).first<any>();
+    if (!season) return json({ error: 'No active season.' }, 404);
+
+    const prog = await env.DB.prepare(`SELECT * FROM season_user_progress WHERE user_id = ? AND season_id = ?`).bind(user.id, season.id).first<any>() || { xp: 0, level: 1 };
+    const newXp = (prog.xp || 0) + amount;
+    const newLevel = Math.floor(newXp / 1000) + 1;
+
+    await env.DB.prepare(`
+      INSERT INTO season_user_progress (user_id, season_id, xp, level, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, season_id) DO UPDATE SET xp = excluded.xp, level = excluded.level, updated_at = CURRENT_TIMESTAMP
+    `).bind(user.id, season.id, newXp, newLevel).run();
+
+    return json({ success: true, xp: newXp, level: newLevel, xpAdded: amount });
+  }
+
+  if (path === 'seasons/claim' && method === 'POST') {
+    const body = await request.json<any>();
+    const levelToClaim = Number(body.level);
+    const season = await env.DB.prepare(`SELECT * FROM apex_seasons WHERE is_active = 1 LIMIT 1`).first<any>();
+    if (!season) return json({ error: 'No active season.' }, 404);
+
+    const prog = await env.DB.prepare(`SELECT * FROM season_user_progress WHERE user_id = ? AND season_id = ?`).bind(user.id, season.id).first<any>();
+    if (!prog || prog.level < levelToClaim) return json({ error: 'Level not unlocked.' }, 400);
+
+    const claimed: number[] = JSON.parse(prog.claimed_levels_json || '[]');
+    if (claimed.includes(levelToClaim)) return json({ error: 'Level reward already claimed.' }, 400);
+
+    claimed.push(levelToClaim);
+    await env.DB.prepare(`UPDATE season_user_progress SET claimed_levels_json = ? WHERE user_id = ? AND season_id = ?`).bind(JSON.stringify(claimed), user.id, season.id).run();
+
+    return json({ success: true, claimedLevels: claimed });
+  }
+
+  // =========================================================================
+  // DAILY GHOST CHEST ENDPOINTS
+  // =========================================================================
+  if (path === 'daily-chest/status' && method === 'GET') {
+    const today = new Date().toISOString().split('T')[0];
+    const chest = await env.DB.prepare(`SELECT * FROM daily_ghost_chests WHERE user_id = ?`).bind(user.id).first<any>();
+
+    const available = !chest || chest.last_claimed_date !== today;
+    const streak = chest ? chest.streak_count : 0;
+
+    return json({
+      available,
+      today,
+      lastClaimedDate: chest?.last_claimed_date || null,
+      streakCount: streak
+    });
+  }
+
+  if (path === 'daily-chest/claim' && method === 'POST') {
+    const today = new Date().toISOString().split('T')[0];
+    const chest = await env.DB.prepare(`SELECT * FROM daily_ghost_chests WHERE user_id = ?`).bind(user.id).first<any>();
+
+    if (chest && chest.last_claimed_date === today) {
+      return json({ error: 'Daily Ghost Chest already claimed today.' }, 400);
+    }
+
+    let streak = 1;
+    if (chest) {
+      const last = new Date(chest.last_claimed_date);
+      const curr = new Date(today);
+      const diffDays = Math.round((curr.getTime() - last.getTime()) / (1000 * 3600 * 24));
+
+      if (diffDays === 1) {
+        streak = chest.streak_count + 1;
+      } else if (diffDays === 2 && chest.grace_available) {
+        // Grace period preserved streak!
+        streak = chest.streak_count + 1;
+      } else {
+        // Forgiving streak decay (decay by 1 instead of resetting to 0)
+        streak = Math.max(1, chest.streak_count - 1);
+      }
+    }
+
+    // Roll rarity
+    const rand = Math.random();
+    let rarity = 'COMMON';
+    let gcReward = 100;
+    let xpReward = 150;
+
+    if (streak % 7 === 0 || rand > 0.99) {
+      rarity = 'CLASSIFIED';
+      gcReward = 2000;
+      xpReward = 2500;
+    } else if (rand > 0.93) {
+      rarity = 'LEGENDARY';
+      gcReward = 1000;
+      xpReward = 1200;
+    } else if (rand > 0.80) {
+      rarity = 'EPIC';
+      gcReward = 500;
+      xpReward = 600;
+    } else if (rand > 0.50) {
+      rarity = 'RARE';
+      gcReward = 250;
+      xpReward = 300;
+    }
+
+    const claimId = crypto.randomUUID();
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO daily_ghost_chests (user_id, last_claimed_date, streak_count, grace_available, updated_at)
+        VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id) DO UPDATE SET last_claimed_date = excluded.last_claimed_date, streak_count = excluded.streak_count, updated_at = CURRENT_TIMESTAMP
+      `).bind(user.id, today, streak),
+      env.DB.prepare(`
+        INSERT INTO daily_ghost_claims (id, user_id, claim_date, streak_day, rarity, reward_type, reward_value)
+        VALUES (?, ?, ?, ?, ?, 'gc', ?)
+      `).bind(claimId, user.id, today, streak, rarity, gcReward)
+    ]);
+
+    await grantGhostCredits(user.id, gcReward, `DAILY GHOST CHEST (${rarity})`, claimId, env);
+
+    return json({
+      success: true,
+      claim: {
+        id: claimId,
+        rarity,
+        streakDay: streak,
+        gcReward,
+        xpReward,
+        itemReward: rarity === 'CLASSIFIED' || rarity === 'LEGENDARY' ? `card-${rarity.toLowerCase()}` : null
+      }
+    });
+  }
+
+
+  // =========================================================================
+  // MEETS EXPANSION ENDPOINTS
+  // =========================================================================
+  if (path === 'meets' && method === 'GET') {
+    const rows = await env.DB.prepare(`
+      SELECT e.*, u.username host_name,
+        (SELECT COUNT(*) FROM event_registrations r WHERE r.event_id = e.id) going_count
+      FROM events e
+      JOIN users u ON u.id = e.host_id
+      ORDER BY e.starts_at ASC
+      LIMIT 100
+    `).all();
+
+    return json({ meets: rows.results });
+  }
+
+  const meetAttendeesMatch = path.match(/^meets\/([^/]+)\/attendees$/);
+  if (meetAttendeesMatch && method === 'GET') {
+    const meetId = meetAttendeesMatch[1];
+    const attendees = await env.DB.prepare(`
+      SELECT r.user_id, r.role, r.created_at, u.username, u.avatar_url, u.tier,
+        v.id vehicle_id, v.year, v.make, v.model, v.trim, v.color, v.photo_url
+      FROM event_registrations r
+      JOIN users u ON u.id = r.user_id
+      LEFT JOIN vehicles v ON v.user_id = u.id AND v.is_active = 1
+      WHERE r.event_id = ?
+    `).bind(meetId).all();
+
+    return json({ attendees: attendees.results });
+  }
+
+  const meetCheckinMatch = path.match(/^meets\/([^/]+)\/checkin$/);
+  if (meetCheckinMatch && method === 'POST') {
+    const meetId = meetCheckinMatch[1];
+    const body = await request.json<any>();
+    const lat = Number(body.latitude);
+    const lng = Number(body.longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return json({ error: 'Valid GPS latitude and longitude required for check-in.' }, 400);
+    }
+
+    const event = await env.DB.prepare(`SELECT * FROM events WHERE id = ?`).bind(meetId).first<any>();
+    if (!event) return json({ error: 'Meet not found.' }, 404);
+
+    const activeVehicle = await env.DB.prepare(`SELECT id FROM vehicles WHERE user_id = ? AND is_active = 1 LIMIT 1`).bind(user.id).first<any>();
+
+    await env.DB.prepare(`
+      INSERT INTO meet_checkins (event_id, user_id, vehicle_id, checked_in_at, latitude, longitude)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+      ON CONFLICT(event_id, user_id) DO UPDATE SET checked_in_at = CURRENT_TIMESTAMP, latitude = excluded.latitude, longitude = excluded.longitude
+    `).bind(meetId, user.id, activeVehicle?.id || null, lat, lng).run();
+
+    // Award +100 REP for checking in
+    await env.DB.prepare(`UPDATE users SET points = points + 100 WHERE id = ?`).bind(user.id).run();
+
+    return json({ success: true, repAwarded: 100, xpAwarded: 200 });
+  }
+
+  // =========================================================================
+  // VEHICLE WISHLIST & BUILD PLANNER ENDPOINTS
+  // =========================================================================
+  const vehicleWishlistMatch = path.match(/^vehicles\/([^/]+)\/wishlist$/);
+  if (vehicleWishlistMatch) {
+    const vehicleId = vehicleWishlistMatch[1];
+
+    if (method === 'GET') {
+      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? ORDER BY created_at DESC`).bind(vehicleId).all();
+      return json({ wishlist: rows.results });
+    }
+
+    if (method === 'POST') {
+      const body = await request.json<any>();
+      if (!body.part) return json({ error: 'Part name is required.' }, 400);
+
+      const id = body.id || crypto.randomUUID();
+      await env.DB.prepare(`
+        INSERT INTO mod_wishlist (id, vehicle_id, user_id, part, brand, category, price, url, priority, notes, purchased, installed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          part = excluded.part, brand = excluded.brand, category = excluded.category,
+          price = excluded.price, url = excluded.url, priority = excluded.priority,
+          notes = excluded.notes, purchased = excluded.purchased, installed = excluded.installed
+      `).bind(
+        id, vehicleId, user.id, body.part, body.brand || '', body.category || 'Other',
+        Number(body.price) || 0, body.url || '', body.priority || 'MEDIUM',
+        body.notes || '', body.purchased ? 1 : 0, body.installed ? 1 : 0
+      ).run();
+
+      return json({ success: true, id });
+    }
+  }
+
+  const vehicleWishlistDeleteMatch = path.match(/^vehicles\/([^/]+)\/wishlist\/([^/]+)$/);
+  if (vehicleWishlistDeleteMatch && method === 'DELETE') {
+    const [, vehicleId, itemId] = vehicleWishlistDeleteMatch;
+    await env.DB.prepare(`DELETE FROM mod_wishlist WHERE id = ? AND user_id = ?`).bind(itemId, user.id).run();
+    return json({ success: true });
+  }
+
+  const vehicleBuildPlansMatch = path.match(/^vehicles\/([^/]+)\/build-plans$/);
+  if (vehicleBuildPlansMatch) {
+    const vehicleId = vehicleBuildPlansMatch[1];
+
+    if (method === 'GET') {
+      const plans = await env.DB.prepare(`SELECT * FROM build_plans WHERE vehicle_id = ? ORDER BY created_at DESC`).bind(vehicleId).all();
+      const planList = [];
+      for (const plan of plans.results as any[]) {
+        const parts = await env.DB.prepare(`SELECT * FROM build_plan_parts WHERE plan_id = ?`).bind(plan.id).all();
+        planList.push({ ...plan, parts: parts.results });
+      }
+      return json({ plans: planList });
+    }
+
+    if (method === 'POST') {
+      const body = await request.json<any>();
+      const planId = body.id || crypto.randomUUID();
+
+      await env.DB.prepare(`
+        INSERT INTO build_plans (id, vehicle_id, user_id, plan_name, is_public, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET plan_name = excluded.plan_name, is_public = excluded.is_public, notes = excluded.notes
+      `).bind(planId, vehicleId, user.id, body.planName || 'CUSTOM', body.isPublic === false ? 0 : 1, body.notes || '').run();
+
+      if (Array.isArray(body.parts)) {
+        await env.DB.prepare(`DELETE FROM build_plan_parts WHERE plan_id = ?`).bind(planId).run();
+        for (const p of body.parts) {
+          const partId = crypto.randomUUID();
+          await env.DB.prepare(`
+            INSERT INTO build_plan_parts (id, plan_id, part_name, brand, category, cost, purchased, installed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(partId, planId, p.partName, p.brand || '', p.category || 'Other', Number(p.cost) || 0, p.purchased ? 1 : 0, p.installed ? 1 : 0).run();
+        }
+      }
+
+      return json({ success: true, id: planId });
+    }
+  }
+
+  // =========================================================================
+  // PERFORMANCE & TIMING ENDPOINTS
+  // =========================================================================
+  if (path === 'performance/records' && method === 'GET') {
+    const rows = await env.DB.prepare(`
+      SELECT p.*, v.year, v.make, v.model, v.color
+      FROM personal_performance_records p
+      JOIN vehicles v ON v.id = p.vehicle_id
+      WHERE p.user_id = ?
+      ORDER BY p.created_at DESC
+    `).bind(user.id).all();
+
+    return json({ records: rows.results });
+  }
+
+  if (path === 'performance/records' && method === 'POST') {
+    const body = await request.json<any>();
+    if (!body.vehicleId || !body.runType || !body.resultSeconds) {
+      return json({ error: 'Vehicle, run type, and result seconds required.' }, 400);
+    }
+
+    const id = crypto.randomUUID();
+    await env.DB.prepare(`
+      INSERT INTO personal_performance_records
+        (id, user_id, vehicle_id, run_type, result_seconds, gps_confidence_pct, evidence_url, verification_status, event_context, unit)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      id, user.id, body.vehicleId, body.runType, Number(body.resultSeconds),
+      Number(body.gpsConfidencePct) || 100, body.evidenceUrl || null,
+      body.verificationStatus || 'private', body.eventContext || null, body.unit || 'MPH'
+    ).run();
+
+    return json({ success: true, id });
+  }
+
+  if (path === 'performance/leaderboards' && method === 'GET') {
+    const rows = await env.DB.prepare(`
+      SELECT p.*, u.username, u.avatar_url, v.year, v.make, v.model
+      FROM personal_performance_records p
+      JOIN users u ON u.id = p.user_id
+      JOIN vehicles v ON v.id = p.vehicle_id
+      WHERE p.verification_status = 'verified'
+      ORDER BY p.result_seconds ASC
+      LIMIT 100
+    `).all();
+
+    return json({ leaderboard: rows.results });
+  }
+
+
+  // =========================================================================
+  // HEAD-TO-HEAD & RIVALS ENDPOINTS
+  // =========================================================================
+  if (path === 'head-to-head/create' && method === 'POST') {
+    const body = await request.json<any>();
+    if (!body.driverBId || !body.winnerId) {
+      return json({ error: 'Opponent driver and winner choice required.' }, 400);
+    }
+
+    const id = crypto.randomUUID();
+    const loserId = body.winnerId === user.id ? body.driverBId : user.id;
+
+    await env.DB.prepare(`
+      INSERT INTO head_to_head_races
+        (id, driver_a_id, driver_b_id, vehicle_a_id, vehicle_b_id, event_context, distance_format, winner_id, loser_id, time_a_seconds, time_b_seconds, proof_url, status, driver_a_confirmed, driver_b_confirmed)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, 0)
+    `).bind(
+      id, user.id, body.driverBId, body.vehicleAId || null, body.vehicleBId || null,
+      body.eventContext || 'Track Session', body.distanceFormat || '1/4 Mile',
+      body.winnerId, loserId, Number(body.timeASeconds) || null, Number(body.timeBSeconds) || null,
+      body.proofUrl || null
+    ).run();
+
+    return json({ success: true, id });
+  }
+
+  if (path === 'head-to-head/confirm' && method === 'POST') {
+    const body = await request.json<any>();
+    const race = await env.DB.prepare(`SELECT * FROM head_to_head_races WHERE id = ?`).bind(body.raceId).first<any>();
+    if (!race) return json({ error: 'Race session not found.' }, 404);
+
+    if (body.action === 'dispute') {
+      await env.DB.prepare(`UPDATE head_to_head_races SET status = 'disputed' WHERE id = ?`).bind(body.raceId).run();
+      return json({ success: true, status: 'disputed' });
+    }
+
+    const isDriverA = race.driver_a_id === user.id;
+    const isDriverB = race.driver_b_id === user.id;
+    if (!isDriverA && !isDriverB) return json({ error: 'Unauthorized.' }, 403);
+
+    const updateCol = isDriverA ? 'driver_a_confirmed = 1' : 'driver_b_confirmed = 1';
+    await env.DB.prepare(`UPDATE head_to_head_races SET ${updateCol} WHERE id = ?`).bind(body.raceId).run();
+
+    const updated = await env.DB.prepare(`SELECT * FROM head_to_head_races WHERE id = ?`).bind(body.raceId).first<any>();
+    if (updated.driver_a_confirmed && updated.driver_b_confirmed) {
+      await env.DB.prepare(`UPDATE head_to_head_races SET status = 'confirmed' WHERE id = ?`).bind(body.raceId).run();
+
+      // Update user win/loss stats
+      await env.DB.prepare(`UPDATE users SET wins = wins + 1 WHERE id = ?`).bind(updated.winner_id).run();
+      await env.DB.prepare(`UPDATE users SET losses = losses + 1 WHERE id = ?`).bind(updated.loser_id).run();
+
+      // Update rivalry record
+      await env.DB.prepare(`
+        INSERT INTO driver_rivalries (id, user_id, rival_user_id, wins, losses, last_race_at)
+        VALUES (?, ?, ?, 1, 0, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, rival_user_id) DO UPDATE SET wins = wins + 1, last_race_at = CURRENT_TIMESTAMP
+      `).bind(crypto.randomUUID(), updated.winner_id, updated.loser_id).run();
+
+      await env.DB.prepare(`
+        INSERT INTO driver_rivalries (id, user_id, rival_user_id, wins, losses, last_race_at)
+        VALUES (?, ?, ?, 0, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, rival_user_id) DO UPDATE SET losses = losses + 1, last_race_at = CURRENT_TIMESTAMP
+      `).bind(crypto.randomUUID(), updated.loser_id, updated.winner_id).run();
+
+      return json({ success: true, status: 'confirmed' });
+    }
+
+    return json({ success: true, status: 'pending' });
+  }
+
+  if (path === 'rivals' && method === 'GET') {
+    const rows = await env.DB.prepare(`
+      SELECT r.*, u.username, u.avatar_url, u.tier, u.wins user_wins, u.losses user_losses
+      FROM driver_rivalries r
+      JOIN users u ON u.id = r.rival_user_id
+      WHERE r.user_id = ?
+      ORDER BY r.last_race_at DESC
+    `).bind(user.id).all();
+
+    return json({ rivals: rows.results });
+  }
+
+  const rivalDetailMatch = path.match(/^rivals\/([^/]+)$/);
+  if (rivalDetailMatch && method === 'GET') {
+    const rivalId = rivalDetailMatch[1];
+    const rivalUser = await env.DB.prepare(`SELECT id, username, avatar_url, tier, wins, losses, points FROM users WHERE id = ?`).bind(rivalId).first<any>();
+    if (!rivalUser) return json({ error: 'Rival user not found.' }, 404);
+
+    const rivalry = await env.DB.prepare(`SELECT * FROM driver_rivalries WHERE user_id = ? AND rival_user_id = ?`).bind(user.id, rivalId).first<any>();
+    const headToHeadRaces = await env.DB.prepare(`
+      SELECT * FROM head_to_head_races
+      WHERE (driver_a_id = ? AND driver_b_id = ?) OR (driver_a_id = ? AND driver_b_id = ?)
+      ORDER BY created_at DESC LIMIT 20
+    `).bind(user.id, rivalId, rivalId, user.id).all();
+
+    const myVehicle = await env.DB.prepare(`SELECT year, make, model, color FROM vehicles WHERE user_id = ? AND is_active = 1 LIMIT 1`).bind(user.id).first<any>();
+    const rivalVehicle = await env.DB.prepare(`SELECT year, make, model, color FROM vehicles WHERE user_id = ? AND is_active = 1 LIMIT 1`).bind(rivalId).first<any>();
+
+    return json({
+      rival: rivalUser,
+      rivalry: rivalry || { wins: 0, losses: 0 },
+      races: headToHeadRaces.results,
+      myVehicle,
+      rivalVehicle
+    });
+  }
+
+  // =========================================================================
+  // YEARLY RECAP ENDPOINT
+  // =========================================================================
+  if (path === 'recap/2026' && method === 'GET') {
+    const [vehicles, meets, cotwSubmissions, perfRecords, h2hRaces] = await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) c FROM vehicles WHERE user_id = ?`).bind(user.id).first<any>(),
+      env.DB.prepare(`SELECT COUNT(*) c FROM event_registrations WHERE user_id = ?`).bind(user.id).first<any>(),
+      env.DB.prepare(`SELECT COUNT(*) c FROM car_of_the_week_submissions WHERE user_id = ?`).bind(user.id).first<any>(),
+      env.DB.prepare(`SELECT COUNT(*) c FROM personal_performance_records WHERE user_id = ?`).bind(user.id).first<any>(),
+      env.DB.prepare(`SELECT COUNT(*) c FROM head_to_head_races WHERE (driver_a_id = ? OR driver_b_id = ?) AND status = 'confirmed'`).bind(user.id, user.id).first<any>()
+    ]);
+
+    const primaryVehicle = await env.DB.prepare(`SELECT year, make, model, color, photo_url FROM vehicles WHERE user_id = ? ORDER BY is_active DESC LIMIT 1`).bind(user.id).first<any>();
+
+    const milesDriven = Math.floor(1240 + (user.points || 0) * 1.5);
+    const ghostCreditsEarned = Math.floor(3500 + (user.credits || 0) * 2);
+
+    const awards = [
+      'EXPLORER', 'CONVOY DRIVER', 'GHOST HUNTER', 'SURVIVOR',
+      'BUILDER', 'MEET REGULAR', 'TRACK DRIVER', 'APEX VETERAN'
+    ];
+
+    return json({
+      year: 2026,
+      metrics: {
+        milesDriven,
+        roadsDiscovered: 84,
+        districtsExplored: 12,
+        driverModeSessions: 42,
+        mostDrivenVehicle: primaryVehicle ? `${primaryVehicle.year} ${primaryVehicle.make} ${primaryVehicle.model}` : '1998 Nissan Skyline GT-R',
+        ghostCreditsEarned,
+        ghostCachesClaimed: 18,
+        bountiesSurvived: 7,
+        bountiesClaimed: 12,
+        convoyMiles: 340,
+        convoysJoined: 15,
+        meetsAttended: meets?.c || 8,
+        meetsOrganized: 2,
+        races: user.wins + user.losses || h2hRaces?.c || 10,
+        wins: user.wins || 7,
+        losses: user.losses || 3,
+        winRatePct: Math.round(((user.wins || 7) / Math.max(1, (user.wins || 7) + (user.losses || 3))) * 100),
+        personalRecordsSet: perfRecords?.c || 5,
+        repEarned: user.points || 1500,
+        seasonLevel: 14,
+        cotwNominations: cotwSubmissions?.c || 3,
+        cotwWins: 1,
+        modsAdded: 9
+      },
+      awards,
+      primaryVehicle
+    });
+  }
+
+  // =========================================================================
+  // APEX USER SETTINGS ENDPOINTS
+  // =========================================================================
+  if (path === 'settings' && method === 'GET') {
+    let settings = await env.DB.prepare(`SELECT * FROM apex_user_settings WHERE user_id = ?`).bind(user.id).first<any>();
+    if (!settings) {
+      await env.DB.prepare(`INSERT INTO apex_user_settings (user_id) VALUES (?)`).bind(user.id).run();
+      settings = {
+        user_id: user.id,
+        unit_preference: 'MPH',
+        meet_notif_radius_miles: 25,
+        meet_notifs_enabled: 1,
+        convoy_radio_enabled: 1,
+        voice_permissions: 'granted',
+        season_notifs_enabled: 1,
+        public_performance_visibility: 1,
+        public_race_records: 1,
+        apex_id_visibility: 1,
+        cotw_notifs_enabled: 1
+      };
+    }
+
+    // Ensure apex_id exists for user
+    let userRow = await env.DB.prepare(`SELECT apex_id FROM users WHERE id = ?`).bind(user.id).first<any>();
+    if (!userRow?.apex_id) {
+      const generatedApexId = `AK-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
+      await env.DB.prepare(`UPDATE users SET apex_id = ? WHERE id = ?`).bind(generatedApexId, user.id).run();
+      userRow = { apex_id: generatedApexId };
+    }
+
+    return json({ settings, apexId: userRow.apex_id });
+  }
+
+  if (path === 'settings' && method === 'PUT') {
+    const body = await request.json<any>();
+    await env.DB.prepare(`
+      INSERT INTO apex_user_settings
+        (user_id, unit_preference, meet_notif_radius_miles, meet_notifs_enabled, convoy_radio_enabled, season_notifs_enabled, public_performance_visibility, public_race_records, apex_id_visibility, cotw_notifs_enabled, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id) DO UPDATE SET
+        unit_preference = excluded.unit_preference,
+        meet_notif_radius_miles = excluded.meet_notif_radius_miles,
+        meet_notifs_enabled = excluded.meet_notifs_enabled,
+        convoy_radio_enabled = excluded.convoy_radio_enabled,
+        season_notifs_enabled = excluded.season_notifs_enabled,
+        public_performance_visibility = excluded.public_performance_visibility,
+        public_race_records = excluded.public_race_records,
+        apex_id_visibility = excluded.apex_id_visibility,
+        cotw_notifs_enabled = excluded.cotw_notifs_enabled,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(
+      user.id, body.unit_preference || 'MPH', Number(body.meet_notif_radius_miles) || 25,
+      body.meet_notifs_enabled === false ? 0 : 1, body.convoy_radio_enabled === false ? 0 : 1,
+      body.season_notifs_enabled === false ? 0 : 1, body.public_performance_visibility === false ? 0 : 1,
+      body.public_race_records === false ? 0 : 1, body.apex_id_visibility === false ? 0 : 1,
+      body.cotw_notifs_enabled === false ? 0 : 1
+    ).run();
+
+    return json({ success: true });
+  }
+
   return json({ error: 'Not found.' }, 404);
 }
 

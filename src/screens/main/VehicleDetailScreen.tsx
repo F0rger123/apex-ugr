@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useGarageStore } from '../../stores/garageStore';
@@ -278,3 +278,64 @@ const styles = StyleSheet.create({
   catChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   catChipText: { color: colors.text, fontSize: 11, fontWeight: '800' },
 });
+
+// =========================================================================
+// WISHLIST & BUILD PLANNER COMPONENTS FOR VEHICLE DETAIL
+// =========================================================================
+export const VehicleWishlistSection: React.FC<{ vehicleId: string }> = ({ vehicleId }) => {
+  const [wishlist, setWishlist] = useState<any[]>([]);
+  const [part, setPart] = useState('');
+  const [brand, setBrand] = useState('');
+  const [price, setPrice] = useState('');
+  const [category, setCategory] = useState('Engine');
+  const [priority, setPriority] = useState('MEDIUM');
+
+  useEffect(() => {
+    fetchWishlist();
+  }, [vehicleId]);
+
+  const fetchWishlist = async () => {
+    try {
+      const res = await fetch(`/api/vehicles/${vehicleId}/wishlist`);
+      const data = await res.json();
+      if (res.ok) setWishlist(data.wishlist || []);
+    } catch (e) {}
+  };
+
+  const handleAddWishlistItem = async () => {
+    if (!part.trim()) return;
+    try {
+      await fetch(`/api/vehicles/${vehicleId}/wishlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ part: part.trim(), brand, price, category, priority }),
+      });
+      setPart(''); setBrand(''); setPrice('');
+      fetchWishlist();
+    } catch (e) {}
+  };
+
+  return (
+    <View style={{ marginTop: 16 }}>
+      <SectionHeader title="MOD WISHLIST" />
+      <GlassCard style={{ padding: 12, marginBottom: 12 }}>
+        <TextInput style={styles.input} placeholder="Part Name (e.g. Forged Pistons)" placeholderTextColor={colors.textMuted} value={part} onChangeText={setPart} />
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+          <TextInput style={[styles.input, { flex: 1 }]} placeholder="Brand" placeholderTextColor={colors.textMuted} value={brand} onChangeText={setBrand} />
+          <TextInput style={[styles.input, { flex: 1 }]} placeholder="Price ($)" keyboardType="numeric" placeholderTextColor={colors.textMuted} value={price} onChangeText={setPrice} />
+        </View>
+        <ApexButton title="ADD TO WISHLIST" onPress={handleAddWishlistItem} style={{ marginTop: 10 }} />
+      </GlassCard>
+
+      {wishlist.map((item) => (
+        <GlassCard key={item.id} style={{ padding: 10, marginBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View>
+            <Text style={{ color: colors.text, fontSize: 12, fontWeight: '800' }}>{item.part}</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 10 }}>{item.brand} · {item.category}</Text>
+          </View>
+          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '900' }}>${item.price}</Text>
+        </GlassCard>
+      ))}
+    </View>
+  );
+};

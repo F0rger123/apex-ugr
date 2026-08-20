@@ -419,6 +419,8 @@ export interface BountySession {
   approx_direction?: string; // e.g. 'NW', 'SE'
   signal_strength_pct?: number; // 0..100
   is_hunter?: boolean;
+  remaining_seconds?: number;
+  proximity_lock_seconds?: number;
 }
 
 export interface BountyParticipant {

@@ -29,6 +29,9 @@ import { CarMeetDetailScreen } from '../screens/main/CarMeetDetailScreen';
 import { PartsMarketplaceSearchScreen } from '../screens/main/PartsMarketplaceSearchScreen';
 import { GarageMaintenanceLogScreen } from '../screens/main/GarageMaintenanceLogScreen';
 import { DirectMessagingChatScreen } from '../screens/main/DirectMessagingChatScreen';
+import { SeasonHubScreen } from '../screens/main/SeasonHubScreen';
+import { YearlyRecapScreen } from '../screens/main/YearlyRecapScreen';
+import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { colors } from '../config/colors';
 
 const Stack = createNativeStackNavigator();
@@ -42,13 +45,10 @@ const LoadingScreen = () => (
 export const RootNavigator = () => {
   const { isAuthenticated, isLoading, initializeAuth, user, savePushToken } = useAuthStore();
 
-  // Initialize auth on mount — reads persisted session from AsyncStorage
-  // and subscribes to Supabase auth state changes
   useEffect(() => {
     initializeAuth();
   }, []);
 
-  // Register for Push Notifications when user is authenticated
   useEffect(() => {
     async function registerForPushNotificationsAsync() {
       let token;
@@ -59,9 +59,7 @@ export const RootNavigator = () => {
           const { status } = await Notifications.requestPermissionsAsync();
           finalStatus = status;
         }
-        if (finalStatus !== 'granted') {
-          return;
-        }
+        if (finalStatus !== 'granted') return;
         const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
         if (!projectId) return;
         token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
@@ -89,7 +87,6 @@ export const RootNavigator = () => {
     },
   };
 
-  // Show loading spinner while we check for an existing session
   if (isLoading) {
     return <LoadingScreen />;
   }
@@ -98,119 +95,132 @@ export const RootNavigator = () => {
     <View style={{ flex: 1, backgroundColor: colors.deepSpace }}>
       <NebulaBackground />
       <NavigationContainer theme={navTheme}>
-      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
-        {!isAuthenticated ? (
-          // Auth stack — only shown to unauthenticated users
-          <Stack.Group>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen
-              name="SignUp"
-              component={SignUpScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-          </Stack.Group>
-        ) : (
-          // Main app stack — only shown to authenticated users
-          <Stack.Group>
-            <Stack.Screen name="MainTabs" component={BottomTabNavigator} />
-            <Stack.Screen
-              name="VehicleDetail"
-              component={VehicleDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="CreateChallenge"
-              component={CreateChallengeScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
-            <Stack.Screen
-              name="Cart"
-              component={CartScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Messages"
-              component={MessagesScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Profile"
-              component={ProfileScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="CarMeets"
-              component={CarMeetsScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Telemetry"
-              component={TelemetryScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
-            <Stack.Screen
-              name="RaceHub"
-              component={RaceHubScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
-            <Stack.Screen
-              name="AdminDashboard"
-              component={AdminDashboardScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
-            <Stack.Screen
-              name="ProductDetail"
-              component={ProductDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="RaceDetail"
-              component={RaceDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="DynoSimulator"
-              component={DynoSimulatorScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
-            <Stack.Screen
-              name="TrackTelemetryAnalyzer"
-              component={TrackTelemetryAnalyzerScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="CarMeetDetail"
-              component={CarMeetDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="PartsMarketplaceSearch"
-              component={PartsMarketplaceSearchScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="GarageMaintenanceLog"
-              component={GarageMaintenanceLogScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="BountyHuntScreen"
-              component={BountyHuntScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="MostWantedScreen"
-              component={MostWantedScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="DirectMessagingChat"
-              component={DirectMessagingChatScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-          </Stack.Group>
-        )}
-      </Stack.Navigator>
+        <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
+          {!isAuthenticated ? (
+            <Stack.Group>
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen
+                name="SignUp"
+                component={SignUpScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+            </Stack.Group>
+          ) : (
+            <Stack.Group>
+              <Stack.Screen name="MainTabs" component={BottomTabNavigator} />
+              <Stack.Screen
+                name="VehicleDetail"
+                component={VehicleDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="CreateChallenge"
+                component={CreateChallengeScreen}
+                options={{ animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="Cart"
+                component={CartScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Messages"
+                component={MessagesScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Profile"
+                component={ProfileScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="CarMeets"
+                component={CarMeetsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Telemetry"
+                component={TelemetryScreen}
+                options={{ animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="RaceHub"
+                component={RaceHubScreen}
+                options={{ animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="AdminDashboard"
+                component={AdminDashboardScreen}
+                options={{ animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="ProductDetail"
+                component={ProductDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="RaceDetail"
+                component={RaceDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="DynoSimulator"
+                component={DynoSimulatorScreen}
+                options={{ animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="TrackTelemetryAnalyzer"
+                component={TrackTelemetryAnalyzerScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="CarMeetDetail"
+                component={CarMeetDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="PartsMarketplaceSearch"
+                component={PartsMarketplaceSearchScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="GarageMaintenanceLog"
+                component={GarageMaintenanceLogScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="BountyHuntScreen"
+                component={BountyHuntScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="MostWantedScreen"
+                component={MostWantedScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="DirectMessagingChat"
+                component={DirectMessagingChatScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="SeasonHub"
+                component={SeasonHubScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="YearlyRecap"
+                component={YearlyRecapScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Settings"
+                component={SettingsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+            </Stack.Group>
+          )}
+        </Stack.Navigator>
       </NavigationContainer>
     </View>
   );

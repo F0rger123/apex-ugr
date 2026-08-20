@@ -22,22 +22,22 @@ export const MostWantedScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const renderItem = ({ item }: { item: BountySession }) => {
-    const starsStr = '★'.repeat(item.starLevel || item.star_level);
-    const vehicle = item.vehicle;
+    const starsStr = '★'.repeat(item.star_level);
+    const vehicle = item.target_vehicle;
     const vehicleTitle = vehicle
       ? `${(vehicle.color || 'WHITE').toUpperCase()} ${vehicle.year} ${vehicle.make.toUpperCase()} ${vehicle.model.toUpperCase()}${vehicle.trim ? ` ${vehicle.trim.toUpperCase()}` : ''}`
       : 'TARGET VEHICLE';
 
-    const mins = Math.floor((item.remainingSeconds || 600) / 60);
-    const secs = (item.remainingSeconds || 600) % 60;
+    const mins = Math.floor((item.remaining_seconds || 600) / 60);
+    const secs = (item.remaining_seconds || 600) % 60;
     const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
     return (
       <View style={styles.bountyCard}>
         <View style={styles.cardHeader}>
           <View>
-            <Text style={styles.targetUsername}>{(item.targetUsername || 'NIGHTSHIFT').toUpperCase()}</Text>
-            <Text style={styles.targetRank}>RANK // {(item.targetRank || 'DIAMOND').toUpperCase()}</Text>
+            <Text style={styles.targetUsername}>{(item.target_username || 'NIGHTSHIFT').toUpperCase()}</Text>
+            <Text style={styles.targetRank}>RANK // {(item.target_rank || 'DIAMOND').toUpperCase()}</Text>
           </View>
 
           <View style={styles.starsBadge}>
@@ -45,8 +45,8 @@ export const MostWantedScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </View>
 
-        {vehicle?.photoUrl ? (
-          <Image source={{ uri: vehicle.photoUrl }} style={styles.vehiclePhoto} resizeMode="cover" />
+        {vehicle?.photo_url ? (
+          <Image source={{ uri: vehicle?.photo_url }} style={styles.vehiclePhoto} resizeMode="cover" />
         ) : null}
 
         <View style={styles.vehicleBox}>
@@ -56,7 +56,7 @@ export const MostWantedScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.statsRow}>
           <View>
             <Text style={styles.statLabel}>BOUNTY REWARD</Text>
-            <Text style={styles.rewardText}>{(item.rewardGc || item.reward_gc || 2500).toLocaleString()} GC</Text>
+            <Text style={styles.rewardText}>{(item.reward_gc || 2500).toLocaleString()} GC</Text>
           </View>
 
           <View style={{ alignItems: 'flex-end' }}>
