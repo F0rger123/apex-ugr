@@ -829,6 +829,622 @@ async function handle(request: Request, env: Env, path: string) {
     const data=await response.json<{elements?:Array<{id:number;lat?:number;lon?:number;center?:{lat:number;lon:number};tags?:Record<string,string>}>}>();const places=(data.elements||[]).map(item=>({id:`osm-${item.id}`,name:item.tags?.name||item.tags?.brand||`${category.toUpperCase()} STOP`,latitude:Number(item.lat??item.center?.lat),longitude:Number(item.lon??item.center?.lon),type:category})).filter(item=>Number.isFinite(item.latitude)&&Number.isFinite(item.longitude));const unique=new Map<string,typeof places[number]>();for(const place of places){const key=`${place.name}-${place.latitude.toFixed(4)}-${place.longitude.toFixed(4)}`;if(!unique.has(key))unique.set(key,place);}return json({places:[...unique.values()].slice(0,20)});
   }
 
+
+  // ─── BOUNTY SYSTEM API ENDPOINTS ──────────────────────────────────────────
+  if (path === 'bounty/settings' && method === 'GET') {
+    let settings = await env.DB.prepare('SELECT * FROM bounty_user_settings WHERE user_id=?').bind(user.id).first<any>();
+    if (!settings) {
+      settings = {
+        user_id: user.id,
+        bounty_mode_enabled: 0,
+        notifications_enabled: 1,
+        show_public_photo: 1,
+        allow_most_wanted: 1,
+        agreement_version: 'v1.0',
+        agreed_at: null,
+        cooldown_until: null,
+      };
+    }
+    return json({ settings: {
+      userId: user.id,
+      bountyModeEnabled: Boolean(settings.bounty_mode_enabled),
+      notificationsEnabled: Boolean(settings.notifications_enabled),
+      showPublicPhoto: Boolean(settings.show_public_photo),
+      allowMostWanted: Boolean(settings.allow_most_wanted),
+      agreementVersion: settings.agreement_version,
+      agreedAt: settings.agreed_at,
+      cooldownUntil: settings.cooldown_until,
+    }});
+  }
+
+  if (path === 'bounty/settings' && method === 'PUT') {
+    const body = await request.json<any>();
+    const activeSession = await env.DB.prepare("SELECT id FROM bounty_sessions WHERE target_user_id=? AND status IN ('active','escalating')").bind(user.id).first();
+    if (activeSession && body.bountyModeEnabled === false) {
+      return json({ error: 'Cannot disable Bounty Mode while locked in an active Bounty session.' }, 409);
+    }
+    const enabled = body.bountyModeEnabled ? 1 : 0;
+    const notifs = body.notificationsEnabled !== false ? 1 : 0;
+    const photo = body.showPublicPhoto !== false ? 1 : 0;
+    const mostWanted = body.allowMostWanted !== false ? 1 : 0;
+    const agreedAt = body.agreed ? new Date().toISOString() : null;
+
+    await env.DB.prepare(`
+      INSERT INTO bounty_user_settings(user_id, bounty_mode_enabled, notifications_enabled, show_public_photo, allow_most_wanted, agreement_version, agreed_at, updated_at)
+      VALUES(?, ?, ?, ?, ?, 'v1.0', ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id) DO UPDATE SET
+        bounty_mode_enabled=excluded.bounty_mode_enabled,
+        notifications_enabled=excluded.notifications_enabled,
+        show_public_photo=excluded.show_public_photo,
+        allow_most_wanted=excluded.allow_most_wanted,
+        agreed_at=COALESCE(excluded.agreed_at, bounty_user_settings.agreed_at),
+        updated_at=CURRENT_TIMESTAMP
+    `).bind(user.id, enabled, notifs, photo, mostWanted, agreedAt).run();
+
+    return json({ success: true, bountyModeEnabled: Boolean(enabled) });
+  }
+
+  if (path === 'bounty/config' && method === 'GET') {
+    const config = await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>() || {};
+    return json({ config: {
+      bountyEnabled: Boolean(config.bounty_enabled ?? 1),
+      roamingEnabled: Boolean(config.roaming_enabled ?? 1),
+      venueEnabled: Boolean(config.venue_enabled ?? 1),
+      stageDurationSeconds: JSON.parse(config.stage_duration_seconds || '{"1": 600, "2": 600, "3": 600, "4": 600, "5": 900}'),
+      stageRewardGc: JSON.parse(config.stage_reward_gc || '{"1": 300, "2": 500, "3": 850, "4": 1200, "5": 2500}'),
+      stageRewardRep: JSON.parse(config.stage_reward_rep || '{"1": 150, "2": 250, "3": 450, "4": 650, "5": 1000}'),
+      claimRadiusMiles: Number(config.claim_radius_miles || 0.5),
+      lockDurationSeconds: Number(config.lock_duration_seconds || 20),
+      cooldownMinutes: Number(config.cooldown_minutes || 30),
+      broadcastRadiusMiles: JSON.parse(config.broadcast_radius_miles || '{"1": 5.0, "2": 8.0, "3": 12.0, "4": 20.0, "5": 50.0}'),
+    }});
+  }
+
+  if (path === 'bounty/most-wanted' && method === 'GET') {
+    const rows = await env.DB.prepare(`
+      SELECT s.*, u.username, u.tier as target_rank,
+             v.year, v.make, v.model, v.color, v.trim, v.photo_url,
+             st.show_public_photo
+      FROM bounty_sessions s
+      JOIN users u ON u.id = s.target_user_id
+      JOIN vehicles v ON v.id = s.target_vehicle_id
+      LEFT JOIN bounty_user_settings st ON st.user_id = s.target_user_id
+      WHERE s.status IN ('active', 'escalating')
+        AND s.star_level >= 3
+        AND COALESCE(st.allow_most_wanted, 1) = 1
+      ORDER BY s.star_level DESC, s.stage_ends_at ASC
+      LIMIT 20
+    `).all<any>();
+
+    return json({ mostWanted: rows.results.map((r: any) => ({
+      id: r.id,
+      mode: r.mode,
+      starLevel: r.star_level,
+      targetUsername: r.username,
+      targetRank: r.target_rank,
+      rewardGc: r.reward_gc,
+      rewardRep: r.reward_rep,
+      stageEndsAt: r.stage_ends_at,
+      remainingSeconds: Math.max(0, Math.ceil((Date.parse(r.stage_ends_at) - Date.now()) / 1000)),
+      vehicle: {
+        year: r.year,
+        make: r.make,
+        model: r.model,
+        color: r.color,
+        trim: r.trim,
+        photoUrl: r.show_public_photo ? r.photo_url : null,
+      }
+    })) });
+  }
+
+  if (path === 'bounty/active' && method === 'GET') {
+    // Check if user is the target of an active bounty
+    const asTarget = await env.DB.prepare(`
+      SELECT s.*, u.username, u.tier as target_rank,
+             v.year, v.make, v.model, v.color, v.trim, v.photo_url
+      FROM bounty_sessions s
+      JOIN users u ON u.id = s.target_user_id
+      JOIN vehicles v ON v.id = s.target_vehicle_id
+      WHERE s.target_user_id=? AND s.status IN ('active', 'escalating')
+      LIMIT 1
+    `).bind(user.id).first<any>();
+
+    if (asTarget) {
+      return json({ role: 'target', session: {
+        id: asTarget.id,
+        mode: asTarget.mode,
+        starLevel: asTarget.star_level,
+        status: asTarget.status,
+        rewardGc: asTarget.reward_gc,
+        rewardRep: asTarget.reward_rep,
+        stageStartedAt: asTarget.stage_started_at,
+        stageEndsAt: asTarget.stage_ends_at,
+        remainingSeconds: Math.max(0, Math.ceil((Date.parse(asTarget.stage_ends_at) - Date.now()) / 1000)),
+        vehicle: {
+          year: asTarget.year,
+          make: asTarget.make,
+          model: asTarget.model,
+          color: asTarget.color,
+          trim: asTarget.trim,
+          photoUrl: asTarget.photo_url,
+        }
+      }});
+    }
+
+    // Check if user is hunting an active bounty
+    const asHunter = await env.DB.prepare(`
+      SELECT s.*, p.last_signal_pct, p.proximity_lock_seconds, p.lock_started_at,
+             u.username as target_username, u.tier as target_rank,
+             v.year, v.make, v.model, v.color, v.trim, v.photo_url,
+             st.show_public_photo,
+             dl.latitude as target_lat, dl.longitude as target_lng
+      FROM bounty_participants p
+      JOIN bounty_sessions s ON s.id = p.session_id
+      JOIN users u ON u.id = s.target_user_id
+      JOIN vehicles v ON v.id = s.target_vehicle_id
+      LEFT JOIN bounty_user_settings st ON st.user_id = s.target_user_id
+      LEFT JOIN driver_locations dl ON dl.user_id = s.target_user_id
+      WHERE p.user_id=? AND p.status='hunting' AND s.status IN ('active', 'escalating')
+      LIMIT 1
+    `).bind(user.id).first<any>();
+
+    if (asHunter) {
+      // Calculate approx distance & direction from hunter's current location
+      const hunterLoc = await env.DB.prepare('SELECT latitude, longitude FROM driver_locations WHERE user_id=?').bind(user.id).first<any>();
+      let distanceMiles = 2.5;
+      let direction = 'NW';
+      if (hunterLoc && asHunter.target_lat && asHunter.target_lng) {
+        const meters = distanceMeters(hunterLoc.latitude, hunterLoc.longitude, asHunter.target_lat, asHunter.target_lng);
+        distanceMiles = Math.round((meters / 1609.34) * 10) / 10;
+        const dLat = asHunter.target_lat - hunterLoc.latitude;
+        const dLng = asHunter.target_lng - hunterLoc.longitude;
+        const angle = Math.atan2(dLng, dLat) * (180 / Math.PI);
+        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+        direction = dirs[Math.floor(((angle + 360 + 22.5) % 360) / 45)];
+      }
+
+      return json({ role: 'hunter', session: {
+        id: asHunter.id,
+        mode: asHunter.mode,
+        starLevel: asHunter.star_level,
+        status: asHunter.status,
+        rewardGc: asHunter.reward_gc,
+        rewardRep: asHunter.reward_rep,
+        stageStartedAt: asHunter.stage_started_at,
+        stageEndsAt: asHunter.stage_ends_at,
+        remainingSeconds: Math.max(0, Math.ceil((Date.parse(asHunter.stage_ends_at) - Date.now()) / 1000)),
+        targetUsername: asHunter.target_username,
+        targetRank: asHunter.target_rank,
+        approxDistanceMiles: distanceMiles,
+        approxDirection: direction,
+        signalStrengthPct: asHunter.last_signal_pct || 65,
+        proximityLockSeconds: asHunter.proximity_lock_seconds || 0,
+        vehicle: {
+          year: asHunter.year,
+          make: asHunter.make,
+          model: asHunter.model,
+          color: asHunter.color,
+          trim: asHunter.trim,
+          photoUrl: asHunter.show_public_photo ? asHunter.photo_url : null,
+        }
+      }});
+    }
+
+    return json({ role: null, session: null });
+  }
+
+  if (path === 'bounty/trigger' && method === 'POST') {
+    const body = await request.json<any>();
+    const mode = body.mode === 'venue' ? 'venue' : 'roaming';
+    const starLevel = Math.max(1, Math.min(5, Number(body.starLevel) || 1));
+
+    // Get active vehicle
+    const vehicle = await env.DB.prepare('SELECT * FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1').bind(user.id).first<any>();
+    if (!vehicle) {
+      return json({ error: 'An active vehicle profile (Year, Make, Model, Color) is required to participate in Bounty Mode.' }, 400);
+    }
+
+    // Check existing session
+    const active = await env.DB.prepare("SELECT id FROM bounty_sessions WHERE target_user_id=? AND status IN ('active','escalating')").bind(user.id).first();
+    if (active) {
+      return json({ error: 'You are already in an active Bounty session.' }, 409);
+    }
+
+    const config = await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>() || {};
+    const durations = JSON.parse(config.stage_duration_seconds || '{"1": 600, "2": 600, "3": 600, "4": 600, "5": 900}');
+    const rewardsGc = JSON.parse(config.stage_reward_gc || '{"1": 300, "2": 500, "3": 850, "4": 1200, "5": 2500}');
+    const rewardsRep = JSON.parse(config.stage_reward_rep || '{"1": 150, "2": 250, "3": 450, "4": 650, "5": 1000}');
+
+    const durationSec = durations[String(starLevel)] || 600;
+    const rewardGc = rewardsGc[String(starLevel)] || 300;
+    const rewardRep = rewardsRep[String(starLevel)] || 150;
+
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const endsAt = new Date(now.getTime() + durationSec * 1000).toISOString();
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO bounty_sessions(id, mode, venue_name, target_user_id, target_vehicle_id, star_level, status, starts_at, stage_started_at, stage_ends_at, reward_gc, reward_rep)
+        VALUES(?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+      `).bind(id, mode, body.venueName || null, user.id, vehicle.id, starLevel, now.toISOString(), now.toISOString(), endsAt, rewardGc, rewardRep),
+      env.DB.prepare(`
+        INSERT INTO bounty_user_stats(user_id, times_selected) VALUES(?, 1)
+        ON CONFLICT(user_id) DO UPDATE SET times_selected = times_selected + 1, updated_at = CURRENT_TIMESTAMP
+      `).bind(user.id),
+      env.DB.prepare(`
+        INSERT INTO notifications(id, user_id, type, title, body, data_json)
+        VALUES(?, ?, 'bounty_activated', 'BOUNTY ACTIVATED', ?, ?)
+      `).bind(crypto.randomUUID(), user.id, `YOU ARE THE TARGET // SURVIVE FOR ${Math.ceil(durationSec / 60)} MINS`, JSON.stringify({ sessionId: id, starLevel, vehicle: `${vehicle.color} ${vehicle.year} ${vehicle.make} ${vehicle.model}` })),
+    ]);
+
+    return json({
+      id,
+      mode,
+      starLevel,
+      rewardGc,
+      rewardRep,
+      startsAt: now.toISOString(),
+      stageEndsAt: endsAt,
+      vehicle: {
+        year: vehicle.year,
+        make: vehicle.make,
+        model: vehicle.model,
+        color: vehicle.color,
+        trim: vehicle.trim,
+        photoUrl: vehicle.photo_url,
+      }
+    }, 201);
+  }
+
+  const bountyJoin = path.match(/^bounty\/sessions\/([^/]+)\/join$/);
+  if (bountyJoin && method === 'POST') {
+    const sessionId = bountyJoin[1];
+    const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=? AND status IN ('active','escalating')").bind(sessionId).first<any>();
+    if (!session) return json({ error: 'Bounty session is no longer active.' }, 404);
+    if (session.target_user_id === user.id) return json({ error: 'You cannot hunt yourself.' }, 400);
+
+    const vehicle = await env.DB.prepare('SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1').bind(user.id).first<any>();
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO bounty_participants(session_id, user_id, active_vehicle_id, status)
+        VALUES(?, ?, ?, 'hunting')
+        ON CONFLICT(session_id, user_id) DO UPDATE SET status='hunting', left_at=NULL
+      `).bind(sessionId, user.id, vehicle?.id || null),
+      env.DB.prepare(`
+        INSERT INTO bounty_user_stats(user_id, hunts_joined) VALUES(?, 1)
+        ON CONFLICT(user_id) DO UPDATE SET hunts_joined = hunts_joined + 1, updated_at = CURRENT_TIMESTAMP
+      `).bind(user.id)
+    ]);
+
+    return json({ success: true, sessionId, status: 'hunting' });
+  }
+
+  const bountyLeave = path.match(/^bounty\/sessions\/([^/]+)\/leave$/);
+  if (bountyLeave && method === 'POST') {
+    const sessionId = bountyLeave[1];
+    await env.DB.prepare("UPDATE bounty_participants SET status='left', left_at=CURRENT_TIMESTAMP WHERE session_id=? AND user_id=?").bind(sessionId, user.id).run();
+    return json({ success: true, sessionId, status: 'left' });
+  }
+
+  const bountySignal = path.match(/^bounty\/sessions\/([^/]+)\/signal$/);
+  if (bountySignal && method === 'POST') {
+    const sessionId = bountySignal[1];
+    const body = await request.json<any>();
+    const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=? AND status IN ('active','escalating')").bind(sessionId).first<any>();
+    if (!session) return json({ error: 'Session no longer active.' }, 404);
+
+    const hunterLoc = body.latitude && body.longitude ? { latitude: Number(body.latitude), longitude: Number(body.longitude) } :
+      await env.DB.prepare('SELECT latitude, longitude FROM driver_locations WHERE user_id=?').bind(user.id).first<any>();
+    const targetLoc = await env.DB.prepare('SELECT latitude, longitude FROM driver_locations WHERE user_id=?').bind(session.target_user_id).first<any>();
+
+    let distMiles = Number(body.simulatedDistanceMiles) || 2.5;
+    let direction = 'NW';
+    let signalPct = Math.max(10, Math.min(100, Math.round(100 - (distMiles / 5) * 80)));
+
+    if (hunterLoc && targetLoc) {
+      const meters = distanceMeters(hunterLoc.latitude, hunterLoc.longitude, targetLoc.latitude, targetLoc.longitude);
+      distMiles = Math.round((meters / 1609.34) * 10) / 10;
+      signalPct = Math.max(10, Math.min(100, Math.round(100 - Math.min(1, distMiles / 5) * 85)));
+      const dLat = targetLoc.latitude - hunterLoc.latitude;
+      const dLng = targetLoc.longitude - hunterLoc.longitude;
+      const angle = Math.atan2(dLng, dLat) * (180 / Math.PI);
+      const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      direction = dirs[Math.floor(((angle + 360 + 22.5) % 360) / 45)];
+    }
+
+    const claimRadius = 0.5; // miles
+    const inRange = distMiles <= claimRadius || body.forceInRange;
+
+    const participant = await env.DB.prepare('SELECT * FROM bounty_participants WHERE session_id=? AND user_id=?').bind(sessionId, user.id).first<any>();
+    let lockSec = participant?.proximity_lock_seconds || 0;
+    let lockStartedAt = participant?.lock_started_at;
+
+    if (inRange) {
+      if (!lockStartedAt) lockStartedAt = new Date().toISOString();
+      const elapsed = Math.floor((Date.now() - Date.parse(lockStartedAt)) / 1000);
+      lockSec = Math.min(20, Math.max(lockSec + 1, elapsed));
+    } else {
+      lockSec = 0;
+      lockStartedAt = null;
+    }
+
+    await env.DB.prepare(`
+      UPDATE bounty_participants
+      SET last_signal_pct=?, proximity_lock_seconds=?, lock_started_at=?
+      WHERE session_id=? AND user_id=?
+    `).bind(signalPct, lockSec, lockStartedAt, sessionId, user.id).run();
+
+    return json({
+      sessionId,
+      signalStrengthPct: signalPct,
+      approxDistanceMiles: distMiles,
+      approxDirection: direction,
+      inClaimRange: inRange,
+      proximityLockSeconds: lockSec,
+      targetVerified: lockSec >= 20,
+    });
+  }
+
+  const bountyClaim = path.match(/^bounty\/sessions\/([^/]+)\/claim$/);
+  if (bountyClaim && method === 'POST') {
+    const sessionId = bountyClaim[1];
+    const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=? AND status IN ('active','escalating')").bind(sessionId).first<any>();
+    if (!session) return json({ error: 'Bounty session is not in a claimable state.' }, 404);
+    if (session.target_user_id === user.id) return json({ error: 'Target user cannot claim their own bounty.' }, 400);
+
+    const now = new Date().toISOString();
+    const rewardGc = Number(session.reward_gc || 300);
+    const rewardRep = Number(session.reward_rep || 150);
+
+    // Atomically close session as claimed
+    const updateSession = await env.DB.prepare("UPDATE bounty_sessions SET status='claimed', claimed_by_user_id=?, claimed_at=?, completed_at=? WHERE id=? AND status IN ('active','escalating')").bind(user.id, now, now, sessionId).run();
+    if (!updateSession.meta.changes) {
+      return json({ error: 'Bounty was already claimed or closed.' }, 409);
+    }
+
+    // Award GC to Hunter via Ghost Ledger
+    await grantGhostCredits(user.id, rewardGc, 'BOUNTY CLAIM', sessionId, env);
+
+    // Award REP & update Hunter stats
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET points = points + ? WHERE id=?').bind(rewardRep, user.id),
+      env.DB.prepare(`
+        INSERT INTO bounty_user_stats(user_id, successful_claims, highest_star_claimed, current_hunter_streak, best_hunter_streak, five_star_claims, hunter_gc_earned, hunter_rep_earned)
+        VALUES(?, 1, ?, 1, 1, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          successful_claims = successful_claims + 1,
+          highest_star_claimed = MAX(highest_star_claimed, excluded.highest_star_claimed),
+          current_hunter_streak = current_hunter_streak + 1,
+          best_hunter_streak = MAX(best_hunter_streak, current_hunter_streak + 1),
+          five_star_claims = five_star_claims + excluded.five_star_claims,
+          hunter_gc_earned = hunter_gc_earned + excluded.hunter_gc_earned,
+          hunter_rep_earned = hunter_rep_earned + excluded.hunter_rep_earned,
+          updated_at = CURRENT_TIMESTAMP
+      `).bind(user.id, session.star_level, session.star_level === 5 ? 1 : 0, rewardGc, rewardRep),
+      env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id, badge_id) VALUES(?, 'bounty-hunter')").bind(user.id),
+      ...(session.star_level === 5 ? [env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id, badge_id) VALUES(?, 'five-star-hunter')").bind(user.id)] : []),
+      env.DB.prepare(`
+        INSERT INTO notifications(id, user_id, type, title, body, data_json)
+        VALUES(?, ?, 'bounty_claimed', 'BOUNTY CLAIMED!', ?, ?)
+      `).bind(crypto.randomUUID(), user.id, `+${rewardGc} GC // +${rewardRep} REP`, JSON.stringify({ sessionId, rewardGc, rewardRep, stars: session.star_level })),
+      env.DB.prepare(`
+        INSERT INTO notifications(id, user_id, type, title, body, data_json)
+        VALUES(?, ?, 'bounty_claimed', 'BOUNTY CLAIMED BY HUNTER', ?, ?)
+      `).bind(crypto.randomUUID(), session.target_user_id, `A hunter claimed your ${session.star_level}-Star Bounty.`, JSON.stringify({ sessionId, hunterId: user.id })),
+    ]);
+
+    return json({
+      claimed: true,
+      rewardGc,
+      rewardRep,
+      starLevel: session.star_level,
+      badgeEarned: session.star_level === 5 ? 'FIVE-STAR HUNTER' : 'BOUNTY HUNTER',
+    });
+  }
+
+  const bountyProgress = path.match(/^bounty\/sessions\/([^/]+)\/progress$/);
+  if (bountyProgress && method === 'POST') {
+    const sessionId = bountyProgress[1];
+    const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=? AND status IN ('active','escalating')").bind(sessionId).first<any>();
+    if (!session) return json({ error: 'Session not active.' }, 404);
+
+    const isTarget = session.target_user_id === user.id;
+    const now = new Date();
+    const stageEnded = now.getTime() >= Date.parse(session.stage_ends_at);
+
+    if (!stageEnded) {
+      return json({
+        status: session.status,
+        starLevel: session.star_level,
+        remainingSeconds: Math.max(0, Math.ceil((Date.parse(session.stage_ends_at) - now.getTime()) / 1000)),
+      });
+    }
+
+    // Timer expired for current stage! Check if we escalate or escape
+    if (session.star_level < 5) {
+      // Escalate to next star level
+      const nextStar = session.star_level + 1;
+      const config = await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>() || {};
+      const durations = JSON.parse(config.stage_duration_seconds || '{"1": 600, "2": 600, "3": 600, "4": 600, "5": 900}');
+      const rewardsGc = JSON.parse(config.stage_reward_gc || '{"1": 300, "2": 500, "3": 850, "4": 1200, "5": 2500}');
+      const rewardsRep = JSON.parse(config.stage_reward_rep || '{"1": 150, "2": 250, "3": 450, "4": 650, "5": 1000}');
+
+      const durationSec = durations[String(nextStar)] || 600;
+      const rewardGc = rewardsGc[String(nextStar)] || 500;
+      const rewardRep = rewardsRep[String(nextStar)] || 250;
+      const endsAt = new Date(now.getTime() + durationSec * 1000).toISOString();
+
+      await env.DB.batch([
+        env.DB.prepare(`
+          UPDATE bounty_sessions
+          SET star_level=?, status='escalating', stage_started_at=?, stage_ends_at=?, reward_gc=?, reward_rep=?,
+              escalation_history = json_insert(escalation_history, '$[#]', json_object('star_level', ?, 'reached_at', ?, 'reward_gc', ?, 'reward_rep', ?))
+          WHERE id=?
+        `).bind(nextStar, now.toISOString(), endsAt, rewardGc, rewardRep, nextStar, now.toISOString(), rewardGc, rewardRep, sessionId),
+        env.DB.prepare(`
+          INSERT INTO notifications(id, user_id, type, title, body, data_json)
+          VALUES(?, ?, 'bounty_escalated', 'BOUNTY ESCALATED!', ?, ?)
+        `).bind(crypto.randomUUID(), session.target_user_id, `YOU REACHED ★${nextStar}! SURVIVE FOR NEXT STAGE REWARD.`, JSON.stringify({ sessionId, starLevel: nextStar })),
+      ]);
+
+      return json({
+        status: 'escalated',
+        starLevel: nextStar,
+        rewardGc,
+        rewardRep,
+        stageEndsAt: endsAt,
+        remainingSeconds: durationSec,
+      });
+    }
+
+    // 5-Star Survived! Escape!
+    const rewardGc = Number(session.reward_gc || 2500);
+    const rewardRep = Number(session.reward_rep || 1000);
+
+    const updateSession = await env.DB.prepare("UPDATE bounty_sessions SET status='escaped', escaped_at=?, completed_at=? WHERE id=? AND status IN ('active','escalating')").bind(now.toISOString(), now.toISOString(), sessionId).run();
+    if (!updateSession.meta.changes) {
+      return json({ error: 'Session already completed.' }, 409);
+    }
+
+    // Award Ghost Credits to Survivor
+    await grantGhostCredits(session.target_user_id, rewardGc, 'BOUNTY ESCAPE', sessionId, env);
+
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET points = points + ? WHERE id=?').bind(rewardRep, session.target_user_id),
+      env.DB.prepare(`
+        INSERT INTO bounty_user_stats(user_id, escapes, highest_star_survived, five_star_survivals, current_survival_streak, best_survival_streak, survivor_gc_earned, survivor_rep_earned)
+        VALUES(?, 1, 5, 1, 1, 1, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          escapes = escapes + 1,
+          highest_star_survived = 5,
+          five_star_survivals = five_star_survivals + 1,
+          current_survival_streak = current_survival_streak + 1,
+          best_survival_streak = MAX(best_survival_streak, current_survival_streak + 1),
+          survivor_gc_earned = survivor_gc_earned + excluded.survivor_gc_earned,
+          survivor_rep_earned = survivor_rep_earned + excluded.survivor_rep_earned,
+          updated_at = CURRENT_TIMESTAMP
+      `).bind(session.target_user_id, rewardGc, rewardRep),
+      env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id, badge_id) VALUES(?, 'survivor')").bind(session.target_user_id),
+      env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id, badge_id) VALUES(?, 'five-star-survivor')").bind(session.target_user_id),
+      env.DB.prepare(`
+        INSERT INTO notifications(id, user_id, type, title, body, data_json)
+        VALUES(?, ?, 'bounty_escaped', '★★★★★ SURVIVED!', ?, ?)
+      `).bind(crypto.randomUUID(), session.target_user_id, `FIVE-STAR SURVIVOR! +${rewardGc} GC // +${rewardRep} REP`, JSON.stringify({ sessionId, rewardGc, rewardRep })),
+    ]);
+
+    return json({
+      escaped: true,
+      starLevel: 5,
+      rewardGc,
+      rewardRep,
+      badgeEarned: 'FIVE-STAR SURVIVOR',
+    });
+  }
+
+  if (path === 'bounty/history' && method === 'GET') {
+    const rows = await env.DB.prepare(`
+      SELECT s.*, v.year, v.make, v.model, v.color, v.trim
+      FROM bounty_sessions s
+      JOIN vehicles v ON v.id = s.target_vehicle_id
+      LEFT JOIN bounty_participants p ON p.session_id = s.id
+      WHERE (s.target_user_id=? OR p.user_id=?) AND s.status IN ('claimed', 'escaped', 'expired', 'cancelled')
+      ORDER BY s.completed_at DESC
+      LIMIT 50
+    `).bind(user.id, user.id).all<any>();
+
+    return json({ history: rows.results.map((r: any) => ({
+      id: r.id,
+      date: r.completed_at || r.starts_at,
+      role: r.target_user_id === user.id ? 'bounty' : 'hunter',
+      vehicle: `${(r.color || 'BLACK').toUpperCase()} ${r.year} ${r.make.toUpperCase()} ${r.model.toUpperCase()}`,
+      stars: r.star_level,
+      outcome: r.status,
+      rewardGc: r.reward_gc,
+      rewardRep: r.reward_rep,
+    })) });
+  }
+
+  if (path === 'bounty/stats' && method === 'GET') {
+    const stats = await env.DB.prepare('SELECT * FROM bounty_user_stats WHERE user_id=?').bind(user.id).first<any>() || {};
+    const badges = await env.DB.prepare(`
+      SELECT b.*, CASE WHEN ub.user_id IS NULL THEN 0 ELSE 1 END earned, ub.earned_at
+      FROM badges b
+      LEFT JOIN user_badges ub ON ub.badge_id = b.id AND ub.user_id = ?
+      WHERE b.category = 'bounty' OR b.id IN ('survivor', 'survivor-2', 'survivor-3', 'five-star-survivor', 'bounty-hunter', 'bounty-hunter-2', 'bounty-hunter-3', 'elite-bounty-hunter', 'five-star-hunter')
+    `).bind(user.id).all<any>();
+
+    return json({
+      stats: {
+        huntsJoined: stats.hunts_joined || 0,
+        successfulClaims: stats.successful_claims || 0,
+        highestStarClaimed: stats.highest_star_claimed || 0,
+        currentHunterStreak: stats.current_hunter_streak || 0,
+        bestHunterStreak: stats.best_hunter_streak || 0,
+        fiveStarClaims: stats.five_star_claims || 0,
+        hunterGcEarned: stats.hunter_gc_earned || 0,
+        hunterRepEarned: stats.hunter_rep_earned || 0,
+        timesSelected: stats.times_selected || 0,
+        escapes: stats.escapes || 0,
+        highestStarSurvived: stats.highest_star_survived || 0,
+        fiveStarSurvivals: stats.five_star_survivals || 0,
+        currentSurvivalStreak: stats.current_survival_streak || 0,
+        bestSurvivalStreak: stats.best_survival_streak || 0,
+        survivorGcEarned: stats.survivor_gc_earned || 0,
+        survivorRepEarned: stats.survivor_rep_earned || 0,
+      },
+      badges: badges.results,
+    });
+  }
+
+  if (path === 'bounty/dev-override' && method === 'POST') {
+    const body = await request.json<any>();
+    const action = body.action; // 'force_trigger', 'set_star', 'shorten_timer', 'force_claim', 'force_escape'
+
+    if (action === 'force_trigger') {
+      const vehicle = await env.DB.prepare('SELECT * FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1').bind(user.id).first<any>();
+      if (!vehicle) return json({ error: 'No active vehicle.' }, 400);
+
+      const starLevel = Math.max(1, Math.min(5, Number(body.starLevel) || 1));
+      const id = crypto.randomUUID();
+      const now = new Date();
+      const endsAt = new Date(now.getTime() + 60 * 1000).toISOString(); // 1 min timer for quick testing
+
+      await env.DB.prepare(`
+        INSERT INTO bounty_sessions(id, mode, target_user_id, target_vehicle_id, star_level, status, starts_at, stage_started_at, stage_ends_at, reward_gc, reward_rep)
+        VALUES(?, 'roaming', ?, ?, ?, 'active', ?, ?, ?, 500, 250)
+      `).bind(id, user.id, vehicle.id, starLevel, now.toISOString(), now.toISOString(), endsAt).run();
+
+      return json({ success: true, sessionId: id, starLevel, stageEndsAt: endsAt });
+    }
+
+    if (action === 'shorten_timer') {
+      const sessionId = body.sessionId;
+      const endsAt = new Date(Date.now() + 5 * 1000).toISOString(); // 5 seconds remaining
+      await env.DB.prepare("UPDATE bounty_sessions SET stage_ends_at=? WHERE id=? AND status IN ('active','escalating')").bind(endsAt, sessionId).run();
+      return json({ success: true, stageEndsAt: endsAt });
+    }
+
+    if (action === 'force_claim') {
+      const sessionId = body.sessionId;
+      const now = new Date().toISOString();
+      await env.DB.prepare("UPDATE bounty_sessions SET status='claimed', claimed_by_user_id=?, claimed_at=?, completed_at=? WHERE id=?").bind(user.id, now, now, sessionId).run();
+      await grantGhostCredits(user.id, 1000, 'BOUNTY CLAIM DEV', sessionId, env);
+      return json({ success: true, claimed: true });
+    }
+
+    if (action === 'force_escape') {
+      const sessionId = body.sessionId;
+      const now = new Date().toISOString();
+      await env.DB.prepare("UPDATE bounty_sessions SET status='escaped', escaped_at=?, completed_at=? WHERE id=?").bind(now, now, sessionId).run();
+      await grantGhostCredits(user.id, 1500, 'BOUNTY ESCAPE DEV', sessionId, env);
+      return json({ success: true, escaped: true });
+    }
+
+    return json({ error: 'Unknown dev action.' }, 400);
+  }
+
   return json({ error: 'Not found.' }, 404);
 }
 

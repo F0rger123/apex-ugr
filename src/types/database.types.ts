@@ -343,3 +343,136 @@ export type ConversationWithProfile = Conversation & {
 export type CarMeetWithHost = CarMeet & {
   host_profile?: Profile;
 };
+
+// ─── Bounty System Types ──────────────────────────────────────────────────
+export type BountyMode = 'roaming' | 'venue' | 'event';
+export type BountyState = 'pending' | 'active' | 'escalating' | 'claimed' | 'escaped' | 'cancelled' | 'expired' | 'invalidated';
+export type HunterParticipantStatus = 'hunting' | 'left' | 'claimed' | 'failed';
+
+export interface BountyUserSettings {
+  user_id: string;
+  bounty_mode_enabled: boolean;
+  notifications_enabled: boolean;
+  show_public_photo: boolean;
+  allow_most_wanted: boolean;
+  agreement_version: string;
+  agreed_at: string | null;
+  cooldown_until: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BountyConfig {
+  id: string;
+  bounty_enabled: boolean;
+  roaming_enabled: boolean;
+  venue_enabled: boolean;
+  stage_duration_seconds: Record<string, number>;
+  stage_reward_gc: Record<string, number>;
+  stage_reward_rep: Record<string, number>;
+  claim_radius_miles: number;
+  lock_duration_seconds: number;
+  cooldown_minutes: number;
+  broadcast_radius_miles: Record<string, number>;
+  updated_at: string;
+}
+
+export interface BountySession {
+  id: string;
+  mode: BountyMode;
+  venue_id: string | null;
+  venue_name: string | null;
+  target_user_id: string;
+  target_vehicle_id: string;
+  star_level: number; // 1..5
+  status: BountyState;
+  starts_at: string;
+  stage_started_at: string;
+  stage_ends_at: string;
+  reward_gc: number;
+  reward_rep: number;
+  claimed_by_user_id: string | null;
+  claimed_at: string | null;
+  escaped_at: string | null;
+  completed_at: string | null;
+  escalation_history: Array<{
+    star_level: number;
+    reached_at: string;
+    reward_gc: number;
+    reward_rep: number;
+  }>;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  // Joined fields from API
+  target_username?: string;
+  target_rank?: string;
+  target_vehicle?: {
+    year: number;
+    make: string;
+    model: string;
+    trim?: string | null;
+    color: string;
+    photo_url?: string | null;
+  };
+  approx_distance_miles?: number;
+  approx_direction?: string; // e.g. 'NW', 'SE'
+  signal_strength_pct?: number; // 0..100
+  is_hunter?: boolean;
+}
+
+export interface BountyParticipant {
+  session_id: string;
+  user_id: string;
+  active_vehicle_id: string | null;
+  joined_at: string;
+  left_at: string | null;
+  status: HunterParticipantStatus;
+  last_signal_pct: number;
+  proximity_lock_seconds: number;
+  lock_started_at: string | null;
+}
+
+export interface BountyUserStats {
+  user_id: string;
+  // Hunter Stats
+  hunts_joined: number;
+  successful_claims: number;
+  highest_star_claimed: number;
+  current_hunter_streak: number;
+  best_hunter_streak: number;
+  five_star_claims: number;
+  hunter_gc_earned: number;
+  hunter_rep_earned: number;
+  // Survivor Stats
+  times_selected: number;
+  escapes: number;
+  highest_star_survived: number;
+  five_star_survivals: number;
+  current_survival_streak: number;
+  best_survival_streak: number;
+  survivor_gc_earned: number;
+  survivor_rep_earned: number;
+  updated_at: string;
+}
+
+export interface BountySafeZone {
+  id: string;
+  user_id: string | null;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius_m: number;
+  created_at: string;
+}
+
+export interface BountyHistoryItem {
+  id: string;
+  date: string;
+  role: 'bounty' | 'hunter';
+  vehicle: string; // e.g., "WHITE 2011 FORD MUSTANG"
+  stars: number;
+  outcome: 'claimed' | 'escaped' | 'failed';
+  reward_gc: number;
+  reward_rep: number;
+}
