@@ -101,10 +101,10 @@ export const useBountyStore = create<BountyState>((set, get) => ({
       set({
         activeRole: res.role,
         activeSession: res.session,
-        signalStrengthPct: res.session?.signalStrengthPct || 0,
-        approxDistanceMiles: res.session?.approxDistanceMiles || 0,
-        approxDirection: res.session?.approxDirection || 'NW',
-        proximityLockSeconds: res.session?.proximityLockSeconds || 0,
+        signalStrengthPct: res.session?.signal_strength_pct || 0,
+        approxDistanceMiles: res.session?.approx_distance_miles || 0,
+        approxDirection: res.session?.approx_direction || 'NW',
+        proximityLockSeconds: res.session?.proximity_lock_seconds || 0,
         isLoading: false,
       });
     } catch (err: any) {

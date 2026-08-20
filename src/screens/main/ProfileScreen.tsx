@@ -146,19 +146,19 @@ export const ProfileScreen = ({ navigation }: any) => {
           <View style={{ flexDirection: 'row', gap: 8, marginVertical: 8 }}>
             <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 8, alignItems: 'center' }}>
               <Text style={{ color: colors.textMuted, fontSize: 8, fontWeight: '800' }}>HUNTER CLAIMS</Text>
-              <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '900', marginTop: 2 }}>{stats?.successfulClaims || 0}</Text>
-              <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 2 }}>{stats?.hunterGcEarned || 0} GC</Text>
+              <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '900', marginTop: 2 }}>{stats?.successful_claims || 0}</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 2 }}>{stats?.hunter_gc_earned || 0} GC</Text>
             </View>
 
             <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 8, alignItems: 'center' }}>
               <Text style={{ color: colors.textMuted, fontSize: 8, fontWeight: '800' }}>SURVIVOR ESCAPES</Text>
               <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '900', marginTop: 2 }}>{stats?.escapes || 0}</Text>
-              <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 2 }}>{stats?.survivorGcEarned || 0} GC</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 2 }}>{stats?.survivor_gc_earned || 0} GC</Text>
             </View>
 
             <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 8, alignItems: 'center' }}>
               <Text style={{ color: colors.textMuted, fontSize: 8, fontWeight: '800' }}>5-STAR SURVIVALS</Text>
-              <Text style={{ color: '#FFCC00', fontSize: 15, fontWeight: '900', marginTop: 2 }}>{stats?.fiveStarSurvivals || 0}</Text>
+              <Text style={{ color: '#FFCC00', fontSize: 15, fontWeight: '900', marginTop: 2 }}>{stats?.five_star_survivals || 0}</Text>
               <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 2 }}>TOP SURVIVOR</Text>
             </View>
           </View>
@@ -180,7 +180,7 @@ export const ProfileScreen = ({ navigation }: any) => {
                     </Text>
                   </View>
                   <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '900' }}>
-                    +{item.rewardGc} GC
+                    +{item.reward_gc} GC
                   </Text>
                 </View>
               ))}

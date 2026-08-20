@@ -86,7 +86,7 @@ export const BountyHuntScreen: React.FC<Props> = ({ navigation }) => {
   const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   const starsStr = '★'.repeat(activeSession.star_level);
 
-  const vehicle = activeSession.vehicle;
+  const vehicle = activeSession.target_vehicle;
   const vehicleTitle = vehicle
     ? `${(vehicle.color || 'WHITE').toUpperCase()} ${vehicle.year} ${vehicle.make.toUpperCase()} ${vehicle.model.toUpperCase()}${vehicle.trim ? ` ${vehicle.trim.toUpperCase()}` : ''}`
     : 'WHITE 2011 FORD MUSTANG';
@@ -122,13 +122,13 @@ export const BountyHuntScreen: React.FC<Props> = ({ navigation }) => {
       </View>
 
       <View style={styles.vehicleSection}>
-        {vehicle?.photoUrl ? (
-          <Image source={{ uri: vehicle.photoUrl }} style={styles.vehiclePhoto} resizeMode="cover" />
+        {vehicle?.photo_url ? (
+          <Image source={{ uri: vehicle?.photo_url }} style={styles.vehiclePhoto} resizeMode="cover" />
         ) : null}
 
         <Text style={styles.vehicleTitleText}>{vehicleTitle}</Text>
         <Text style={styles.rankText}>
-          DRIVER RANK // {(activeSession.targetRank || 'GOLD').toUpperCase()}
+          DRIVER RANK // {(activeSession.target_rank || 'GOLD').toUpperCase()}
         </Text>
       </View>
 
