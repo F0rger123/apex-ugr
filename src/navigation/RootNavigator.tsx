@@ -1,3 +1,5 @@
+import { BountyHuntScreen } from '../screens/main/BountyHuntScreen';
+import { MostWantedScreen } from '../screens/main/MostWantedScreen';
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -189,6 +191,16 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="GarageMaintenanceLog"
               component={GarageMaintenanceLogScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="BountyHuntScreen"
+              component={BountyHuntScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="MostWantedScreen"
+              component={MostWantedScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

@@ -120,7 +120,7 @@ export const DashboardScreen = ({ navigation }: any) => {
         <View style={styles.quickNavRow}>
           {[
             { label: 'MAP', icon: <MapPin size={20} color={colors.primary} />, screen: 'Map', sub: `${driversNearby.length} NEARBY` },
-            { label: 'SHOP', icon: <Zap size={20} color={colors.warning} />, screen: 'Marketplace', sub: 'LIVE PARTS' },
+            { label: 'MOST WANTED', icon: <Trophy size={20} color="#FFCC00" />, screen: 'MostWantedScreen', sub: 'HIGH BOUNTY' },
             { label: 'RACE', icon: <Flame size={20} color={colors.primary} />, screen: 'RaceHub', sub: 'WAGER NOW' },
             { label: 'RANKS', icon: <Trophy size={20} color={colors.primary} />, screen: 'Leaderboards', sub: 'GLOBAL' },
           ].map(item => (

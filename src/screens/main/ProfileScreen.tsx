@@ -1,3 +1,6 @@
+import { useBountyStore } from '../../stores/bountyStore';
+import { BountyOptInModal } from '../../components/bounty/BountyOptInModal';
+import { Target, Shield, Crosshair } from 'lucide-react-native';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '../../stores/authStore';
@@ -22,6 +25,15 @@ export const ProfileScreen = ({ navigation }: any) => {
   }, [user?.id]);
 
   const [showReportModal, setShowReportModal] = useState(false);
+  const { settings, stats, history, badges, fetchSettings, fetchStats, fetchHistory } = useBountyStore();
+  const [showBountyModal, setShowBountyModal] = useState(false);
+
+  useEffect(() => {
+    fetchSettings();
+    fetchStats();
+    fetchHistory();
+  }, []);
+
   const [isFollowing, setIsFollowing] = useState(false);
 
   return (
@@ -110,6 +122,72 @@ export const ProfileScreen = ({ navigation }: any) => {
         </GlassCard>
 
         {/* Privacy & Safety Settings */}
+
+        {/* Bounty Mode Settings & Statistics */}
+        <SectionHeader title="BOUNTY SYSTEM & STATS" />
+        <GlassCard>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <View>
+              <Text style={{ color: colors.text, fontSize: 14, fontWeight: '900' }}>BOUNTY MODE</Text>
+              <Text style={{ color: settings?.bounty_mode_enabled ? colors.primary : colors.textMuted, fontSize: 11, fontWeight: '800' }}>
+                STATUS // {settings?.bounty_mode_enabled ? 'ENABLED' : 'DISABLED'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={{ backgroundColor: settings?.bounty_mode_enabled ? 'rgba(0,255,102,0.15)' : colors.surface, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: settings?.bounty_mode_enabled ? colors.primary : colors.cardBorder }}
+              onPress={() => setShowBountyModal(true)}
+            >
+              <Text style={{ color: settings?.bounty_mode_enabled ? colors.primary : colors.text, fontSize: 11, fontWeight: '900' }}>
+                SETTINGS & RULES
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 8, marginVertical: 8 }}>
+            <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 8, alignItems: 'center' }}>
+              <Text style={{ color: colors.textMuted, fontSize: 8, fontWeight: '800' }}>HUNTER CLAIMS</Text>
+              <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '900', marginTop: 2 }}>{stats?.successfulClaims || 0}</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 2 }}>{stats?.hunterGcEarned || 0} GC</Text>
+            </View>
+
+            <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 8, alignItems: 'center' }}>
+              <Text style={{ color: colors.textMuted, fontSize: 8, fontWeight: '800' }}>SURVIVOR ESCAPES</Text>
+              <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '900', marginTop: 2 }}>{stats?.escapes || 0}</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 2 }}>{stats?.survivorGcEarned || 0} GC</Text>
+            </View>
+
+            <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 8, alignItems: 'center' }}>
+              <Text style={{ color: colors.textMuted, fontSize: 8, fontWeight: '800' }}>5-STAR SURVIVALS</Text>
+              <Text style={{ color: '#FFCC00', fontSize: 15, fontWeight: '900', marginTop: 2 }}>{stats?.fiveStarSurvivals || 0}</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 2 }}>TOP SURVIVOR</Text>
+            </View>
+          </View>
+        </GlassCard>
+
+        {/* Bounty History */}
+        {history.length > 0 ? (
+          <>
+            <SectionHeader title="BOUNTY HISTORY" />
+            <GlassCard>
+              {history.slice(0, 5).map((item) => (
+                <View key={item.id} style={styles.achRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.text, fontSize: 12, fontWeight: '800' }}>
+                      {'★'.repeat(item.stars)} {item.vehicle}
+                    </Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 10 }}>
+                      {item.role.toUpperCase()} · {item.outcome.toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '900' }}>
+                    +{item.rewardGc} GC
+                  </Text>
+                </View>
+              ))}
+            </GlassCard>
+          </>
+        ) : null}
+
         <SectionHeader title="GPS & RADAR PRIVACY" />
         <GlassCard>
           <Text style={styles.privacySub}>Current Radar Visibility: <Text style={{ color: colors.primary }}>{(user?.privacy_mode || 'all').toUpperCase()}</Text></Text>
@@ -150,6 +228,12 @@ export const ProfileScreen = ({ navigation }: any) => {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+
+      <BountyOptInModal
+        visible={showBountyModal}
+        onClose={() => setShowBountyModal(false)}
+      />
 
       <ReportUserModal
         visible={showReportModal}

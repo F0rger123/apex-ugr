@@ -1,3 +1,5 @@
+import { BountyDriverHUD } from '../../components/bounty/BountyDriverHUD';
+import { useBountyStore } from '../../stores/bountyStore';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -597,6 +599,10 @@ export const MapScreen = ({ navigation, route }: any) => {
           <Route size={16} color="#000000" />
         </TouchableOpacity>
       </View>
+
+
+      {/* Bounty Active HUD Overlay (Compact, lower priority than turn-by-turn navigation) */}
+      <BountyDriverHUD onOpenHuntScreen={() => navigation.navigate('BountyHuntScreen')} />
 
       {/* Main 3D Map View Container */}
       <View style={styles.mapContainer}>
