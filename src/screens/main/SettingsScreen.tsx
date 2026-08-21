@@ -152,6 +152,12 @@ export const SettingsScreen = ({ navigation }: any) => {
         </GlassCard>
 
         <ApexButton title="SAVE APEX SETTINGS" onPress={handleSave} style={{ marginTop: 16 }} />
+
+        <View style={{ marginTop: 24, alignItems: 'center' }}>
+          <Text style={{ color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 }}>
+            APEX UGR BUILD // 51992a8 (6-TAB NAVIGATION ACTIVE)
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );

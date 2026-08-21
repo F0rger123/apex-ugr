@@ -2120,7 +2120,10 @@ async function handle(request: Request, env: Env, path: string) {
         return json({ error: 'Missing challenge_code query parameter.' }, 400);
       }
 
-      const verificationToken = env.EBAY_DELETION_VERIFICATION_TOKEN || 'apex_ebay_verification_token_2026';
+      const verificationToken = env.EBAY_DELETION_VERIFICATION_TOKEN;
+      if (!verificationToken) {
+        return json({ error: 'Server configuration error: EBAY_DELETION_VERIFICATION_TOKEN environment variable is not configured.' }, 500);
+      }
       const endpoint = env.EBAY_DELETION_ENDPOINT || 'https://apex-ugr.pages.dev/api/ebay/account-deletion';
 
       const unhashed = challengeCode + verificationToken + endpoint;
@@ -2216,14 +2219,8 @@ async function handle(request: Request, env: Env, path: string) {
           street: s.name || 'Main Corridor'
         }))
       });
-    } catch (err) {
-      // Fallback straight-line navigation if OSRM is unreachable
-      return json({
-        distanceMiles: 2.4,
-        durationMinutes: 5,
-        coordinates: [{ latitude: startLat, longitude: startLng }, { latitude: destLat, longitude: destLng }],
-        steps: [{ instruction: 'Head toward destination', distanceMiles: 2.4, street: 'Destination Route' }]
-      });
+    } catch (err: any) {
+      return json({ error:  }, 502);
     }
   }
 
