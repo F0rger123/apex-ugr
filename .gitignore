@@ -6,3 +6,5 @@ web-build/
 .env
 .env.local
 .wrangler/
+
+# Qwen local Git agent test
