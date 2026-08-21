@@ -6,12 +6,11 @@ import { DashboardScreen } from '../screens/main/DashboardScreen';
 import { GarageScreen } from '../screens/main/GarageScreen';
 import { MapScreen } from '../screens/main/MapScreen';
 import { RaceHubScreen } from '../screens/main/RaceHubScreen';
-import { MarketplaceScreen } from '../screens/main/MarketplaceScreen';
+import { ShopScreen } from '../screens/main/ShopScreen';
 import { FeedScreen } from '../screens/main/FeedScreen';
-import { LeaderboardsScreen } from '../screens/main/LeaderboardsScreen';
 
 import { colors } from '../config/colors';
-import { Gauge, Car, MapPin, Flag, ShoppingBag, Tv, Trophy } from 'lucide-react-native';
+import { Gauge, Car, MapPin, Flag, ShoppingBag, Users } from 'lucide-react-native';
 
 const Tab = createBottomTabNavigator();
 
@@ -58,16 +57,16 @@ export const BottomTabNavigator = () => {
         name="RaceHub"
         component={RaceHubScreen}
         options={{
-          tabBarLabel: 'WAGERS',
+          tabBarLabel: 'RACE',
           tabBarIcon: ({ color, size }: { color: string; size: number }) => <Flag size={size - 2} color={color} />,
         }}
       />
 
       <Tab.Screen
-        name="Marketplace"
-        component={MarketplaceScreen}
+        name="Shop"
+        component={ShopScreen}
         options={{
-          tabBarLabel: 'PARTS',
+          tabBarLabel: 'SHOP',
           tabBarIcon: ({ color, size }: { color: string; size: number }) => <ShoppingBag size={size - 2} color={color} />,
         }}
       />
@@ -76,17 +75,8 @@ export const BottomTabNavigator = () => {
         name="Feed"
         component={FeedScreen}
         options={{
-          tabBarLabel: 'FEED',
-          tabBarIcon: ({ color, size }: { color: string; size: number }) => <Tv size={size - 2} color={color} />,
-        }}
-      />
-
-      <Tab.Screen
-        name="Leaderboards"
-        component={LeaderboardsScreen}
-        options={{
-          tabBarLabel: 'RANKS',
-          tabBarIcon: ({ color, size }: { color: string; size: number }) => <Trophy size={size - 2} color={color} />,
+          tabBarLabel: 'SOCIAL',
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => <Users size={size - 2} color={color} />,
         }}
       />
     </Tab.Navigator>
