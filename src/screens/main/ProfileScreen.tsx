@@ -1,3 +1,5 @@
+import { ApexIDModal } from '../../components/profile/ApexIDModal';
+import { QrCode, Calendar, Settings as SettingsIcon } from 'lucide-react-native';
 import { useBountyStore } from '../../stores/bountyStore';
 import { BountyOptInModal } from '../../components/bounty/BountyOptInModal';
 import { Target, Shield, Crosshair } from 'lucide-react-native';
@@ -15,6 +17,9 @@ import { colors } from '../../config/colors';
 import { ShieldCheck, Award, Coins, MapPin, Settings, LogOut, CheckCircle2, ShieldAlert, UserCheck } from 'lucide-react-native';
 
 export const ProfileScreen = ({ navigation }: any) => {
+
+  const [showApexIdModal, setShowApexIdModal] = useState(false);
+
   const { user, signOut, togglePrivacyMode, followStats, fetchFollowStats } = useAuthStore();
   const { vehicles } = useGarageStore();
 
