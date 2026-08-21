@@ -28,7 +28,7 @@ export const BountyDriverCard: React.FC<Props> = ({
   badges = [],
 }) => {
   const starsStr = '★'.repeat(starLevel);
-  const formattedVehicle = `${(vehicle.color || 'WHITE').toUpperCase()} ${vehicle.year} ${vehicle.make.toUpperCase()} ${vehicle.model.toUpperCase()}${vehicle.trim ? ` ${vehicle.trim.toUpperCase()}` : ''}`;
+  const formattedVehicle = vehicle ? `${(vehicle.color || 'WHITE').toUpperCase()} ${vehicle.year} ${vehicle.make.toUpperCase()} ${vehicle.model.toUpperCase()}${vehicle.trim ? ` ${vehicle.trim.toUpperCase()}` : ''}` : 'TARGET VEHICLE';
 
   return (
     <View style={styles.cardContainer}>

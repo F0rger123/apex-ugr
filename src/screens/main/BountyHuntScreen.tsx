@@ -89,7 +89,7 @@ export const BountyHuntScreen: React.FC<Props> = ({ navigation }) => {
   const vehicle = activeSession.target_vehicle;
   const vehicleTitle = vehicle
     ? `${(vehicle.color || 'WHITE').toUpperCase()} ${vehicle.year} ${vehicle.make.toUpperCase()} ${vehicle.model.toUpperCase()}${vehicle.trim ? ` ${vehicle.trim.toUpperCase()}` : ''}`
-    : 'WHITE 2011 FORD MUSTANG';
+    : 'TARGET VEHICLE';
 
   return (
     <ScrollView style={styles.screenContainer} contentContainerStyle={styles.contentContainer}>
