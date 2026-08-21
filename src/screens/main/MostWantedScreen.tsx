@@ -23,7 +23,7 @@ export const MostWantedScreen: React.FC<Props> = ({ navigation }) => {
 
   const renderItem = ({ item }: { item: BountySession }) => {
     const starsStr = '★'.repeat(item.star_level);
-    const vehicle = item.target_vehicle;
+    const vehicle = item.target_vehicle || (item as any).vehicle;
     const vehicleTitle = vehicle
       ? `${(vehicle.color || 'WHITE').toUpperCase()} ${vehicle.year} ${vehicle.make.toUpperCase()} ${vehicle.model.toUpperCase()}${vehicle.trim ? ` ${vehicle.trim.toUpperCase()}` : ''}`
       : 'TARGET VEHICLE';

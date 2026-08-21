@@ -100,7 +100,7 @@ export const useBountyStore = create<BountyState>((set, get) => ({
       const res = await bountyService.getActiveSession(token);
       set({
         activeRole: res.role,
-        activeSession: res.session,
+        activeSession: res.session ? { ...res.session, target_vehicle: (res.session as any).vehicle || res.session.target_vehicle } : null,
         signalStrengthPct: res.session?.signal_strength_pct || 0,
         approxDistanceMiles: res.session?.approx_distance_miles || 0,
         approxDirection: res.session?.approx_direction || 'NW',

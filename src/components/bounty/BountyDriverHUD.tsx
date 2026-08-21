@@ -49,7 +49,7 @@ export const BountyDriverHUD: React.FC<Props> = ({ onOpenHuntScreen }) => {
       <View style={styles.centerInfo}>
         <Text style={styles.vehicleText} numberOfLines={1}>
           {activeSession.target_vehicle
-            ? `${(activeSession.target_vehicle.color || '').toUpperCase()} ${activeSession.target_vehicle.year} ${activeSession.target_vehicle.make.toUpperCase()} ${activeSession.target_vehicle.model.toUpperCase()}`
+            ? `${(activeSession.target_vehicle.color || 'WHITE').toUpperCase()} ${activeSession.target_vehicle.year} ${activeSession.target_vehicle.make.toUpperCase()} ${activeSession.target_vehicle.model.toUpperCase()}`
             : 'TARGET VEHICLE LOCKED'}
         </Text>
         <Text style={styles.rewardText}>
