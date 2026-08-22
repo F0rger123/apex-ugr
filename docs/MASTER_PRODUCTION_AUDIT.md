@@ -73,8 +73,8 @@ Status vocabulary is intentionally restricted to the requested values. `WORKING`
 | Encrypted Contracts | Yes | Yes | World | Pages Function | contracts/progress | Seeded admin content | D1 | Yes | Yes | Partial | No device | PARTIAL |
 | World admin tools | Yes, gated | Developer only | Admin-gated World | Pages Function | world tables | Yes | D1 | Yes | Yes | No | No | NOT TESTABLE |
 | Settings persistence | Yes | Yes | Profile/Settings | Pages Function | apex_user_settings | Yes | D1/local | Yes | Yes | 320-412px save/reload | No device | WORKING |
-| APK download | Yes | Signed-in profile/settings | GitHub Release | EAS/GitHub | Release asset | Signed APK | Stable URL | Yes | Yes | Yes | No install device | PARTIAL |
-| Android release automation | Workflow | No UI | CI | GitHub/EAS | Release metadata | Real build | GitHub | N/A | Failure-safe latest release | Workflow token absent | N/A | PARTIAL |
+| APK download | Yes | Signed-in profile/settings | Cloudflare R2 public endpoint | Pages Function/R2 | Release metadata | Signed APK | Stable URL | Yes | Yes | Browser download and hash verified | No install device | PARTIAL |
+| Android release automation | Workflow | No UI | CI | GitHub Actions/Cloudflare | Release metadata | Real signed build | GitHub/R2 | N/A | Failure-safe latest release | Successful production run | No install device | WORKING |
 
 ## Hidden Features Found
 
@@ -98,7 +98,7 @@ Status vocabulary is intentionally restricted to the requested values. `WORKING`
 - Before this audit, only six destinations were first-class; Leaderboards and Meets were buried.
 - User-facing `RADAR` terminology conflicted with the requested `MAP` architecture and canonical URL design.
 - Settings omitted navigation audio, map preference, Driver Mode preference, Ghost Frequency, multiple notification categories, and multiple privacy controls.
-- GitHub Android automation is configured but currently skips because the repository `EXPO_TOKEN` secret is absent; manual authenticated EAS publication remains required until that secret is restored.
+- The original browser APK action opened the binary URL as a page instead of producing a download. The signed-in action now uses a browser-native download handoff and was exercised against the public Cloudflare endpoint.
 
 ## Runtime Evidence
 
@@ -112,3 +112,5 @@ Status vocabulary is intentionally restricted to the requested values. `WORKING`
 - Ghost Shop: purchased the Blackout Frame for 300 GC, verified balance changed from 2,150 to 1,850 GC, equipped it, and confirmed ownership/equipment survived reload.
 - HUD: Daily Ghost Chest was visible and displayed its server-backed claimed state and streak.
 - Media transport: byte request `0-99` returned `206`, `Content-Range: bytes 0-99/2514704`, `Content-Length: 100`, and `Accept-Ranges: bytes`; `HEAD` returned metadata without a body.
+- Android release: GitHub Actions built version `1.3.1` (`versionCode 13`), verified V1/V2 signing with one signer, published the APK to Cloudflare R2, and created immutable release `android-v1.3.1-b13-39`.
+- APK delivery: the signed-in Settings download produced `apex-ugr.apk`; the downloaded 85,494,495-byte file matched release SHA-256 `6f6f7bec43eb0f4cf10bc54ef1f565500a862b59944097eda9056404a0f2f336`.
