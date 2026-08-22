@@ -99,8 +99,8 @@ const surface = 'rgba(4, 8, 5, 0.86)';
 const border = 'rgba(255, 255, 255, 0.16)';
 const { width: screenWidth } = Dimensions.get('window');
 const ANDROID_DOWNLOAD_URL='https://github.com/F0rger123/apex-ugr/releases/latest/download/apex-ugr.apk';
-const APP_VERSION='1.2.0';
-const ANDROID_VERSION_CODE=10;
+const APP_VERSION='1.2.1';
+const ANDROID_VERSION_CODE=11;
 const SCRAMBLE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%&';
 
 let NativeMap: any = null;
