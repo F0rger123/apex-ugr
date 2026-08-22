@@ -17,7 +17,7 @@ type UserRow = {
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization,content-type',
-  'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,HEAD,POST,PUT,DELETE,OPTIONS',
 };
 
 const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
@@ -240,12 +240,22 @@ async function handle(request: Request, env: Env, path: string) {
   if (method === 'OPTIONS') return new Response(null, { headers: cors });
   if (path === 'health') return json({ status: 'live', backend: 'cloudflare', storage: 'd1+r2' });
   if(path==='download/android'&&method==='GET')return Response.redirect(ANDROID_RELEASE_URL,302);
-  if (path.startsWith('media/') && method === 'GET') {
+  if (path.startsWith('media/') && (method === 'GET' || method === 'HEAD')) {
     const key=decodeURIComponent(path.slice(6));
-    const object=await env.MEDIA.get(key);
+    const rangeHeader=request.headers.get('range');
+    const object=await env.MEDIA.get(key,rangeHeader?{range:request.headers}:undefined);
     if(!object) return json({error:'Media not found.'},404);
-    const headers=new Headers(cors); object.writeHttpMetadata(headers); headers.set('etag',object.httpEtag); headers.set('Cache-Control','public,max-age=31536000,immutable');
-    return new Response(object.body,{headers});
+    const headers=new Headers(cors);object.writeHttpMetadata(headers);headers.set('etag',object.httpEtag);headers.set('Cache-Control','public,max-age=31536000,immutable');headers.set('Accept-Ranges','bytes');
+    let status=200;
+    if(rangeHeader&&object.range){
+      const range=object.range as {offset?:number;length?:number;suffix?:number};
+      const offset=Number.isFinite(range.offset)?Number(range.offset):Math.max(0,object.size-Number(range.suffix||0));
+      const length=Number(range.length||Math.max(0,object.size-offset));
+      headers.set('Content-Range',`bytes ${offset}-${Math.max(offset,offset+length-1)}/${object.size}`);
+      headers.set('Content-Length',String(length));
+      status=206;
+    }else headers.set('Content-Length',String(object.size));
+    return new Response(method==='HEAD'?null:object.body,{headers,status});
   }
 
   if(path==='invite/verify'&&method==='POST'){
@@ -318,6 +328,22 @@ async function handle(request: Request, env: Env, path: string) {
     await env.DB.prepare('UPDATE users SET display_name=? WHERE id=?').bind(displayName.slice(0,40),user.id).run();
     const updated=await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?').bind(user.id).first<UserRow>();
     return json({user:publicUser(updated!)});
+  }
+  if(path==='profile/featured-badges'&&method==='GET'){
+    const badges=await env.DB.prepare(`SELECT b.id,b.name,b.description,b.category,fb.slot FROM featured_badges fb JOIN badges b ON b.id=fb.badge_id JOIN user_badges ub ON ub.user_id=fb.user_id AND ub.badge_id=fb.badge_id WHERE fb.user_id=? ORDER BY fb.slot`).bind(user.id).all();
+    return json({badges:badges.results});
+  }
+  if(path==='profile/featured-badges'&&method==='PUT'){
+    const body=await request.json<{badgeIds?:string[]}>();
+    const badgeIds=[...new Set((body.badgeIds||[]).map(value=>String(value).trim()).filter(Boolean))].slice(0,4);
+    if(badgeIds.length){
+      const placeholders=badgeIds.map(()=>'?').join(',');
+      const earned=await env.DB.prepare(`SELECT badge_id FROM user_badges WHERE user_id=? AND badge_id IN (${placeholders})`).bind(user.id,...badgeIds).all<{badge_id:string}>();
+      if(earned.results.length!==badgeIds.length)return json({error:'Only earned achievement badges can be featured.'},403);
+    }
+    const statements=[env.DB.prepare('DELETE FROM featured_badges WHERE user_id=?').bind(user.id),...badgeIds.map((badgeId,index)=>env.DB.prepare('INSERT INTO featured_badges(user_id,badge_id,slot) VALUES(?,?,?)').bind(user.id,badgeId,index+1))];
+    await env.DB.batch(statements);
+    return json({badgeIds});
   }
   if(path==='ghost/profile'&&method==='GET'){
     const profile=await ghostProfile(user.id,env);const [transactions,inventory,equipped]=await Promise.all([env.DB.prepare('SELECT * FROM ghost_credit_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 50').bind(user.id).all(),env.DB.prepare(`SELECT i.*,s.name,s.category,s.rarity,s.metadata_json FROM ghost_inventory i JOIN ghost_shop_items s ON s.id=i.item_id WHERE i.user_id=? ORDER BY i.acquired_at DESC`).bind(user.id).all(),env.DB.prepare('SELECT category,item_id FROM ghost_equipped_items WHERE user_id=?').bind(user.id).all()]);return json({profile,transactions:transactions.results,inventory:inventory.results,equipped:equipped.results});
@@ -2122,7 +2148,18 @@ async function handle(request: Request, env: Env, path: string) {
         apex_id_visibility: 1,
         cotw_notifs_enabled: 1,
         mod_sync_enabled: 1,
-        mod_price_alerts_enabled: 1
+        mod_price_alerts_enabled: 1,
+        navigation_audio_enabled: 1,
+        driver_mode_autostart: 0,
+        ghost_frequency_enabled: 1,
+        bounty_notifs_enabled: 1,
+        ghost_notifs_enabled: 1,
+        social_notifs_enabled: 1,
+        profile_visibility: 1,
+        vehicle_visibility: 1,
+        meet_attendance_visibility: 1,
+        location_visibility: 1,
+        map_style_preference: 'street'
       };
     }
 
@@ -2142,8 +2179,8 @@ async function handle(request: Request, env: Env, path: string) {
     const enabled=(value:unknown)=>value===false||value===0?0:1;
     await env.DB.prepare(`
       INSERT INTO apex_user_settings
-        (user_id, unit_preference, meet_notif_radius_miles, meet_notifs_enabled, convoy_radio_enabled, season_notifs_enabled, public_performance_visibility, public_race_records, apex_id_visibility, cotw_notifs_enabled, mod_sync_enabled, mod_price_alerts_enabled, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        (user_id, unit_preference, meet_notif_radius_miles, meet_notifs_enabled, convoy_radio_enabled, season_notifs_enabled, public_performance_visibility, public_race_records, apex_id_visibility, cotw_notifs_enabled, mod_sync_enabled, mod_price_alerts_enabled, navigation_audio_enabled, driver_mode_autostart, ghost_frequency_enabled, bounty_notifs_enabled, ghost_notifs_enabled, social_notifs_enabled, profile_visibility, vehicle_visibility, meet_attendance_visibility, location_visibility, map_style_preference, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id) DO UPDATE SET
         unit_preference = excluded.unit_preference,
         meet_notif_radius_miles = excluded.meet_notif_radius_miles,
@@ -2156,13 +2193,28 @@ async function handle(request: Request, env: Env, path: string) {
         cotw_notifs_enabled = excluded.cotw_notifs_enabled,
         mod_sync_enabled = excluded.mod_sync_enabled,
         mod_price_alerts_enabled = excluded.mod_price_alerts_enabled,
+        navigation_audio_enabled = excluded.navigation_audio_enabled,
+        driver_mode_autostart = excluded.driver_mode_autostart,
+        ghost_frequency_enabled = excluded.ghost_frequency_enabled,
+        bounty_notifs_enabled = excluded.bounty_notifs_enabled,
+        ghost_notifs_enabled = excluded.ghost_notifs_enabled,
+        social_notifs_enabled = excluded.social_notifs_enabled,
+        profile_visibility = excluded.profile_visibility,
+        vehicle_visibility = excluded.vehicle_visibility,
+        meet_attendance_visibility = excluded.meet_attendance_visibility,
+        location_visibility = excluded.location_visibility,
+        map_style_preference = excluded.map_style_preference,
         updated_at = CURRENT_TIMESTAMP
     `).bind(
       user.id, body.unit_preference || 'MPH', Number(body.meet_notif_radius_miles) || 25,
       enabled(body.meet_notifs_enabled),enabled(body.convoy_radio_enabled),
       enabled(body.season_notifs_enabled),enabled(body.public_performance_visibility),
       enabled(body.public_race_records),enabled(body.apex_id_visibility),enabled(body.cotw_notifs_enabled),
-      enabled(body.mod_sync_enabled),enabled(body.mod_price_alerts_enabled)
+      enabled(body.mod_sync_enabled),enabled(body.mod_price_alerts_enabled),enabled(body.navigation_audio_enabled),
+      enabled(body.driver_mode_autostart),enabled(body.ghost_frequency_enabled),enabled(body.bounty_notifs_enabled),
+      enabled(body.ghost_notifs_enabled),enabled(body.social_notifs_enabled),enabled(body.profile_visibility),
+      enabled(body.vehicle_visibility),enabled(body.meet_attendance_visibility),enabled(body.location_visibility),
+      body.map_style_preference === 'satellite' ? 'satellite' : 'street'
     ).run();
 
     return json({ success: true });

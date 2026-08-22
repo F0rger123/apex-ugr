@@ -1,0 +1,11 @@
+ALTER TABLE apex_user_settings ADD COLUMN navigation_audio_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN driver_mode_autostart INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE apex_user_settings ADD COLUMN ghost_frequency_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN bounty_notifs_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN ghost_notifs_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN social_notifs_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN profile_visibility INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN vehicle_visibility INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN meet_attendance_visibility INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN location_visibility INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE apex_user_settings ADD COLUMN map_style_preference TEXT NOT NULL DEFAULT 'street';
