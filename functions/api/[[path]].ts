@@ -22,7 +22,7 @@ const cors = {
 
 const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
 const ROOT_ACCESS_CODE_HASH = '99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718';
-const ANDROID_RELEASE_URL = 'https://github.com/F0rger123/apex-ugr/releases/latest/download/apex-ugr.apk';
+const ANDROID_RELEASE_KEY = 'releases/apex-ugr-latest.apk';
 
 function normalizeInviteCode(value: string) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -239,7 +239,31 @@ async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === 'OPTIONS') return new Response(null, { headers: cors });
   if (path === 'health') return json({ status: 'live', backend: 'cloudflare', storage: 'd1+r2' });
-  if(path==='download/android'&&method==='GET')return Response.redirect(ANDROID_RELEASE_URL,302);
+  if(path==='download/android'&&(method==='GET'||method==='HEAD')){
+    const rangeHeader=request.headers.get('range');
+    const object=await env.MEDIA.get(ANDROID_RELEASE_KEY,rangeHeader?{range:request.headers}:undefined);
+    if(!object)return json({error:'Android release is not available yet.'},404);
+    const headers=new Headers(cors);object.writeHttpMetadata(headers);headers.set('etag',object.httpEtag);headers.set('Cache-Control','public,max-age=300');headers.set('Accept-Ranges','bytes');headers.set('Content-Disposition','attachment; filename="apex-ugr.apk"');
+    let status=200;
+    if(rangeHeader&&object.range){
+      const range=object.range as {offset?:number;length?:number;suffix?:number};
+      const offset=Number.isFinite(range.offset)?Number(range.offset):Math.max(0,object.size-Number(range.suffix||0));
+      const length=Number(range.length||Math.max(0,object.size-offset));
+      headers.set('Content-Range',`bytes ${offset}-${Math.max(offset,offset+length-1)}/${object.size}`);headers.set('Content-Length',String(length));status=206;
+    }else headers.set('Content-Length',String(object.size));
+    return new Response(method==='HEAD'?null:object.body,{headers,status});
+  }
+  if(path==='admin/android-release'&&method==='POST'){
+    const user=await authenticatedUser(request,env);
+    if(!user||user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
+    const size=Number(request.headers.get('content-length')||0);
+    if(!request.body||size>100*1024*1024)return json({error:'A valid APK under 100 MB is required.'},400);
+    const contentType=request.headers.get('content-type')||'';
+    if(!contentType.includes('android.package-archive')&&!contentType.includes('application/octet-stream'))return json({error:'Only Android APK files are accepted.'},400);
+    await env.MEDIA.put(ANDROID_RELEASE_KEY,request.body,{httpMetadata:{contentType:'application/vnd.android.package-archive',contentDisposition:'attachment; filename="apex-ugr.apk"',cacheControl:'public, max-age=300'},customMetadata:{publishedBy:user.id,publishedAt:new Date().toISOString(),version:request.headers.get('x-apex-version')||'unknown'}});
+    const object=await env.MEDIA.head(ANDROID_RELEASE_KEY);
+    return json({published:true,size:object?.size||size,version:request.headers.get('x-apex-version')||'unknown'});
+  }
   if (path.startsWith('media/') && (method === 'GET' || method === 'HEAD')) {
     const key=decodeURIComponent(path.slice(6));
     const rangeHeader=request.headers.get('range');

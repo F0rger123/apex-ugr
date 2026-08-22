@@ -100,9 +100,9 @@ const muted = '#929B95';
 const surface = 'rgba(4, 8, 5, 0.86)';
 const border = 'rgba(255, 255, 255, 0.16)';
 const { width: screenWidth } = Dimensions.get('window');
-const ANDROID_DOWNLOAD_URL='https://github.com/F0rger123/apex-ugr/releases/latest/download/apex-ugr.apk';
-const APP_VERSION='1.3.0';
-const ANDROID_VERSION_CODE=12;
+const ANDROID_DOWNLOAD_URL='https://apex-ugr.pages.dev/api/download/android';
+const APP_VERSION='1.3.1';
+const ANDROID_VERSION_CODE=13;
 const SCRAMBLE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%&';
 const useNativeAnimations=Platform.OS!=='web';
 
@@ -903,6 +903,7 @@ type CompleteSettings=ApexSettings&{
 };
 
 function SettingsScreen(){
+  const isDeveloper=useContentStore(state=>Boolean(state.profile?.isDeveloper));
   const [settings,setSettings]=useState<CompleteSettings|null>(null);
   const [apexId,setApexId]=useState('');
   const [audio,setAudio]=useState(true);
@@ -917,6 +918,7 @@ function SettingsScreen(){
   const divider=<View style={styles.identityDivider}/>;
   const save=async()=>{if(!settings||busy)return;setBusy(true);try{await Promise.all([cloudflareApi.request('/api/settings',{method:'PUT',body:JSON.stringify(settings)}),cloudflareApi.request('/api/bounty/settings',{method:'PUT',body:JSON.stringify({bountyModeEnabled:bounty,agreed:bounty,notificationsEnabled:Boolean(settings.bounty_notifs_enabled),showPublicPhoto:Boolean(settings.profile_visibility),allowMostWanted:true})}),AsyncStorage.setItem(LOCAL_SETTINGS_KEY,JSON.stringify({audio,haptics}))]);setInterfaceAudioEnabled(audio);setHapticsEnabled(haptics);const liveUnit=useLiveNetworkStore.getState().unit.toUpperCase();if((settings.unit_preference==='KMH'?'KPH':'MPH')!==liveUnit)useLiveNetworkStore.getState().toggleUnit();playInterfaceSound('unlock');setStatus('SETTINGS SECURED');}catch(error){setStatus(error instanceof Error?error.message:'Settings could not be saved.');}finally{setBusy(false);}};
   const signOut=async()=>{setBusy(true);try{await cloudflareApi.signOut();useLiveNetworkStore.getState().dispose();await Promise.all([useContentStore.getState().initialize(),useLiveNetworkStore.getState().initialize()]);if(Platform.OS==='web'&&typeof window!=='undefined')window.location.assign('/');}finally{setBusy(false);}};
+  const publishAndroidRelease=async(file:Blob)=>{setBusy(true);setStatus('PUBLISHING ANDROID RELEASE');try{const result=await cloudflareApi.publishAndroidRelease(file);setStatus(`ANDROID RELEASE LIVE · ${(result.size/1024/1024).toFixed(1)} MB`);playInterfaceSound('unlock');}catch(error){setStatus(error instanceof Error?error.message:'Android release could not be published.');}finally{setBusy(false);}};
   if(!settings)return <ScrollView contentContainerStyle={styles.screenContent}><GlassPanel style={styles.emptyState}><Settings size={28} color={accent}/><Text style={styles.emptyTitle}>{busy?'DECRYPTING SETTINGS':'SETTINGS UNAVAILABLE'}</Text>{status?<Text style={styles.networkError}>{status}</Text>:null}<GlassButton label="RETRY" icon={Radio} onPress={()=>void load()} compact/></GlassPanel></ScrollView>;
   return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
     <View style={styles.raceHeader}><View><Text style={styles.eyebrow}>PILOT CONTROL</Text><Text style={styles.feedTitle}>SETTINGS</Text></View><Settings size={27} color={paper}/></View>
@@ -926,7 +928,7 @@ function SettingsScreen(){
     <SectionTitle label="GARAGE + MOD SYNC"/><GlassPanel>{toggle('SYNC MOD PLANNER','mod_sync_enabled')}{divider}{toggle('PART PRICE ALERTS','mod_price_alerts_enabled')}</GlassPanel>
     <SectionTitle label="PRIVACY"/><GlassPanel>{toggle('PROFILE VISIBLE','profile_visibility')}{divider}{toggle('VEHICLES VISIBLE','vehicle_visibility')}{divider}{toggle('APEX ID VISIBLE','apex_id_visibility')}{divider}{toggle('MEET ATTENDANCE VISIBLE','meet_attendance_visibility')}{divider}{toggle('LOCATION SHARING','location_visibility','Live location still expires automatically.')}{divider}<View style={styles.healthRow}><View style={styles.commandCopy}><Text style={styles.commandTitle}>BOUNTY PARTICIPATION</Text><Text style={styles.commandMeta}>OPT-IN · APPROXIMATE SIGNALS · AUTHORIZED VENUES</Text></View><Switch value={bounty} onValueChange={setBounty} trackColor={{false:'#252A26',true:'rgba(167,229,154,.46)'}} thumbColor={bounty?accent:'#D5D9D5'}/></View></GlassPanel>
     <SectionTitle label="ACCOUNT"/><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>APEX ID</Text><Text style={styles.healthGood}>{apexId}</Text></View>{divider}<GlassButton label="LOCK YOURSELF OUT" icon={LockKeyhole} onPress={()=>void signOut()}/></GlassPanel>
-    <SectionTitle label="ABOUT"/><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>APP</Text><Text style={styles.commandMeta}>{APP_VERSION}</Text></View>{divider}<View style={styles.healthRow}><Text style={styles.identityLabel}>ANDROID BUILD</Text><Text style={styles.commandMeta}>{ANDROID_VERSION_CODE}</Text></View>{divider}<AndroidDownloadButton/></GlassPanel>
+    <SectionTitle label="ABOUT"/><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>APP</Text><Text style={styles.commandMeta}>{APP_VERSION}</Text></View>{divider}<View style={styles.healthRow}><Text style={styles.identityLabel}>ANDROID BUILD</Text><Text style={styles.commandMeta}>{ANDROID_VERSION_CODE}</Text></View>{divider}<AndroidDownloadButton/>{isDeveloper&&Platform.OS==='web'?<><View style={styles.identityDivider}/><View style={{position:'relative'}}><GlassButton label={busy?'PUBLISHING RELEASE':'PUBLISH VERIFIED APK'} icon={PackageCheck} onPress={()=>undefined}/>{React.createElement('input',{type:'file',accept:'.apk,application/vnd.android.package-archive',disabled:busy,onChange:(event:any)=>{const file=event.target.files?.[0];if(file)void publishAndroidRelease(file);event.target.value='';},style:{position:'absolute',inset:0,width:'100%',height:'100%',opacity:0,cursor:'pointer'}})}</View><Text style={styles.commandMeta}>OWNER ONLY · REPLACES THE PUBLIC ANDROID DOWNLOAD</Text></>:null}</GlassPanel>
     {status?<Text style={status.includes('SECURED')?styles.healthGood:styles.networkError}>{status}</Text>:null}<GlassButton label={busy?'SAVING':'SAVE SETTINGS'} icon={Check} onPress={()=>void save()} active/>
   </ScrollView>;
 }

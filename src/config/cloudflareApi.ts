@@ -51,6 +51,13 @@ export const cloudflareApi = {
     form.append('file', file, `upload.${mediaType === 'video' ? 'mp4' : 'jpg'}`);
     return request<{ url: string }>('/api/upload', { method: 'POST', body: form });
   },
+  async publishAndroidRelease(file: Blob) {
+    return request<{ published: boolean; size: number; version: string }>('/api/admin/android-release', {
+      method: 'POST',
+      body: file,
+      headers: { 'Content-Type': 'application/vnd.android.package-archive', 'X-Apex-Version': '1.3.1 (13)' },
+    });
+  },
 };
 
 export const hasCloudflareBackend = true;
