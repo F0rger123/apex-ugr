@@ -1811,9 +1811,11 @@ async function handle(request: Request, env: Env, path: string) {
   const vehicleWishlistMatch = path.match(/^vehicles\/([^/]+)\/wishlist$/);
   if (vehicleWishlistMatch) {
     const vehicleId = vehicleWishlistMatch[1];
+    const ownedVehicle = await env.DB.prepare('SELECT id FROM vehicles WHERE id = ? AND user_id = ?').bind(vehicleId, user.id).first<any>();
+    if (!ownedVehicle) return json({ error: 'Vehicle was not found in your garage.' }, 404);
 
     if (method === 'GET') {
-      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? ORDER BY created_at DESC`).bind(vehicleId).all();
+      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? AND user_id = ? ORDER BY created_at DESC`).bind(vehicleId, user.id).all();
       return json({ wishlist: rows.results });
     }
 
@@ -1842,7 +1844,7 @@ async function handle(request: Request, env: Env, path: string) {
   const vehicleWishlistDeleteMatch = path.match(/^vehicles\/([^/]+)\/wishlist\/([^/]+)$/);
   if (vehicleWishlistDeleteMatch && method === 'DELETE') {
     const [, vehicleId, itemId] = vehicleWishlistDeleteMatch;
-    await env.DB.prepare(`DELETE FROM mod_wishlist WHERE id = ? AND user_id = ?`).bind(itemId, user.id).run();
+    await env.DB.prepare(`DELETE FROM mod_wishlist WHERE id = ? AND vehicle_id = ? AND user_id = ?`).bind(itemId, vehicleId, user.id).run();
     return json({ success: true });
   }
 
@@ -2118,7 +2120,9 @@ async function handle(request: Request, env: Env, path: string) {
         public_performance_visibility: 1,
         public_race_records: 1,
         apex_id_visibility: 1,
-        cotw_notifs_enabled: 1
+        cotw_notifs_enabled: 1,
+        mod_sync_enabled: 1,
+        mod_price_alerts_enabled: 1
       };
     }
 
@@ -2138,8 +2142,8 @@ async function handle(request: Request, env: Env, path: string) {
     const enabled=(value:unknown)=>value===false||value===0?0:1;
     await env.DB.prepare(`
       INSERT INTO apex_user_settings
-        (user_id, unit_preference, meet_notif_radius_miles, meet_notifs_enabled, convoy_radio_enabled, season_notifs_enabled, public_performance_visibility, public_race_records, apex_id_visibility, cotw_notifs_enabled, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        (user_id, unit_preference, meet_notif_radius_miles, meet_notifs_enabled, convoy_radio_enabled, season_notifs_enabled, public_performance_visibility, public_race_records, apex_id_visibility, cotw_notifs_enabled, mod_sync_enabled, mod_price_alerts_enabled, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id) DO UPDATE SET
         unit_preference = excluded.unit_preference,
         meet_notif_radius_miles = excluded.meet_notif_radius_miles,
@@ -2150,12 +2154,15 @@ async function handle(request: Request, env: Env, path: string) {
         public_race_records = excluded.public_race_records,
         apex_id_visibility = excluded.apex_id_visibility,
         cotw_notifs_enabled = excluded.cotw_notifs_enabled,
+        mod_sync_enabled = excluded.mod_sync_enabled,
+        mod_price_alerts_enabled = excluded.mod_price_alerts_enabled,
         updated_at = CURRENT_TIMESTAMP
     `).bind(
       user.id, body.unit_preference || 'MPH', Number(body.meet_notif_radius_miles) || 25,
       enabled(body.meet_notifs_enabled),enabled(body.convoy_radio_enabled),
       enabled(body.season_notifs_enabled),enabled(body.public_performance_visibility),
-      enabled(body.public_race_records),enabled(body.apex_id_visibility),enabled(body.cotw_notifs_enabled)
+      enabled(body.public_race_records),enabled(body.apex_id_visibility),enabled(body.cotw_notifs_enabled),
+      enabled(body.mod_sync_enabled),enabled(body.mod_price_alerts_enabled)
     ).run();
 
     return json({ success: true });
