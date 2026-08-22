@@ -8,27 +8,18 @@ on:
 permissions:
   contents: write
 
-jobs:
-  check-expo-token:
-    runs-on: ubuntu-latest
-    outputs:
-      configured: ${{ steps.token.outputs.configured }}
-    steps:
-      - id: token
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: |
-          if [ -n "$EXPO_TOKEN" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          fi
+concurrency:
+  group: apex-android-production
+  cancel-in-progress: true
 
+jobs:
   build-and-publish:
-    needs: check-expo-token
-    if: github.actor != 'github-actions[bot]' && needs.check-expo-token.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      APEX_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.APEX_ANDROID_KEYSTORE_PASSWORD }}
+      APEX_ANDROID_KEY_ALIAS: ${{ secrets.APEX_ANDROID_KEY_ALIAS }}
+      APEX_ANDROID_KEY_PASSWORD: ${{ secrets.APEX_ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,11 +28,11 @@ jobs:
           node-version: 20
           cache: npm
 
-      - uses: expo/expo-github-action@v8
+      - uses: actions/setup-java@v4
         with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          distribution: temurin
+          java-version: 17
+          cache: gradle
 
       - run: npm ci
 
@@ -52,27 +43,71 @@ jobs:
           npx wrangler pages functions build functions --outdir .wrangler/functions-build
           node scripts/navigationSimulation.mjs
 
-      - name: Build the installable APK
-        run: eas build --platform android --profile preview --non-interactive --wait --json > build.json
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --no-install --clean
 
-      - name: Download and identify the verified APK
-        id: apk
+      - name: Restore production signing certificate
+        env:
+          APEX_ANDROID_KEYSTORE_B64: ${{ secrets.APEX_ANDROID_KEYSTORE_B64 }}
         run: |
-          APK_URL="$(node -e "const raw=require('./build.json'); const build=Array.isArray(raw)?raw[0]:raw; process.stdout.write(build.artifacts.buildUrl)")"
-          BUILD_VERSION="$(node -e "const raw=require('./build.json'); const build=Array.isArray(raw)?raw[0]:raw; process.stdout.write(String(build.appBuildVersion || 'unknown'))")"
-          APP_VERSION="$(node -e "const app=require('./app.json'); process.stdout.write(app.expo.version)")"
-          curl --fail --location --retry 3 "$APK_URL" --output apex-ugr.apk
-          test -s apex-ugr.apk
-          sha256sum apex-ugr.apk
-          echo "build_version=$BUILD_VERSION" >> "$GITHUB_OUTPUT"
-          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          test -n "$APEX_ANDROID_KEYSTORE_B64"
+          printf '%s' "$APEX_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/apex-production.jks"
+          rm -f android/app/debug.keystore
+          keytool -importkeystore -noprompt \
+            -srckeystore "$RUNNER_TEMP/apex-production.jks" \
+            -srcstorepass "$APEX_ANDROID_KEYSTORE_PASSWORD" \
+            -srcalias "$APEX_ANDROID_KEY_ALIAS" \
+            -srckeypass "$APEX_ANDROID_KEY_PASSWORD" \
+            -destkeystore android/app/debug.keystore \
+            -deststorepass android \
+            -destalias androiddebugkey \
+            -destkeypass android
 
-      - name: Publish immutable release with stable latest asset
+      - name: Build signed release APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk ../apex-ugr.apk
+          cd ..
+          test -s apex-ugr.apk
+          sha256sum apex-ugr.apk | tee apex-ugr.apk.sha256
+
+      - name: Verify signing identity and package
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs apex-ugr.apk
+          unzip -t apex-ugr.apk >/dev/null
+
+      - name: Publish public Cloudflare download
+        env:
+          RELEASE_UPLOAD_TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
+        run: |
+          APP_VERSION="$(node -p "require('./app.json').expo.version")"
+          VERSION_CODE="$(node -p "require('./app.json').expo.android.versionCode")"
+          curl --fail --show-error --retry 3 \
+            -H "Content-Type: application/vnd.android.package-archive" \
+            -H "X-Apex-Release-Token: $RELEASE_UPLOAD_TOKEN" \
+            -H "X-Apex-Version: ${APP_VERSION} (${VERSION_CODE})" \
+            --data-binary @apex-ugr.apk \
+            https://apex-ugr.pages.dev/api/admin/android-release
+
+      - name: Publish immutable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="android-v${{ steps.apk.outputs.app_version }}-b${{ steps.apk.outputs.build_version }}-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" apex-ugr.apk#apex-ugr.apk \
-            --title "Apex UGR Android ${{ steps.apk.outputs.app_version }} (${{ steps.apk.outputs.build_version }})" \
-            --notes "Commit: ${GITHUB_SHA}\nBuild date: $(date -u +%Y-%m-%dT%H:%M:%SZ)\nSource: ${GITHUB_REPOSITORY}@${GITHUB_SHA}" \
+          APP_VERSION="$(node -p "require('./app.json').expo.version")"
+          VERSION_CODE="$(node -p "require('./app.json').expo.android.versionCode")"
+          TAG="android-v${APP_VERSION}-b${VERSION_CODE}-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" apex-ugr.apk#apex-ugr.apk apex-ugr.apk.sha256 \
+            --title "Apex UGR Android ${APP_VERSION} (${VERSION_CODE})" \
+            --notes "Commit: ${GITHUB_SHA}\nBuild date: $(date -u +%Y-%m-%dT%H:%M:%SZ)\nPublic download: https://apex-ugr.pages.dev/api/download/android" \
             --latest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apex-ugr-android-${{ github.sha }}
+          path: |
+            apex-ugr.apk
+            apex-ugr.apk.sha256
+          retention-days: 30

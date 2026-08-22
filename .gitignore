@@ -1,4 +1,7 @@
 node_modules/
+credentials.json
+credentials/
+*.jks
 .expo/
 dist/
 web-build/

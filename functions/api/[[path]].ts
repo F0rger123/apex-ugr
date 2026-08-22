@@ -7,6 +7,7 @@ interface Env {
   EBAY_CLIENT_SECRET?: string;
   EBAY_DELETION_VERIFICATION_TOKEN?: string;
   EBAY_DELETION_ENDPOINT?: string;
+  RELEASE_UPLOAD_TOKEN?: string;
 }
 
 type UserRow = {
@@ -255,12 +256,14 @@ async function handle(request: Request, env: Env, path: string) {
   }
   if(path==='admin/android-release'&&method==='POST'){
     const user=await authenticatedUser(request,env);
-    if(!user||user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
+    const releaseToken=request.headers.get('x-apex-release-token')||'';
+    const automatedRelease=Boolean(env.RELEASE_UPLOAD_TOKEN)&&await sha256Hex(releaseToken)===await sha256Hex(env.RELEASE_UPLOAD_TOKEN||'');
+    if(!automatedRelease&&(!user||user.email.toLowerCase()!==DEVELOPER_EMAIL))return json({error:'Developer access required.'},403);
     const size=Number(request.headers.get('content-length')||0);
     if(!request.body||size>100*1024*1024)return json({error:'A valid APK under 100 MB is required.'},400);
     const contentType=request.headers.get('content-type')||'';
     if(!contentType.includes('android.package-archive')&&!contentType.includes('application/octet-stream'))return json({error:'Only Android APK files are accepted.'},400);
-    await env.MEDIA.put(ANDROID_RELEASE_KEY,request.body,{httpMetadata:{contentType:'application/vnd.android.package-archive',contentDisposition:'attachment; filename="apex-ugr.apk"',cacheControl:'public, max-age=300'},customMetadata:{publishedBy:user.id,publishedAt:new Date().toISOString(),version:request.headers.get('x-apex-version')||'unknown'}});
+    await env.MEDIA.put(ANDROID_RELEASE_KEY,request.body,{httpMetadata:{contentType:'application/vnd.android.package-archive',contentDisposition:'attachment; filename="apex-ugr.apk"',cacheControl:'public, max-age=300'},customMetadata:{publishedBy:user?.id||'github-actions',publishedAt:new Date().toISOString(),version:request.headers.get('x-apex-version')||'unknown'}});
     const object=await env.MEDIA.head(ANDROID_RELEASE_KEY);
     return json({published:true,size:object?.size||size,version:request.headers.get('x-apex-version')||'unknown'});
   }
