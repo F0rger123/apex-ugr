@@ -5,6 +5,8 @@ interface Env {
   MEDIA: R2Bucket;
   EBAY_CLIENT_ID?: string;
   EBAY_CLIENT_SECRET?: string;
+  EBAY_DELETION_VERIFICATION_TOKEN?: string;
+  EBAY_DELETION_ENDPOINT?: string;
 }
 
 type UserRow = {
@@ -86,6 +88,11 @@ function base64ToBytes(value: string) {
 async function sha256(value: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return bytesToBase64(new Uint8Array(digest));
+}
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function passwordHash(password: string, salt: Uint8Array) {
@@ -238,6 +245,19 @@ async function handle(request: Request, env: Env, path: string) {
     return json({valid:true,label:invite.label,remaining:invite.max_uses-invite.use_count,expiresAt:invite.expires_at});
   }
 
+  // eBay calls this endpoint before any Apex user session exists. Never use a
+  // development fallback here: the challenge must be signed by configured
+  // production secrets or fail visibly.
+  if (path === 'ebay/account-deletion') {
+    if (method !== 'GET') return json({ error: 'Method not allowed.' }, 405);
+    const challengeCode = new URL(request.url).searchParams.get('challenge_code');
+    if (!challengeCode) return json({ error: 'Missing challenge_code query parameter.' }, 400);
+    if (!env.EBAY_DELETION_VERIFICATION_TOKEN || !env.EBAY_DELETION_ENDPOINT) {
+      return json({ error: 'eBay deletion verification is not configured.' }, 503);
+    }
+    return json({ challengeResponse: await sha256Hex(challengeCode + env.EBAY_DELETION_VERIFICATION_TOKEN + env.EBAY_DELETION_ENDPOINT) });
+  }
+
   if (path === 'auth/signup' && method === 'POST') {
     const body = await request.json<{ email?: string; password?: string; inviteCode?:string }>();
     const email = body.email?.trim().toLowerCase() || '';
@@ -278,6 +298,8 @@ async function handle(request: Request, env: Env, path: string) {
   const user = await authenticatedUser(request, env);
   if (!user) return json({ error: 'Authentication required.' }, 401);
 
+  if (path.startsWith('ghost-shop/')) return json({ error: 'Use the canonical Ghost Vault endpoint.' }, 410);
+
   if (path === 'session' && method === 'GET') return json({ user: publicUser(user) });
   if(path==='profile'&&method==='PUT'){
     const body=await request.json<{displayName?:string}>();const displayName=body.displayName?.trim();
@@ -293,7 +315,7 @@ async function handle(request: Request, env: Env, path: string) {
     const profile=await ghostProfile(user.id,env);const userRank=await refreshRank(user.id,env);const rankRow=await env.DB.prepare('SELECT shop_access FROM rank_thresholds WHERE rank=?').bind(userRank.rank).first<{shop_access:number}>();const now=new Date(),nextRefresh=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()+1));const items=await env.DB.prepare(`SELECT s.*,EXISTS(SELECT 1 FROM ghost_inventory i WHERE i.user_id=? AND i.item_id=s.id) owned FROM ghost_shop_items s WHERE s.is_active=1 AND (s.available_from IS NULL OR s.available_from<=?) AND (s.available_until IS NULL OR s.available_until>?) ORDER BY s.rarity DESC,s.price_gc`).bind(user.id,now.toISOString(),now.toISOString()).all();return json({credits:profile?.credits||0,streak:profile?.current_streak||0,rank:userRank.rank,shopAccess:rankRow?.shop_access||0,serverNow:now.toISOString(),refreshesAt:nextRefresh.toISOString(),items:items.results});
   }
   const ghostPurchase=path.match(/^ghost\/shop\/([^/]+)\/purchase$/);if(ghostPurchase&&method==='POST'){
-    const profile=await ghostProfile(user.id,env);const item=await env.DB.prepare(`SELECT * FROM ghost_shop_items WHERE id=? AND is_active=1 AND (available_from IS NULL OR available_from<=?) AND (available_until IS NULL OR available_until>?)`).bind(ghostPurchase[1],new Date().toISOString(),new Date().toISOString()).first<any>();if(!item)return json({error:'This Ghost Shop item is unavailable.'},404);if(item.requirement_type==='streak'&&Number(profile?.current_streak||0)<Number(item.requirement_value))return json({error:`Requires Ghost Streak x${item.requirement_value}.`},403);if(item.requirement_type==='rank'){const current=await env.DB.prepare('SELECT points FROM users WHERE id=?').bind(user.id).first<{points:number}>();const threshold=await env.DB.prepare('SELECT minimum_rep FROM rank_thresholds WHERE shop_access>=? ORDER BY shop_access LIMIT 1').bind(Number(item.requirement_value)).first<{minimum_rep:number}>();if(Number(current?.points||0)<Number(threshold?.minimum_rep||0))return json({error:'Your current rank does not unlock this item.'},403);}const owned=await env.DB.prepare('SELECT 1 found FROM ghost_inventory WHERE user_id=? AND item_id=?').bind(user.id,item.id).first();if(owned)return json({error:'You already own this item.'},409);const cost=Number(item.price_gc);const result=await env.DB.prepare('UPDATE ghost_profiles SET credits=credits-?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND credits>=?').bind(cost,user.id,cost).run();if(!result.meta.changes)return json({error:'Not enough Ghost Credits.'},409);const balance=Number(profile?.credits||0)-cost;await env.DB.batch([env.DB.prepare('INSERT INTO ghost_inventory(user_id,item_id,acquired_source,purchase_price_gc) VALUES(?,?,?,?)').bind(user.id,item.id,'ghost_shop',cost),env.DB.prepare('INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user.id,-cost,'GHOST SHOP',item.id,Number(profile?.credits||0),balance)]);return json({purchased:true,balance});
+    const profile=await ghostProfile(user.id,env);const item=await env.DB.prepare(`SELECT * FROM ghost_shop_items WHERE id=? AND is_active=1 AND (available_from IS NULL OR available_from<=?) AND (available_until IS NULL OR available_until>?)`).bind(ghostPurchase[1],new Date().toISOString(),new Date().toISOString()).first<any>();if(!item)return json({error:'This Ghost Shop item is unavailable.'},404);if(item.requirement_type==='streak'&&Number(profile?.current_streak||0)<Number(item.requirement_value))return json({error:`Requires Ghost Streak x${item.requirement_value}.`},403);if(item.requirement_type==='rank'){const current=await env.DB.prepare('SELECT points FROM users WHERE id=?').bind(user.id).first<{points:number}>();const threshold=await env.DB.prepare('SELECT minimum_rep FROM rank_thresholds WHERE shop_access>=? ORDER BY shop_access LIMIT 1').bind(Number(item.requirement_value)).first<{minimum_rep:number}>();if(Number(current?.points||0)<Number(threshold?.minimum_rep||0))return json({error:'Your current rank does not unlock this item.'},403);}const owned=await env.DB.prepare('SELECT 1 found FROM ghost_inventory WHERE user_id=? AND item_id=?').bind(user.id,item.id).first();if(owned)return json({error:'You already own this item.'},409);const cost=Math.max(0,Number(item.price_gc)||0),orderId=crypto.randomUUID(),ledgerId=crypto.randomUUID();const results=await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO ghost_shop_orders(id,user_id,item_id,cost_gc) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM ghost_profiles WHERE user_id=? AND credits>=?) AND NOT EXISTS(SELECT 1 FROM ghost_inventory WHERE user_id=? AND item_id=?)`).bind(orderId,user.id,item.id,cost,user.id,cost,user.id,item.id),env.DB.prepare('UPDATE ghost_profiles SET credits=credits-?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND EXISTS(SELECT 1 FROM ghost_shop_orders WHERE id=?)').bind(cost,user.id,orderId),env.DB.prepare(`INSERT INTO ghost_inventory(user_id,item_id,acquired_source,purchase_price_gc) SELECT user_id,item_id,'ghost_shop',cost_gc FROM ghost_shop_orders WHERE id=?`).bind(orderId),env.DB.prepare(`INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after) SELECT ?,user_id,-cost_gc,'GHOST SHOP',item_id,(SELECT credits+cost_gc FROM ghost_profiles WHERE user_id=ghost_shop_orders.user_id),(SELECT credits FROM ghost_profiles WHERE user_id=ghost_shop_orders.user_id) FROM ghost_shop_orders WHERE id=?`).bind(ledgerId,orderId)]);if(!results[0].meta.changes){const current=await env.DB.prepare('SELECT credits FROM ghost_profiles WHERE user_id=?').bind(user.id).first<{credits:number}>();return json({error:Number(current?.credits||0)<cost?'Not enough Ghost Credits.':'You already own this item.'},409);}const current=await env.DB.prepare('SELECT credits FROM ghost_profiles WHERE user_id=?').bind(user.id).first<{credits:number}>();return json({purchased:true,balance:Number(current?.credits||0)});
   }
   if(path==='ghost/equip'&&method==='POST'){
     const body=await request.json<{itemId?:string}>();const item=await env.DB.prepare(`SELECT s.id,s.category FROM ghost_shop_items s JOIN ghost_inventory i ON i.item_id=s.id WHERE s.id=? AND i.user_id=?`).bind(body.itemId||'',user.id).first<{id:string;category:string}>();if(!item)return json({error:'You do not own this cosmetic.'},403);await env.DB.prepare(`INSERT INTO ghost_equipped_items(user_id,category,item_id) VALUES(?,?,?) ON CONFLICT(user_id,category) DO UPDATE SET item_id=excluded.item_id,equipped_at=CURRENT_TIMESTAMP`).bind(user.id,item.category,item.id).run();return json({equipped:true,category:item.category,itemId:item.id});
@@ -2219,14 +2241,8 @@ async function handle(request: Request, env: Env, path: string) {
           street: s.name || 'Main Corridor'
         }))
       });
-    } catch (err) {
-      // Fallback straight-line navigation if OSRM is unreachable
-      return json({
-        distanceMiles: 2.4,
-        durationMinutes: 5,
-        coordinates: [{ latitude: startLat, longitude: startLng }, { latitude: destLat, longitude: destLng }],
-        steps: [{ instruction: 'Head toward destination', distanceMiles: 2.4, street: 'Destination Route' }]
-      });
+    } catch {
+      return json({ error: 'Routing service is temporarily unavailable. Retry in a moment.' }, 502);
     }
   }
 
