@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {
-  BOUNTY_DEFAULTS, RANK_CURVE, bountyWindow, captureProgress, deterministicIndex,
-  frequencyForProgress, hunterWaveForStar, npcPosition, rankForRep, rewardForStar,
+  BOUNTY_DEFAULTS, CANONICAL_RARITIES, RANK_CURVE, bountyWindow, captureProgress, deterministicIndex,
+  frequencyForProgress, hunterWaveForStar, nextSerial, npcPosition, rankForRep, rankTrialEligible, rewardForStar,
   signalForDistance, starForElapsed,
 } from '../functions/lib/phase2-core.mjs';
 
@@ -41,6 +41,11 @@ assert.equal(rankForRep(150000), 'APEX');
 assert.equal(RANK_CURVE.every((row, index) => index === 0 || row[1] > RANK_CURVE[index - 1][1]), true);
 assert.equal(frequencyForProgress({ rank: 'GOLD', ghostStreak: 5, contracts: 2 }), 7);
 assert.equal(frequencyForProgress({ rank: 'MASTER', ghostStreak: 10, contracts: 5 }), 13);
+assert.equal(CANONICAL_RARITIES.join(','), 'COMMON,UNCOMMON,RARE,EPIC,LEGENDARY,GHOST,CLASSIFIED');
+assert.equal(nextSerial(7, [1, 4, 7]), 8);
+assert.equal(nextSerial(2, [9]), 10);
+assert.equal(rankTrialEligible({ rep: 30000, meets: 3, bounty: 1 }, { rep: 30000, meets: 3, bounty: 1 }), true);
+assert.equal(rankTrialEligible({ rep: 70000, districts: 3 }, { rep: 70000, districts: 2 }), false);
 
 const idempotencyKeys = new Set();
 const grant = key => !idempotencyKeys.has(key) && Boolean(idempotencyKeys.add(key));

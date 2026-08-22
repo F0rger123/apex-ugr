@@ -15,6 +15,8 @@ export const RANK_CURVE = Object.freeze([
   ['PLATINUM', 12000], ['DIAMOND', 30000], ['MASTER', 70000], ['APEX', 150000],
 ]);
 
+export const CANONICAL_RARITIES = Object.freeze(['COMMON', 'UNCOMMON', 'RARE', 'EPIC', 'LEGENDARY', 'GHOST', 'CLASSIFIED']);
+
 export function bountyWindow(nowMs, cadenceHours = BOUNTY_DEFAULTS.cadenceHours) {
   const cadenceMs = Math.max(1, cadenceHours) * 3600000;
   const startMs = Math.floor(nowMs / cadenceMs) * cadenceMs;
@@ -104,6 +106,14 @@ export function npcPosition(route, startedAtMs, nowMs, speedKph) {
 
 export function rankForRep(rep, curve = RANK_CURVE) {
   return [...curve].reverse().find(([, minimum]) => rep >= minimum)?.[0] || 'ROOKIE';
+}
+
+export function rankTrialEligible(requirements, metrics) {
+  return Object.entries(requirements || {}).every(([key, required]) => Number(metrics?.[key] || 0) >= Number(required));
+}
+
+export function nextSerial(quantityMinted, existingSerials = []) {
+  return Math.max(Number(quantityMinted || 0), ...existingSerials.map(Number).filter(Number.isFinite), 0) + 1;
 }
 
 export function frequencyForProgress({ rank, ghostStreak = 0, contracts = 0 }) {

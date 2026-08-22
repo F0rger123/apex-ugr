@@ -1,6 +1,21 @@
 -- Phase 2: scheduled Bounty world events, serialized cosmetics, trading,
 -- referrals, Ghost progression, milestones, and vehicle legacy.
 
+-- Trading makes repeat purchases legitimate after an item leaves an inventory.
+-- Preserve the full ledger while removing the legacy one-order-per-item limit.
+ALTER TABLE ghost_shop_orders RENAME TO ghost_shop_orders_legacy;
+CREATE TABLE ghost_shop_orders (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL REFERENCES ghost_shop_items(id) ON DELETE RESTRICT,
+  cost_gc INTEGER NOT NULL CHECK(cost_gc >= 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO ghost_shop_orders(id,user_id,item_id,cost_gc,created_at)
+  SELECT id,user_id,item_id,cost_gc,created_at FROM ghost_shop_orders_legacy;
+DROP TABLE ghost_shop_orders_legacy;
+CREATE INDEX idx_ghost_shop_orders_user ON ghost_shop_orders(user_id,created_at DESC);
+
 ALTER TABLE ghost_shop_items ADD COLUMN tradeable INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE ghost_shop_items ADD COLUMN supply_limit INTEGER;
 ALTER TABLE ghost_shop_items ADD COLUMN quantity_minted INTEGER NOT NULL DEFAULT 0;
@@ -177,6 +192,8 @@ CREATE TABLE IF NOT EXISTS ghost_trail_progress (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   current_stage INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','completed')),
+  anchor_latitude REAL,
+  anchor_longitude REAL,
   started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at TEXT,
   PRIMARY KEY(trail_id,user_id)
@@ -292,3 +309,7 @@ INSERT OR IGNORE INTO badges(id,name,description,icon,reward_credits,category) V
   ('signal-breaker','SIGNAL BREAKER','Complete a Ghost Trail.','radio',0,'ghost'),
   ('founding-driver','FOUNDING DRIVER','Early Apex network driver.','crown',0,'legacy'),
   ('founding-recruiter','FOUNDING RECRUITER','Qualify ten legitimate referrals.','users',0,'social');
+
+INSERT OR IGNORE INTO ghost_trails(id,title,stages_json,reward_gc,reward_item_id,required_frequency,is_active) VALUES
+  ('trail-echo-grid','ECHO GRID','[{"label":"ECHO 01","distanceMeters":260,"bearing":35,"radiusMeters":85},{"label":"ECHO 02","distanceMeters":620,"bearing":118,"radiusMeters":85},{"label":"ECHO 03","distanceMeters":940,"bearing":224,"radiusMeters":95},{"label":"FINAL SIGNAL","distanceMeters":420,"bearing":305,"radiusMeters":100}]',700,'nameplate-signal',1,1),
+  ('trail-black-frequency','BLACK FREQUENCY','[{"label":"BLACK 01","distanceMeters":480,"bearing":70,"radiusMeters":80},{"label":"BLACK 02","distanceMeters":1100,"bearing":160,"radiusMeters":90},{"label":"BLACK 03","distanceMeters":1500,"bearing":255,"radiusMeters":100}]',1300,'trail-blackout',7,1);

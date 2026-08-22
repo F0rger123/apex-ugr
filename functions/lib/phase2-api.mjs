@@ -1,7 +1,7 @@
 import {
   BOUNTY_DEFAULTS, bountyWindow, captureProgress, deterministicIndex, directionBetween,
-  frequencyForProgress, hunterWaveForStar, npcPosition, rewardForStar, signalForDistance,
-  starForElapsed,
+  frequencyForProgress, hunterWaveForStar, nextSerial, npcPosition, rewardForStar, signalForDistance,
+  starForElapsed, rankTrialEligible,
 } from './phase2-core.mjs';
 
 const headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
@@ -133,7 +133,14 @@ async function advanceEvent(env, event, cfg) {
     const closed = await env.DB.prepare(`UPDATE bounty_world_events SET status='escaped',completed_at=CURRENT_TIMESTAMP,reward_ledger_key=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='open'`).bind(`bounty:${event.id}:escape`, event.id).run();
     if (closed.meta.changes) {
       const target = await env.DB.prepare('SELECT * FROM bounty_actors WHERE id=?').bind(event.target_actor_id).first();
-      if (target?.user_id) await award(env, target.user_id, Number(event.reward_gc), Number(event.reward_rep), 'BOUNTY WORLD ESCAPE', event.id, `bounty:${event.id}:escape:${target.user_id}`);
+      if (target?.user_id) {
+        await award(env, target.user_id, Number(event.reward_gc), Number(event.reward_rep), 'BOUNTY WORLD ESCAPE', event.id, `bounty:${event.id}:escape:${target.user_id}`);
+        await env.DB.batch([
+          env.DB.prepare('UPDATE ghost_profiles SET bounty_escapes=bounty_escapes+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(target.user_id),
+          env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'survivor')").bind(target.user_id),
+          ...(Number(event.star_level) === 5 ? [env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'five-star-survivor')").bind(target.user_id)] : []),
+        ]);
+      }
       await env.DB.prepare(`UPDATE bounty_actors SET status='escaped' WHERE id=?`).bind(event.target_actor_id).run();
       await broadcast(env, 'bounty_escape', target?.user_id, `${target?.display_name || 'GHOST ZERO'} SURVIVED ${'★'.repeat(Number(event.star_level))}`, event.id);
     }
@@ -168,6 +175,118 @@ async function updateActorPositions(env, eventId, now) {
 
 async function broadcast(env, type, actorUserId, text, sourceKey) {
   await env.DB.prepare(`INSERT OR IGNORE INTO underground_broadcasts(id,event_type,actor_user_id,text,source_key,expires_at) VALUES(?,?,?,?,?,datetime('now','+24 hours'))`).bind(crypto.randomUUID(), type, actorUserId || null, text, sourceKey).run();
+}
+
+export async function grantCosmeticDrop(env, userId, itemId, sourceType, sourceId) {
+  const existingDrop = await env.DB.prepare(`SELECT d.instance_id,i.serial_number FROM cosmetic_drops d
+    LEFT JOIN cosmetic_instances i ON i.id=d.instance_id
+    WHERE d.user_id=? AND d.source_type=? AND d.source_id=? AND d.item_id=?`)
+    .bind(userId, sourceType, sourceId, itemId).first();
+  if (existingDrop?.instance_id) {
+    return { itemId, instanceId: existingDrop.instance_id, serialNumber: Number(existingDrop.serial_number || 0), replayed: true };
+  }
+  const item = await env.DB.prepare('SELECT id,supply_limit,quantity_minted FROM ghost_shop_items WHERE id=?').bind(itemId).first();
+  if (!item) return null;
+  const owned = await env.DB.prepare('SELECT 1 found FROM ghost_inventory WHERE user_id=? AND item_id=?').bind(userId, itemId).first();
+  if (owned || (item.supply_limit != null && Number(item.quantity_minted) >= Number(item.supply_limit))) return null;
+  const serialRow = await env.DB.prepare('SELECT MAX(serial_number) max_serial FROM cosmetic_instances WHERE item_id=?').bind(itemId).first();
+  const dropId = crypto.randomUUID(), instanceId = crypto.randomUUID(), serial = nextSerial(item.quantity_minted, [serialRow?.max_serial]);
+  const results = await env.DB.batch([
+    env.DB.prepare('UPDATE ghost_shop_items SET quantity_minted=MAX(quantity_minted+1,?) WHERE id=? AND (supply_limit IS NULL OR quantity_minted<supply_limit)').bind(serial, itemId),
+    env.DB.prepare(`INSERT OR IGNORE INTO cosmetic_instances(id,item_id,owner_user_id,serial_number,acquired_source) VALUES(?,?,?,?,?)`).bind(instanceId, itemId, userId, serial, sourceType),
+    env.DB.prepare(`INSERT OR IGNORE INTO cosmetic_drops(id,user_id,item_id,source_type,source_id,status,instance_id,claimed_at) VALUES(?,?,?,?,?,'claimed',?,CURRENT_TIMESTAMP)`).bind(dropId, userId, itemId, sourceType, sourceId, instanceId),
+    env.DB.prepare(`INSERT OR IGNORE INTO ghost_inventory(user_id,item_id,acquired_source,purchase_price_gc) VALUES(?,?,?,0)`).bind(userId, itemId, sourceType),
+  ]);
+  if (!results[2].meta.changes) return null;
+  return { itemId, instanceId, serialNumber: serial };
+}
+
+export async function grantGhostKey(env, userId, amount, source, sourceId) {
+  const inserted = await env.DB.prepare('INSERT OR IGNORE INTO ghost_key_transactions(id,user_id,amount,source,source_id) VALUES(?,?,?,?,?)').bind(crypto.randomUUID(), userId, amount, source, sourceId).run();
+  if (!inserted.meta.changes) return false;
+  await env.DB.prepare(`INSERT INTO ghost_keys(user_id,balance,lifetime_earned) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=balance+excluded.balance,lifetime_earned=lifetime_earned+excluded.lifetime_earned,updated_at=CURRENT_TIMESTAMP`).bind(userId, amount, Math.max(0, amount)).run();
+  return true;
+}
+
+async function finalizeTrail(env, user, trail) {
+  const reward = await award(env, user.id, Number(trail.reward_gc || 0), 350, 'GHOST TRAIL', trail.id, `trail:${trail.id}:${user.id}`);
+  await grantGhostKey(env, user.id, 1, 'GHOST TRAIL', trail.id);
+  const cosmetic = trail.reward_item_id ? await grantCosmeticDrop(env, user.id, trail.reward_item_id, 'ghost_trail', trail.id) : null;
+  const progressClaim = await env.DB.prepare(`INSERT OR IGNORE INTO economy_reward_claims(reward_key,user_id,amount_gc,amount_rep,source,source_id)
+    VALUES(?,?,0,0,'GHOST TRAIL PROGRESS',?)`).bind(`trail-progress:${trail.id}:${user.id}`, user.id, trail.id).run();
+  await env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'signal-breaker')").bind(user.id).run();
+  if (progressClaim.meta.changes) await env.DB.prepare('UPDATE ghost_profiles SET current_streak=current_streak+1,best_streak=MAX(best_streak,current_streak+1),activities_completed=activities_completed+1,trails_completed=trails_completed+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(user.id).run();
+  await broadcast(env, 'ghost_trail', user.id, `${user.username} BROKE ${trail.title}`, `trail:${trail.id}:${user.id}`);
+  return { reward, cosmetic };
+}
+
+async function synchronizeProgression(env, userId) {
+  await env.DB.prepare('INSERT OR IGNORE INTO ghost_profiles(user_id) VALUES(?)').bind(userId).run();
+  const [user, discoveries, dropClaims, safeHouses, contracts, meets, hosted, traces, vehicles, performance, referrals, trailsCompleted, bounty] = await Promise.all([
+    env.DB.prepare('SELECT created_at,points,tier FROM users WHERE id=?').bind(userId).first(),
+    env.DB.prepare(`SELECT 'DISTRICT '||CAST(latitude*10 AS INTEGER)||':'||CAST(longitude*10 AS INTEGER) district_name,COUNT(*) roads FROM map_discoveries WHERE user_id=? GROUP BY CAST(latitude*10 AS INTEGER),CAST(longitude*10 AS INTEGER)`).bind(userId).all(),
+    env.DB.prepare('SELECT COUNT(*) count FROM dead_drop_claims WHERE user_id=?').bind(userId).first(),
+    env.DB.prepare('SELECT COUNT(*) count FROM safe_houses WHERE user_id=?').bind(userId).first(),
+    env.DB.prepare(`SELECT COUNT(*) count FROM contract_progress WHERE user_id=? AND status='completed'`).bind(userId).first(),
+    env.DB.prepare('SELECT COUNT(*) count FROM meet_checkins WHERE user_id=?').bind(userId).first(),
+    env.DB.prepare('SELECT COUNT(*) count FROM events WHERE host_id=?').bind(userId).first(),
+    env.DB.prepare('SELECT session_id,latitude,longitude,captured_at FROM drive_trace_points WHERE user_id=? ORDER BY session_id,captured_at LIMIT 5000').bind(userId).all(),
+    env.DB.prepare('SELECT id,is_active FROM vehicles WHERE user_id=? ORDER BY is_active DESC,created_at LIMIT 20').bind(userId).all(),
+    env.DB.prepare(`SELECT vehicle_id,MIN(CASE WHEN run_type='0-60' THEN result_seconds END) best_zero_sixty,COUNT(*) count FROM personal_performance_records WHERE user_id=? GROUP BY vehicle_id`).bind(userId).all(),
+    env.DB.prepare('SELECT COUNT(*) count FROM referrals WHERE referrer_user_id=? AND qualified_at IS NOT NULL').bind(userId).first(),
+    env.DB.prepare(`SELECT COUNT(*) count FROM ghost_trail_progress WHERE user_id=? AND status='completed'`).bind(userId).first(),
+    env.DB.prepare('SELECT bounty_claims claims,bounty_escapes escapes FROM ghost_profiles WHERE user_id=?').bind(userId).first(),
+  ]);
+  const districtRows = discoveries.results || [];
+  const districtProgress = [];
+  for (const row of districtRows) {
+    const districtId = `district-${deterministicIndex(String(row.district_name).toUpperCase(), 2147483647)}`;
+    const roads = Number(row.roads || 0), total = 25;
+    const state = roads >= total ? 'MASTERED' : roads >= 8 ? 'EXPLORED' : roads > 0 ? 'DETECTED' : 'UNKNOWN';
+    await env.DB.batch([
+      env.DB.prepare(`INSERT OR IGNORE INTO districts(id,name,region_code,total_road_cells) VALUES(?,?,?,?)`).bind(districtId, row.district_name, 'LOCAL', total),
+      env.DB.prepare(`INSERT INTO district_user_progress(district_id,user_id,roads_explored,caches_claimed,safe_houses_found,contracts_completed,meets_attended,trails_completed,state)
+        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(district_id,user_id) DO UPDATE SET roads_explored=excluded.roads_explored,caches_claimed=excluded.caches_claimed,safe_houses_found=excluded.safe_houses_found,contracts_completed=excluded.contracts_completed,meets_attended=excluded.meets_attended,trails_completed=excluded.trails_completed,state=excluded.state,updated_at=CURRENT_TIMESTAMP`)
+        .bind(districtId, userId, roads, Number(dropClaims?.count || 0), Number(safeHouses?.count || 0), Number(contracts?.count || 0), Number(meets?.count || 0), Number(trailsCompleted?.count || 0), state),
+    ]);
+    const existing = await env.DB.prepare('SELECT mastery_rewarded_at FROM district_user_progress WHERE district_id=? AND user_id=?').bind(districtId, userId).first();
+    if (state === 'MASTERED' && !existing?.mastery_rewarded_at) {
+      const reward = await award(env, userId, 500, 500, 'DISTRICT MASTERY', districtId, `district:${districtId}:${userId}`);
+      if (reward.awarded) await env.DB.prepare('UPDATE district_user_progress SET mastery_rewarded_at=CURRENT_TIMESTAMP WHERE district_id=? AND user_id=?').bind(districtId, userId).run();
+    }
+    districtProgress.push({ id: districtId, name: row.district_name, roadsExplored: roads, totalRoadCells: total, percent: Math.min(100, Math.round(roads / total * 100)), state });
+  }
+  const points = traces.results || [];
+  let totalMeters = 0;
+  for (let index = 1; index < points.length; index++) if (points[index - 1].session_id === points[index].session_id) totalMeters += meters(points[index - 1], points[index]);
+  const miles = totalMeters / 1609.344;
+  const perfByVehicle = new Map((performance.results || []).map(row => [row.vehicle_id, row]));
+  for (const vehicle of vehicles.results || []) {
+    const perf = perfByVehicle.get(vehicle.id);
+    const title = miles >= 1000 ? 'DISTRICT MASTER' : Number(bounty?.escapes || 0) ? 'SURVIVOR' : miles >= 100 ? 'NIGHT RUNNER' : null;
+    await env.DB.prepare(`INSERT INTO vehicle_legacy_stats(vehicle_id,apex_miles,meets,bounty_escapes,best_zero_sixty,title) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(vehicle_id) DO UPDATE SET apex_miles=excluded.apex_miles,meets=excluded.meets,bounty_escapes=excluded.bounty_escapes,best_zero_sixty=excluded.best_zero_sixty,title=excluded.title,updated_at=CURRENT_TIMESTAMP`)
+      .bind(vehicle.id, vehicle.is_active ? miles : 0, Number(meets?.count || 0), Number(bounty?.escapes || 0), perf?.best_zero_sixty || null, title).run();
+  }
+  const milestones = [
+    ['joined-apex', true, null], ['first-drive', points.length > 0, miles], ['100-miles', miles >= 100, miles], ['500-miles', miles >= 500, miles],
+    ['1000-miles', miles >= 1000, miles], ['5000-miles', miles >= 5000, miles], ['first-cache', Number(dropClaims?.count || 0) > 0, dropClaims?.count],
+    ['first-safe-house', Number(safeHouses?.count || 0) > 0, safeHouses?.count], ['first-meet', Number(meets?.count || 0) > 0, meets?.count],
+    ['first-bounty', Number(bounty?.claims || 0) + Number(bounty?.escapes || 0) > 0, 1], ['first-pb', Number(performance.results?.length || 0) > 0, 1],
+  ];
+  for (const [key, earned, value] of milestones) if (earned) await env.DB.prepare('INSERT OR IGNORE INTO driver_milestones(user_id,milestone_key,value_number) VALUES(?,?,?)').bind(userId, key, value).run();
+  const qualifiedReferrals = Number(referrals?.count || 0);
+  if (qualifiedReferrals >= 3) await grantCosmeticDrop(env, userId, 'banner-ghost-network', 'referral', 'milestone-3');
+  if (qualifiedReferrals >= 5) await grantCosmeticDrop(env, userId, 'frame-ghost-signal', 'referral', 'milestone-5');
+  if (qualifiedReferrals >= 10) await env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'founding-recruiter')").bind(userId).run();
+  const [trialRows, listRows] = await Promise.all([
+    env.DB.prepare('SELECT rank,requirements_json,enabled FROM rank_trials ORDER BY CASE rank WHEN \'DIAMOND\' THEN 1 WHEN \'MASTER\' THEN 2 ELSE 3 END').all(),
+    env.DB.prepare(`SELECT u.id,u.username,u.display_name,u.points,u.tier,COALESCE(g.bounty_claims,0) bounty_claims,COALESCE(g.bounty_escapes,0) bounty_escapes,COALESCE(g.activities_completed,0) ghost_activity
+      FROM users u LEFT JOIN ghost_profiles g ON g.user_id=u.id ORDER BY u.points DESC,u.wins DESC LIMIT 20`).all(),
+  ]);
+  const trialMetrics = { rep: Number(user?.points || 0), meets: Number(meets?.count || 0), bounty: Number(bounty?.claims || 0) + Number(bounty?.escapes || 0), districts: districtProgress.filter(row => row.state === 'MASTERED').length, performance: Number(performance.results?.length || 0) };
+  const trials = (trialRows.results || []).map(row => { const requirements = parseJson(row.requirements_json, {}); return { rank: row.rank, requirements, eligible: Boolean(row.enabled) && rankTrialEligible(requirements, trialMetrics), metrics: trialMetrics }; });
+  return { districts: districtProgress, trials, list: listRows.results, referralMilestones: [{ count: 1, reward: '350 GC', achieved: qualifiedReferrals >= 1 }, { count: 3, reward: 'GHOST NETWORK BANNER', achieved: qualifiedReferrals >= 3 }, { count: 5, reward: 'GHOST SIGNAL FRAME', achieved: qualifiedReferrals >= 5 }, { count: 10, reward: 'FOUNDING RECRUITER', achieved: qualifiedReferrals >= 10 }] };
 }
 
 async function eventPayload(env, user, event, cfg, window) {
@@ -215,7 +334,8 @@ function meters(a, b) {
 }
 
 async function progression(env, userId) {
-  const [user, ghost, contracts, keys, frequency, milestones, vehicleLegacy, broadcasts] = await Promise.all([
+  const connected = await synchronizeProgression(env, userId);
+  const [user, ghost, contracts, keys, frequency, milestones, vehicleLegacy, broadcasts, trails] = await Promise.all([
     env.DB.prepare('SELECT points,tier FROM users WHERE id=?').bind(userId).first(),
     env.DB.prepare('SELECT * FROM ghost_profiles WHERE user_id=?').bind(userId).first(),
     env.DB.prepare(`SELECT COUNT(*) count FROM contract_progress WHERE user_id=? AND status='completed'`).bind(userId).first(),
@@ -224,10 +344,27 @@ async function progression(env, userId) {
     env.DB.prepare('SELECT * FROM driver_milestones WHERE user_id=? ORDER BY earned_at DESC').bind(userId).all(),
     env.DB.prepare(`SELECT l.*,v.nickname,v.year,v.make,v.model FROM vehicle_legacy_stats l JOIN vehicles v ON v.id=l.vehicle_id WHERE v.user_id=? ORDER BY l.apex_miles DESC`).bind(userId).all(),
     env.DB.prepare(`SELECT * FROM underground_broadcasts WHERE expires_at IS NULL OR expires_at>? ORDER BY occurred_at DESC LIMIT 20`).bind(new Date().toISOString()).all(),
+    trailState(env, userId),
   ]);
   const unlocked = frequencyForProgress({ rank: String(user?.tier || 'ROOKIE').toUpperCase(), ghostStreak: Number(ghost?.current_streak || 0), contracts: Number(contracts?.count || 0) });
   await env.DB.prepare(`INSERT INTO ghost_frequency_progress(user_id,unlocked_level,active_level) VALUES(?,?,1) ON CONFLICT(user_id) DO UPDATE SET unlocked_level=MAX(unlocked_level,excluded.unlocked_level),updated_at=CURRENT_TIMESTAMP`).bind(userId, unlocked).run();
-  return { keys: Number(keys?.balance || 0), frequency: { unlockedLevel: Math.max(unlocked, Number(frequency?.unlocked_level || 1)), activeLevel: Number(frequency?.active_level || 1) }, milestones: milestones.results, vehicleLegacy: vehicleLegacy.results, broadcasts: broadcasts.results };
+  return { keys: Number(keys?.balance || 0), frequency: { unlockedLevel: Math.max(unlocked, Number(frequency?.unlocked_level || 1)), activeLevel: Number(frequency?.active_level || 1) }, milestones: milestones.results, vehicleLegacy: vehicleLegacy.results, broadcasts: broadcasts.results, trails, ...connected };
+}
+
+async function trailState(env, userId) {
+  const [rows, location, frequency] = await Promise.all([
+    env.DB.prepare(`SELECT t.*,p.current_stage,p.status progress_status,p.anchor_latitude,p.anchor_longitude,p.started_at,p.completed_at
+      FROM ghost_trails t LEFT JOIN ghost_trail_progress p ON p.trail_id=t.id AND p.user_id=?
+      WHERE t.is_active=1 AND (t.active_from IS NULL OR t.active_from<=?) AND (t.active_until IS NULL OR t.active_until>?) ORDER BY t.required_frequency,t.title`).bind(userId, new Date().toISOString(), new Date().toISOString()).all(),
+    env.DB.prepare('SELECT latitude,longitude,accuracy_m,expires_at FROM driver_locations WHERE user_id=?').bind(userId).first(),
+    env.DB.prepare('SELECT unlocked_level FROM ghost_frequency_progress WHERE user_id=?').bind(userId).first(),
+  ]);
+  return (rows.results || []).map(row => {
+    const stages = parseJson(row.stages_json, []), currentStage = Number(row.current_stage || 0), anchor = row.anchor_latitude != null ? row : location;
+    const stage = stages[currentStage];
+    const target = anchor && stage ? destinationPoint(Number(anchor.anchor_latitude ?? anchor.latitude), Number(anchor.anchor_longitude ?? anchor.longitude), Number(stage.distanceMeters), Number(stage.bearing)) : null;
+    return { id: row.id, title: row.title, rewardGc: Number(row.reward_gc), rewardItemId: row.reward_item_id, requiredFrequency: Number(row.required_frequency), eligible: Number(frequency?.unlocked_level || 1) >= Number(row.required_frequency), status: row.progress_status || 'available', currentStage, totalStages: stages.length, stage: stage ? { index: currentStage + 1, label: stage.label, radiusMeters: Number(stage.radiusMeters), ...(row.progress_status === 'active' && target ? target : {}) } : null };
+  });
 }
 
 async function referralState(env, user) {
@@ -321,10 +458,47 @@ export async function handlePhase2({ request, env, user, path, method }) {
     await env.DB.batch([
       env.DB.prepare(`UPDATE bounty_actors SET status='captured' WHERE id=?`).bind(target.id),
       env.DB.prepare(`UPDATE bounty_actors SET status=CASE WHEN id=? THEN 'active' ELSE 'left' END WHERE event_id=? AND role='hunter'`).bind(actor.id, eventId),
+      env.DB.prepare('UPDATE ghost_profiles SET bounty_claims=bounty_claims+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(user.id),
       env.DB.prepare(`INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'bounty-hunter')`).bind(user.id),
+      ...(Number(event.star_level) === 5 ? [env.DB.prepare(`INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'five-star-hunter')`).bind(user.id)] : []),
     ]);
     await broadcast(env, 'bounty_capture', user.id, `${user.username} CAPTURED ${target.display_name} // ${'★'.repeat(Number(event.star_level))}`, eventId);
     return response({ captured: true, rewardGc: event.reward_gc, rewardRep: event.reward_rep, reward });
+  }
+
+  if (path === 'ghost/trails' && method === 'GET') return response({ trails: await trailState(env, user.id) });
+  const trailAction = path.match(/^ghost\/trails\/([^/]+)\/progress$/);
+  if (trailAction && method === 'POST') {
+    const trail = await env.DB.prepare(`SELECT * FROM ghost_trails WHERE id=? AND is_active=1 AND (active_from IS NULL OR active_from<=?) AND (active_until IS NULL OR active_until>?)`).bind(trailAction[1], new Date().toISOString(), new Date().toISOString()).first();
+    if (!trail) return response({ error: 'This Ghost Trail signal is unavailable.' }, 404);
+    const [frequency, location] = await Promise.all([
+      env.DB.prepare('SELECT unlocked_level FROM ghost_frequency_progress WHERE user_id=?').bind(user.id).first(),
+      env.DB.prepare('SELECT latitude,longitude,accuracy_m,expires_at FROM driver_locations WHERE user_id=?').bind(user.id).first(),
+    ]);
+    if (Number(frequency?.unlocked_level || 1) < Number(trail.required_frequency)) return response({ error: `Requires FREQ ${String(trail.required_frequency).padStart(2, '0')}.` }, 403);
+    if (!location || parseTime(location.expires_at) <= Date.now()) return response({ error: 'Lock a fresh location before decrypting this trail.' }, 409);
+    let progress = await env.DB.prepare('SELECT * FROM ghost_trail_progress WHERE trail_id=? AND user_id=?').bind(trail.id, user.id).first();
+    if (!progress) {
+      await env.DB.prepare(`INSERT INTO ghost_trail_progress(trail_id,user_id,current_stage,status,anchor_latitude,anchor_longitude) VALUES(?,?,0,'active',?,?)`).bind(trail.id, user.id, location.latitude, location.longitude).run();
+      return response({ started: true, trails: await trailState(env, user.id) });
+    }
+    if (progress.status === 'completed') {
+      const finalized = await finalizeTrail(env, user, trail);
+      return response({ completed: true, replayed: true, rewardGc: Number(trail.reward_gc || 0), ghostKeys: 1, cosmetic: finalized.cosmetic, trails: await trailState(env, user.id) });
+    }
+    const stages = parseJson(trail.stages_json, []), stage = stages[Number(progress.current_stage || 0)];
+    if (!stage) return response({ error: 'Trail stage data is invalid.' }, 500);
+    const target = destinationPoint(Number(progress.anchor_latitude), Number(progress.anchor_longitude), Number(stage.distanceMeters), Number(stage.bearing));
+    const distance = meters(location, target), tolerance = Number(stage.radiusMeters || 80) + Math.min(35, Number(location.accuracy_m || 0));
+    if (distance > tolerance) return response({ error: 'Signal is outside decrypt range.', distanceMeters: Math.round(distance), target });
+    const nextStage = Number(progress.current_stage || 0) + 1, completed = nextStage >= stages.length;
+    const updated = await env.DB.prepare(`UPDATE ghost_trail_progress SET current_stage=?,status=?,completed_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE completed_at END WHERE trail_id=? AND user_id=? AND status='active'`).bind(nextStage, completed ? 'completed' : 'active', completed ? 1 : 0, trail.id, user.id).run();
+    if (!updated.meta.changes) return response({ error: 'Trail state changed. Refresh the signal.' }, 409);
+    if (completed) {
+      const finalized = await finalizeTrail(env, user, trail);
+      return response({ completed: true, rewardGc: Number(trail.reward_gc || 0), ghostKeys: 1, cosmetic: finalized.cosmetic, trails: await trailState(env, user.id) });
+    }
+    return response({ advanced: true, currentStage: nextStage, trails: await trailState(env, user.id) });
   }
 
   if (path === 'ghost/frequency' && method === 'PUT') {
