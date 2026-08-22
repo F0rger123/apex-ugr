@@ -139,11 +139,12 @@ interface Driver {
 }
 
 const tabs: { key: TabKey; label: string; icon: IconType }[] = [
-  { key: 'command', label: 'COMMAND', icon: Activity },
-  { key: 'radar', label: 'RADAR', icon: Crosshair },
-  { key: 'feed', label: 'FEED', icon: Play },
+  { key: 'command', label: 'HUD', icon: Activity },
   { key: 'garage', label: 'GARAGE', icon: CarFront },
-  { key: 'more', label: 'MORE', icon: MoreHorizontal },
+  { key: 'radar', label: 'RADAR', icon: Crosshair },
+  { key: 'race', label: 'RACE', icon: Swords },
+  { key: 'shop', label: 'SHOP', icon: ShoppingBag },
+  { key: 'feed', label: 'SOCIAL', icon: Users },
 ];
 
 const rankColors: Record<Driver['rank'], string> = {
@@ -1410,7 +1411,7 @@ export function ApexDesignPreview() {
           <BlurView intensity={42} tint="dark" style={styles.tabBar}>
             {tabs.map(item => {
               const Icon = item.icon;
-              const activeTab = tab === item.key || (item.key === 'more' && ['race', 'vault', 'shop', 'meets', 'messages', 'leaderboard','access','world'].includes(tab));
+              const activeTab = tab === item.key || (item.key === 'command' && ['vault', 'leaderboard', 'access', 'world', 'more'].includes(tab)) || (item.key === 'radar' && ['meets'].includes(tab)) || (item.key === 'feed' && ['messages'].includes(tab));
               return (
                 <Pressable key={item.key} onPress={() => {playInterfaceSound();setTab(item.key);}} style={styles.tabItem}>
                   <View style={[styles.tabIcon, activeTab && styles.tabIconActive]}><Icon size={19} color={activeTab ? accent : muted} strokeWidth={2.1} /></View>
