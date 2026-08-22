@@ -44,6 +44,7 @@
       "bundler": "metro",
       "name": "Apex UGR",
       "shortName": "Apex UGR",
+      "favicon": "./assets/apex-app-icon.png",
       "themeColor": "#010201",
       "backgroundColor": "#010201"
     },
