@@ -45,20 +45,34 @@ jobs:
 
       - run: npm ci
 
+      - name: Quality gate
+        run: |
+          npm run type-check
+          npm run build
+          npx wrangler pages functions build functions --outdir .wrangler/functions-build
+          node scripts/navigationSimulation.mjs
+
       - name: Build the installable APK
         run: eas build --platform android --profile preview --non-interactive --wait --json > build.json
 
-      - name: Point the stable download route at this build
+      - name: Download and identify the verified APK
         id: apk
         run: |
-          APK_URL="$(node -e "const build=require('./build.json'); process.stdout.write(build.artifacts.buildUrl)")"
-          node scripts/setAndroidBuildUrl.mjs "$APK_URL"
-          echo "url=$APK_URL" >> "$GITHUB_OUTPUT"
+          APK_URL="$(node -e "const raw=require('./build.json'); const build=Array.isArray(raw)?raw[0]:raw; process.stdout.write(build.artifacts.buildUrl)")"
+          BUILD_VERSION="$(node -e "const raw=require('./build.json'); const build=Array.isArray(raw)?raw[0]:raw; process.stdout.write(String(build.appBuildVersion || 'unknown'))")"
+          APP_VERSION="$(node -e "const app=require('./app.json'); process.stdout.write(app.expo.version)")"
+          curl --fail --location --retry 3 "$APK_URL" --output apex-ugr.apk
+          test -s apex-ugr.apk
+          sha256sum apex-ugr.apk
+          echo "build_version=$BUILD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Publish the new stable download target
+      - name: Publish immutable release with stable latest asset
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- 'functions/api/[[path]].ts'
-          git commit -m "chore: publish Android APK"
-          git push
+          TAG="android-v${{ steps.apk.outputs.app_version }}-b${{ steps.apk.outputs.build_version }}-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" apex-ugr.apk#apex-ugr.apk \
+            --title "Apex UGR Android ${{ steps.apk.outputs.app_version }} (${{ steps.apk.outputs.build_version }})" \
+            --notes "Commit: ${GITHUB_SHA}\nBuild date: $(date -u +%Y-%m-%dT%H:%M:%SZ)\nSource: ${GITHUB_REPOSITORY}@${GITHUB_SHA}" \
+            --latest

@@ -21,11 +21,16 @@ const cors = {
 };
 
 const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
-const ROOT_ACCESS_CODE = '081926';
-const ANDROID_PREVIEW_URL = 'https://expo.dev/artifacts/eas/07nbhcNY_ylvLX7IZJOx29s6y7UkhTsfdaopPpgZNaQ.apk';
+const ROOT_ACCESS_CODE_HASH = '99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718';
+const ANDROID_RELEASE_URL = 'https://github.com/F0rger123/apex-ugr/releases/latest/download/apex-ugr.apk';
 
 function normalizeInviteCode(value: string) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+async function isRootAccessCode(value:string){
+  const normalized=normalizeInviteCode(value);
+  return Boolean(normalized)&&await sha256Hex(normalized)===ROOT_ACCESS_CODE_HASH;
 }
 
 function createInviteCode() {
@@ -228,7 +233,7 @@ async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === 'OPTIONS') return new Response(null, { headers: cors });
   if (path === 'health') return json({ status: 'live', backend: 'cloudflare', storage: 'd1+r2' });
-  if(path==='download/android'&&method==='GET')return Response.redirect(ANDROID_PREVIEW_URL,302);
+  if(path==='download/android'&&method==='GET')return Response.redirect(ANDROID_RELEASE_URL,302);
   if (path.startsWith('media/') && method === 'GET') {
     const key=decodeURIComponent(path.slice(6));
     const object=await env.MEDIA.get(key);
@@ -239,7 +244,7 @@ async function handle(request: Request, env: Env, path: string) {
 
   if(path==='invite/verify'&&method==='POST'){
     const body=await request.json<{code?:string}>();const code=normalizeInviteCode(body.code||'');
-    if(code===ROOT_ACCESS_CODE)return json({valid:true,label:'APEX ROOT ACCESS',remaining:9999,expiresAt:null});
+    if(await isRootAccessCode(code))return json({valid:true,label:'APEX ROOT ACCESS',remaining:9999,expiresAt:null});
     const invite=await env.DB.prepare(`SELECT label,max_uses,use_count,expires_at FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{label:string;max_uses:number;use_count:number;expires_at:string|null}>();
     if(!invite)return json({error:'Access code is invalid, expired, or fully redeemed.'},404);
     return json({valid:true,label:invite.label,remaining:invite.max_uses-invite.use_count,expiresAt:invite.expires_at});
@@ -267,7 +272,7 @@ async function handle(request: Request, env: Env, path: string) {
     const existing=await env.DB.prepare('SELECT 1 found FROM users WHERE email=?').bind(email).first();
     if(existing)return json({error:'An account already exists for that email. Sign in instead or use another email.'},409);
     let invite:{id:string;burn_after_use:number}|null=null;
-    if(email!==DEVELOPER_EMAIL&&normalizeInviteCode(body.inviteCode||'')!==ROOT_ACCESS_CODE){
+    if(email!==DEVELOPER_EMAIL&&!await isRootAccessCode(body.inviteCode||'')){
       const code=normalizeInviteCode(body.inviteCode||'');
       invite=await env.DB.prepare(`SELECT id,burn_after_use FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{id:string;burn_after_use:number}>();
       if(!invite)return json({error:'A valid private access code is required.'},403);

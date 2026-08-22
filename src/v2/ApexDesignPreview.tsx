@@ -12,6 +12,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  Switch,
   StyleSheet,
   Text,
   TextInput,
@@ -24,13 +25,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import Slider from '@react-native-community/slider';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLiveNetworkStore, LiveDriver, LiveEvent } from './live/liveNetworkStore';
 import { useContentStore } from './live/contentStore';
 import {useWorldStore,DeadDrop,RoadReport,Territory,MapReward,GhostReplay,SafeHouse} from './live/worldStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useMessageStore } from '../stores/messageStore';
 import { cloudflareApi, hasCloudflareBackend } from '../config/cloudflareApi';
-import {playEngineSound,playInterfaceSound} from '../utils/soundSynthesizer';
+import {playEngineSound,playInterfaceSound,setInterfaceAudioEnabled} from '../utils/soundSynthesizer';
 import {
   Activity,
   BadgeCheck,
@@ -68,6 +70,7 @@ import {
   ScanLine,
   Send,
   ShieldCheck,
+  Settings,
   ShoppingBag,
   Sparkles,
   Star,
@@ -82,8 +85,10 @@ import {
   Zap,
 } from 'lucide-react-native';
 
-const hapticTick=()=>{if(Platform.OS!=='web')void Haptics.selectionAsync().catch(()=>undefined);};
-const hapticResult=(kind:'success'|'error')=>{if(Platform.OS!=='web')void Haptics.notificationAsync(kind==='success'?Haptics.NotificationFeedbackType.Success:Haptics.NotificationFeedbackType.Error).catch(()=>undefined);};
+let hapticsEnabled=true;
+const setHapticsEnabled=(enabled:boolean)=>{hapticsEnabled=enabled;};
+const hapticTick=()=>{if(hapticsEnabled&&Platform.OS!=='web')void Haptics.selectionAsync().catch(()=>undefined);};
+const hapticResult=(kind:'success'|'error')=>{if(hapticsEnabled&&Platform.OS!=='web')void Haptics.notificationAsync(kind==='success'?Haptics.NotificationFeedbackType.Success:Haptics.NotificationFeedbackType.Error).catch(()=>undefined);};
 
 const accent = '#A7E59A';
 const paper = '#F7F9F7';
@@ -91,7 +96,9 @@ const muted = '#929B95';
 const surface = 'rgba(4, 8, 5, 0.86)';
 const border = 'rgba(255, 255, 255, 0.16)';
 const { width: screenWidth } = Dimensions.get('window');
-const ANDROID_DOWNLOAD_URL='/api/download/android';
+const ANDROID_DOWNLOAD_URL='https://github.com/F0rger123/apex-ugr/releases/latest/download/apex-ugr.apk';
+const APP_VERSION='1.2.0';
+const ANDROID_VERSION_CODE=10;
 const SCRAMBLE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%&';
 
 let NativeMap: any = null;
@@ -106,13 +113,13 @@ if (Platform.OS !== 'web') {
   NativePolyline = maps.Polyline;
 }
 
-type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard' | 'access' | 'world';
+type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'meets' | 'messages' | 'leaderboard' | 'access' | 'settings' | 'world';
 type IconType = any;
 
 const tabPaths:Record<TabKey,string>={
   command:'/app/command',radar:'/app/radar',feed:'/app/feed',garage:'/app/garage',more:'/app/more',
   race:'/app/competition/races',vault:'/app/rewards/vault',shop:'/app/shop',meets:'/app/events/meets',
-  messages:'/app/social/messages',leaderboard:'/app/competition/leaderboards',access:'/app/settings/access',world:'/app/world',
+  messages:'/app/social/messages',leaderboard:'/app/competition/leaderboards',access:'/app/settings/access',settings:'/app/settings',world:'/app/world',
 };
 const pathTabs=Object.entries(tabPaths).reduce<Record<string,TabKey>>((routes,[tab,path])=>({...routes,[path]:tab as TabKey}),{});
 function routeState(){
@@ -215,7 +222,7 @@ function VaporStory(){
 
 function AndroidDownloadButton(){
   const download=()=>void Linking.openURL(ANDROID_DOWNLOAD_URL);
-  return <Pressable onPress={download} style={styles.androidDownload}><View style={styles.androidDownloadIcon}><PackageCheck size={19} color={paper}/></View><View style={{flex:1}}><Text style={styles.androidDownloadTitle}>DOWNLOAD ANDROID TEST BUILD</Text><Text style={styles.androidDownloadMeta}>DIRECT APK · INSTALL ON A PHONE</Text></View><ChevronRight size={17} color={muted}/></Pressable>;
+  return <Pressable onPress={download} style={styles.androidDownload}><View style={styles.androidDownloadIcon}><PackageCheck size={19} color={paper}/></View><View style={{flex:1}}><Text style={styles.androidDownloadTitle}>DOWNLOAD ANDROID APK</Text><Text style={styles.androidDownloadMeta}>LATEST VERIFIED RELEASE · STABLE LINK</Text></View><ChevronRight size={17} color={muted}/></Pressable>;
 }
 
 function PlayTransition({carName,carImage,onComplete}:{carName:string;carImage?:string|null;onComplete:()=>void}){
@@ -831,6 +838,20 @@ function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.moreHeader}><Text style={styles.eyebrow}>PILOT SYSTEMS</Text><Text style={styles.feedTitle}>ACCESS GRID</Text><Text style={styles.moreCopy}>All network tools. One encrypted identity.</Text></View><View style={styles.moduleGrid}>{modules.map(module => { const Icon = module.icon; return <Pressable key={module.tab} onPress={() => onTab(module.tab)} style={({ pressed }) => [styles.moduleCard, pressed && styles.pressed]}><View style={styles.moduleIcon}><Icon size={23} color={accent} /></View><Text style={styles.moduleTitle}>{module.label}</Text><Text style={styles.moduleMeta}>{module.meta}</Text><ChevronRight size={17} color={muted} style={styles.moduleChevron} /></Pressable>; })}</View><SectionTitle label="NETWORK HEALTH" /><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>GPS PROOF</Text><Text style={location ? styles.healthGood : styles.healthOffline}>{location ? 'LOCKED' : 'NOT GRANTED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>ENCRYPTED COMMS</Text><Text style={userId ? styles.healthGood : styles.healthOffline}>{userId ? 'LIVE' : 'SIGN IN REQUIRED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>LIVE NETWORK</Text><Text style={networkStatus === 'live' ? styles.healthGood : styles.healthOffline}>{networkStatus.replace('_', ' ').toUpperCase()}</Text></View></GlassPanel></ScrollView>;
 }
 
+type ApexSettings={unit_preference:'MPH'|'KMH';meet_notif_radius_miles:number;meet_notifs_enabled:number;convoy_radio_enabled:number;season_notifs_enabled:number;public_performance_visibility:number;public_race_records:number;apex_id_visibility:number;cotw_notifs_enabled:number};
+const LOCAL_SETTINGS_KEY='apex.local.settings';
+
+function SettingsScreen(){
+  const [settings,setSettings]=useState<ApexSettings|null>(null);const [apexId,setApexId]=useState('');const [audio,setAudio]=useState(true);const [haptics,setHaptics]=useState(true);const [bounty,setBounty]=useState(false);const [busy,setBusy]=useState(false);const [status,setStatus]=useState('');
+  const load=async()=>{setBusy(true);try{const [data,bountyData,local]=await Promise.all([cloudflareApi.request<{settings:ApexSettings;apexId:string}>('/api/settings'),cloudflareApi.request<{settings:{bountyModeEnabled:boolean}}>('/api/bounty/settings'),AsyncStorage.getItem(LOCAL_SETTINGS_KEY)]);setSettings(data.settings);setApexId(data.apexId);setBounty(bountyData.settings.bountyModeEnabled);if(local){try{const parsed=JSON.parse(local),nextAudio=parsed.audio!==false,nextHaptics=parsed.haptics!==false;setAudio(nextAudio);setHaptics(nextHaptics);setInterfaceAudioEnabled(nextAudio);setHapticsEnabled(nextHaptics);}catch{await AsyncStorage.removeItem(LOCAL_SETTINGS_KEY);}}setStatus('');}catch(error){setStatus(error instanceof Error?error.message:'Settings unavailable.');}finally{setBusy(false);}};
+  useEffect(()=>{void load();},[]);
+  const update=(key:keyof ApexSettings,value:string|number)=>setSettings(current=>current?{...current,[key]:value}:current);
+  const save=async()=>{if(!settings||busy)return;setBusy(true);try{await Promise.all([cloudflareApi.request('/api/settings',{method:'PUT',body:JSON.stringify(settings)}),cloudflareApi.request('/api/bounty/settings',{method:'PUT',body:JSON.stringify({bountyModeEnabled:bounty,agreed:bounty,notificationsEnabled:true,showPublicPhoto:true,allowMostWanted:true})}),AsyncStorage.setItem(LOCAL_SETTINGS_KEY,JSON.stringify({audio,haptics}))]);setInterfaceAudioEnabled(audio);setHapticsEnabled(haptics);const liveUnit=useLiveNetworkStore.getState().unit.toUpperCase();if((settings.unit_preference==='KMH'?'KPH':'MPH')!==liveUnit)useLiveNetworkStore.getState().toggleUnit();playInterfaceSound('unlock');setStatus('SETTINGS SECURED');}catch(error){setStatus(error instanceof Error?error.message:'Settings could not be saved.');}finally{setBusy(false);}};
+  const row=(label:string,key:keyof ApexSettings)=><View style={styles.healthRow}><View style={styles.commandCopy}><Text style={styles.commandTitle}>{label}</Text></View><Switch value={Boolean(settings?.[key])} onValueChange={value=>update(key,value?1:0)} trackColor={{false:'#252A26',true:'rgba(167,229,154,.46)'}} thumbColor={Boolean(settings?.[key])?accent:'#D5D9D5'}/></View>;
+  if(!settings)return <ScrollView contentContainerStyle={styles.screenContent}><GlassPanel style={styles.emptyState}><Settings size={28} color={accent}/><Text style={styles.emptyTitle}>{busy?'DECRYPTING SETTINGS':'SETTINGS UNAVAILABLE'}</Text>{status?<Text style={styles.networkError}>{status}</Text>:null}<GlassButton label="RETRY" icon={Radio} onPress={()=>void load()} compact/></GlassPanel></ScrollView>;
+  return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.raceHeader}><View><Text style={styles.eyebrow}>PILOT CONTROL</Text><Text style={styles.feedTitle}>SETTINGS</Text></View><Settings size={27} color={paper}/></View><SectionTitle label="GENERAL"/><GlassPanel><View style={styles.healthRow}><Text style={styles.commandTitle}>SPEED UNITS</Text><View style={styles.durationRow}>{(['MPH','KMH'] as const).map(unit=><Pressable key={unit} onPress={()=>update('unit_preference',unit)} style={[styles.durationChoice,settings.unit_preference===unit&&styles.durationChoiceActive]}><Text style={[styles.segmentText,settings.unit_preference===unit&&styles.segmentTextActive]}>{unit==='KMH'?'KM/H':unit}</Text></Pressable>)}</View></View><View style={styles.identityDivider}/><View style={styles.healthRow}><Text style={styles.commandTitle}>AUDIO</Text><Switch value={audio} onValueChange={value=>{setAudio(value);setInterfaceAudioEnabled(value);}} trackColor={{false:'#252A26',true:'rgba(167,229,154,.46)'}} thumbColor={audio?accent:'#D5D9D5'}/></View><View style={styles.identityDivider}/><View style={styles.healthRow}><Text style={styles.commandTitle}>HAPTIC FEEDBACK</Text><Switch value={haptics} onValueChange={value=>{setHaptics(value);setHapticsEnabled(value);}} trackColor={{false:'#252A26',true:'rgba(167,229,154,.46)'}} thumbColor={haptics?accent:'#D5D9D5'}/></View></GlassPanel><SectionTitle label="NOTIFICATIONS"/><GlassPanel>{row('MEETS','meet_notifs_enabled')}<View style={styles.identityDivider}/>{row('SEASONS','season_notifs_enabled')}<View style={styles.identityDivider}/>{row('CAR OF THE WEEK','cotw_notifs_enabled')}</GlassPanel><SectionTitle label="PRIVACY + DRIVING"/><GlassPanel>{row('PUBLIC PERFORMANCE','public_performance_visibility')}<View style={styles.identityDivider}/>{row('PUBLIC RACE RECORDS','public_race_records')}<View style={styles.identityDivider}/>{row('APEX ID VISIBILITY','apex_id_visibility')}<View style={styles.identityDivider}/><View style={styles.healthRow}><View style={styles.commandCopy}><Text style={styles.commandTitle}>BOUNTY NETWORK</Text><Text style={styles.commandMeta}>OPT-IN · APPROXIMATE SIGNALS · SAFE AND LEGAL PARTICIPATION ONLY</Text></View><Switch value={bounty} onValueChange={setBounty} trackColor={{false:'#252A26',true:'rgba(167,229,154,.46)'}} thumbColor={bounty?accent:'#D5D9D5'}/></View><View style={styles.identityDivider}/><View style={styles.healthRow}><View style={styles.commandCopy}><Text style={styles.commandTitle}>MEET RADIUS</Text><Text style={styles.commandMeta}>{settings.meet_notif_radius_miles} MILES</Text></View><Slider style={{width:150,height:36}} minimumValue={5} maximumValue={100} step={5} value={settings.meet_notif_radius_miles} minimumTrackTintColor={accent} maximumTrackTintColor="#343A35" thumbTintColor={paper} onValueChange={value=>update('meet_notif_radius_miles',value)}/></View></GlassPanel><SectionTitle label="ACCOUNT + ABOUT"/><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>APEX ID</Text><Text style={styles.healthGood}>{apexId}</Text></View><View style={styles.identityDivider}/><View style={styles.healthRow}><Text style={styles.identityLabel}>CURRENT SOURCE</Text><Text style={styles.commandMeta}>{APP_VERSION} · NEXT ANDROID BUILD {ANDROID_VERSION_CODE}</Text></View><View style={styles.identityDivider}/><AndroidDownloadButton/></GlassPanel>{status?<Text style={status.includes('SECURED')?styles.healthGood:styles.networkError}>{status}</Text>:null}<GlassButton label={busy?'SAVING':'SAVE SETTINGS'} icon={Check} onPress={()=>void save()} active/></ScrollView>;
+}
+
 function VenueBountyProtocol(){
   const {isDriving,startDrive}=useLiveNetworkStore();const [accepted,setAccepted]=useState(false);const [venueName,setVenueName]=useState('PRIVATE VENUE');const [session,setSession]=useState<any|null>(null);const [now,setNow]=useState(Date.now());const progressing=useRef(false);
   useEffect(()=>{if(!session)return;const timer=setInterval(()=>{const current=Date.now();setNow(current);if(Date.parse(session.endsAt)>current||progressing.current)return;progressing.current=true;void cloudflareApi.request<any>(`/api/venue-bounties/${session.id}/progress`,{method:'POST'}).then(data=>{if(data.status==='escaped'){Alert.alert('Venue session complete',`+${data.reward} GC secured.`);setSession(null);}else setSession({id:session.id,stars:data.stars,endsAt:data.endsAt});}).catch(error=>Alert.alert('Session update failed',error instanceof Error?error.message:'Try again.')).finally(()=>{progressing.current=false;});},1000);return()=>clearInterval(timer);},[session]);
@@ -1275,17 +1296,17 @@ function DeveloperAccessScreen(){
   return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.raceHeader}><View><Text style={styles.eyebrow}>DEVELOPER CHANNEL</Text><Text style={styles.feedTitle}>ACCESS CONTROL</Text></View><View style={styles.adminLive}><View style={styles.liveDot}/><Text style={styles.adminLiveText}>OWNER</Text></View></View><GlassPanel glow><Text style={styles.identityLabel}>CREATE PRIVATE CODE</Text><TextInput value={label} onChangeText={setLabel} placeholder="Code label" placeholderTextColor={muted} style={styles.authInput}/><View style={styles.limitRow}><Pressable onPress={()=>setLimit(value=>Math.max(1,value-1))} style={styles.limitButton}><Text style={styles.limitButtonText}>−</Text></Pressable><View style={styles.limitValue}><Text style={styles.creditNumber}>{limit}</Text><Text style={styles.identityLabel}>REDEMPTIONS</Text></View><Pressable onPress={()=>setLimit(value=>Math.min(500,value+1))} style={styles.limitButton}><Plus size={19} color={paper}/></Pressable></View><View style={styles.durationRow}>{(['24h','7d','30d','none'] as const).map(item=><Pressable key={item} onPress={()=>setDuration(item)} style={[styles.durationChoice,duration===item&&styles.durationChoiceActive]}><Text style={[styles.segmentText,duration===item&&styles.segmentTextActive]}>{item.toUpperCase()}</Text></Pressable>)}</View><GlassButton label={busy?'GENERATING':'GENERATE CODE'} icon={LockKeyhole} onPress={()=>void create()} active/></GlassPanel>{error?<Text style={styles.networkError}>{error.toUpperCase()}</Text>:null}<SectionTitle label="ACTIVE CODES" action={`${codes.filter(code=>code.is_active).length} LIVE`}/>{codes.map(code=><View key={code.id} style={[styles.accessCodeCard,!code.is_active&&styles.accessCodeCardDisabled]}><View style={styles.accessCodeTop}><View style={styles.commandCopy}><Text style={styles.accessCode}>{code.code}</Text><Text style={styles.commandMeta}>{code.label} · {code.expires_at?`EXPIRES ${new Date(code.expires_at).toLocaleDateString()}`:'NO EXPIRY'}</Text></View><Pressable onPress={()=>void copyCode(code.code)} style={styles.iconButton}><LockKeyhole size={16} color={paper}/></Pressable></View><View style={styles.codeUsageTrack}><View style={[styles.codeUsageFill,{width:`${Math.min(100,(code.use_count/code.max_uses)*100)}%`}]}/></View><View style={styles.codeUsageRow}><Text style={styles.codeUsage}>{code.use_count} / {code.max_uses} JOINED</Text><Pressable onPress={()=>void toggle(code.id)}><Text style={code.is_active?styles.codeDisable:styles.codeEnable}>{code.is_active?'DISABLE':'ENABLE'}</Text></Pressable></View></View>)}<SectionTitle label="NEW PILOTS" action={`${redemptions.length} TOTAL`}/>{redemptions.map(entry=><View key={entry.user_id} style={styles.joinedPilot}><View style={styles.opponentAvatar}>{entry.avatar_url?<Image source={{uri:entry.avatar_url}} style={styles.opponentPhoto}/>:<Text style={styles.opponentAvatarText}>{entry.username.slice(0,1)}</Text>}</View><View style={styles.commandCopy}><Text style={styles.commandTitle}>{entry.display_name||entry.username}</Text><Text style={styles.commandMeta}>{entry.email} · {new Date(entry.redeemed_at).toLocaleString()}</Text></View><Check size={17} color={accent}/></View>)}</ScrollView>;
 }
 
-function AccessPortal({onUnlock,onExisting}:{onUnlock:(code:string)=>void;onExisting:()=>void}){
+function AccessPortal({onUnlock}:{onUnlock:(code:string)=>void}){
   const [code,setCode]=useState('');const [status,setStatus]=useState('PRIVATE NETWORK');const [unlocking,setUnlocking]=useState(false);const [denied,setDenied]=useState(false);const reveal=useRef(new Animated.Value(0)).current;const shake=useRef(new Animated.Value(0)).current;const lockPulse=useRef(new Animated.Value(0)).current;
   useEffect(()=>{Animated.timing(reveal,{toValue:1,duration:900,useNativeDriver:true}).start();},[reveal]);
   useEffect(()=>{let loop:Animated.CompositeAnimation|undefined;void AccessibilityInfo.isReduceMotionEnabled().then(reduced=>{if(reduced)return;loop=Animated.loop(Animated.sequence([Animated.timing(lockPulse,{toValue:1,duration:1800,useNativeDriver:true}),Animated.timing(lockPulse,{toValue:0,duration:1800,useNativeDriver:true})]));loop.start();});return()=>loop?.stop();},[lockPulse]);
   useEffect(()=>{if(!code||denied)return;playInterfaceSound('key');shake.setValue(0);Animated.sequence([Animated.timing(shake,{toValue:1,duration:24,useNativeDriver:true}),Animated.timing(shake,{toValue:-1,duration:24,useNativeDriver:true}),Animated.timing(shake,{toValue:0,duration:28,useNativeDriver:true})]).start();},[code]);
   const reject=(message:string)=>{setStatus(message.toUpperCase());setDenied(true);playInterfaceSound('error');hapticResult('error');shake.setValue(0);Animated.sequence([4,-4,3,-3,2,0].map(value=>Animated.timing(shake,{toValue:value,duration:55,useNativeDriver:true}))).start();setTimeout(()=>setDenied(false),950);};
-  const verify=async()=>{if(!/^\d{6}$/.test(code)){reject('Enter all six digits');return;}setStatus('VERIFYING CREDENTIAL');try{await cloudflareApi.request('/api/invite/verify',{method:'POST',body:JSON.stringify({code})});playInterfaceSound('unlock');hapticResult('success');setUnlocking(true);setTimeout(()=>onUnlock(code),3600);}catch(reason){reject(reason instanceof Error?reason.message:'Access denied');}};
+  const verify=async()=>{if(!/^\d{6}$/.test(code)){reject('Enter all six digits');return;}setStatus('VERIFYING CREDENTIAL');try{await cloudflareApi.request('/api/invite/verify',{method:'POST',body:JSON.stringify({code})});playInterfaceSound('unlock');hapticResult('success');setUnlocking(true);setTimeout(()=>onUnlock(code),720);}catch(reason){reject(reason instanceof Error?reason.message:'Access denied');}};
   const enterKey=(key:string)=>{hapticTick();if(key==='CLEAR'){setCode('');setDenied(false);return;}if(key==='UNLOCK'){void verify();return;}setCode(current=>(current+key).slice(0,6));setDenied(false);};
   if(unlocking)return <CredentialTransition/>;
   const pulseScale=lockPulse.interpolate({inputRange:[0,1],outputRange:[1,1.018]});const pulseOpacity=lockPulse.interpolate({inputRange:[0,1],outputRange:[.86,1]});
-  return <View style={[styles.accessPortal,denied&&styles.accessPortalDenied]}><Animated.View pointerEvents="none" style={[styles.lockBreathingGlow,{opacity:lockPulse.interpolate({inputRange:[0,1],outputRange:[.05,.34]}),transform:[{scale:pulseScale}]}]}/><Animated.Image source={require('./assets/apex-lock-reference.png')} style={[styles.lockReferenceImage,{opacity:pulseOpacity,transform:[{scale:pulseScale}]}]} resizeMode="cover"/><LinearGradient colors={denied?['rgba(74,0,8,.52)','rgba(0,0,0,.12)']:['transparent','rgba(0,0,0,.03)']} style={StyleSheet.absoluteFill}/><Animated.View style={[styles.photoLockControls,{opacity:reveal,transform:[{translateX:shake}]}]}><View style={styles.photoCodeSlots} pointerEvents="none">{Array.from({length:6},(_,index)=><Text key={index} style={[styles.photoCodeDigit,denied&&styles.photoLockCodeDenied]}>{code[index]||'—'}</Text>)}</View><TextInput value={code} onChangeText={value=>{setCode(value.replace(/\D/g,'').slice(0,6));setDenied(false);hapticTick();}} keyboardType="number-pad" maxLength={6} caretHidden style={styles.photoLockNativeInput} onSubmitEditing={()=>void verify()}/><View style={styles.photoKeypad} pointerEvents="box-none">{['1','2','3','4','5','6','7','8','9','CLEAR','0','UNLOCK'].map(key=><Pressable key={key} accessibilityLabel={key==='UNLOCK'?'Unlock network':key==='CLEAR'?'Clear access code':`Enter ${key}`} onPress={()=>enterKey(key)} style={({pressed})=>[styles.photoKeyHit,pressed&&styles.photoKeyHitPressed]}/>)}</View><Pressable accessibilityLabel="Existing pilot sign in" onPress={onExisting} style={styles.photoExistingHit}><Text style={styles.photoExistingText}>EXISTING PILOT / SIGN IN</Text></Pressable></Animated.View>{denied?<View pointerEvents="none" style={styles.deniedGlitch}><View style={[styles.glitchLine,{top:'62%'}]}/><Text style={styles.deniedStamp}>ERR // INVALID CREDENTIAL</Text></View>:null}</View>;
+  return <View style={[styles.accessPortal,denied&&styles.accessPortalDenied]}><Animated.View pointerEvents="none" style={[styles.lockBreathingGlow,{opacity:lockPulse.interpolate({inputRange:[0,1],outputRange:[.05,.34]}),transform:[{scale:pulseScale}]}]}/><Animated.Image source={require('./assets/apex-lock-reference.png')} style={[styles.lockReferenceImage,{opacity:pulseOpacity,transform:[{scale:pulseScale}]}]} resizeMode="cover"/><LinearGradient colors={denied?['rgba(74,0,8,.52)','rgba(0,0,0,.12)']:['transparent','rgba(0,0,0,.03)']} style={StyleSheet.absoluteFill}/><Animated.View style={[styles.photoLockControls,{opacity:reveal,transform:[{translateX:shake}]}]}><View style={styles.photoCodeSlots} pointerEvents="none">{Array.from({length:6},(_,index)=><Text key={index} style={[styles.photoCodeDigit,denied&&styles.photoLockCodeDenied]}>{code[index]||'—'}</Text>)}</View><TextInput value={code} onChangeText={value=>{setCode(value.replace(/\D/g,'').slice(0,6));setDenied(false);hapticTick();}} keyboardType="number-pad" maxLength={6} caretHidden style={styles.photoLockNativeInput} onSubmitEditing={()=>void verify()}/><View style={styles.photoKeypad} pointerEvents="box-none">{['1','2','3','4','5','6','7','8','9','CLEAR','0','UNLOCK'].map(key=><Pressable key={key} accessibilityLabel={key==='UNLOCK'?'Unlock network':key==='CLEAR'?'Clear access code':`Enter ${key}`} onPress={()=>enterKey(key)} style={({pressed})=>[styles.photoKeyHit,pressed&&styles.photoKeyHitPressed]}/>)}</View></Animated.View>{denied?<View pointerEvents="none" style={styles.deniedGlitch}><View style={[styles.glitchLine,{top:'62%'}]}/><Text style={styles.deniedStamp}>ERR // INVALID CREDENTIAL</Text></View>:null}</View>;
 }
 
 function AuthPanel({ onClose, onOpen, initialMode='signin', inviteCode }: { onClose: () => void;onOpen?: (tab:TabKey)=>void;initialMode?:'signin'|'signup';inviteCode?:string|null }) {
@@ -1313,7 +1334,7 @@ function AuthPanel({ onClose, onOpen, initialMode='signin', inviteCode }: { onCl
       setStatus((error instanceof Error ? error.message : 'CONNECTION FAILED').toUpperCase());
     }
   };
-  if(signedInId)return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill}/><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{signedInProfile?.displayName||'ACTIVE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper}/></Pressable></View><View style={styles.freeAccountBanner}><ShieldCheck size={17} color={accent}/><View><Text style={styles.freeAccountTitle}>PRIVATE CHANNEL ACTIVE</Text><Text style={styles.freeAccountMeta}>@{signedInProfile?.alias} · {signedInProfile?.isDeveloper?'DEVELOPER AUTHORITY':'INVITED MEMBER'}</Text></View></View><TextInput value={displayName} onChangeText={setDisplayName} placeholder={signedInProfile?.displayName||'Display name'} placeholderTextColor={muted} style={styles.authInput}/><GlassButton label="SAVE PILOT PROFILE" icon={Check} onPress={async()=>{if(await updateProfile(displayName||signedInProfile?.displayName||'')){setDisplayName('');setStatus('PROFILE SECURED');}}} active/><GlassButton label="SHARE ACCESS CODE" icon={Send} onPress={()=>{onClose();onOpen?.('access');}}/><AndroidDownloadButton/><View style={styles.identityDivider}/><GlassButton label="LOCK YOURSELF OUT" icon={LockKeyhole} onPress={()=>void signOut()}/>{status?<Text style={styles.networkError}>{status}</Text>:null}</GlassPanel></View>;
+  if(signedInId)return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill}/><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{signedInProfile?.displayName||'ACTIVE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper}/></Pressable></View><View style={styles.freeAccountBanner}><ShieldCheck size={17} color={accent}/><View><Text style={styles.freeAccountTitle}>PRIVATE CHANNEL ACTIVE</Text><Text style={styles.freeAccountMeta}>@{signedInProfile?.alias} · {signedInProfile?.isDeveloper?'DEVELOPER AUTHORITY':'INVITED MEMBER'}</Text></View></View><TextInput value={displayName} onChangeText={setDisplayName} placeholder={signedInProfile?.displayName||'Display name'} placeholderTextColor={muted} style={styles.authInput}/><GlassButton label="SAVE PILOT PROFILE" icon={Check} onPress={async()=>{if(await updateProfile(displayName||signedInProfile?.displayName||'')){setDisplayName('');setStatus('PROFILE SECURED');}}} active/><GlassButton label="SETTINGS + PRIVACY" icon={Settings} onPress={()=>{onClose();onOpen?.('settings');}}/><GlassButton label="SHARE ACCESS CODE" icon={Send} onPress={()=>{onClose();onOpen?.('access');}}/><AndroidDownloadButton/><View style={styles.identityDivider}/><GlassButton label="LOCK YOURSELF OUT" icon={LockKeyhole} onPress={()=>void signOut()}/>{status?<Text style={styles.networkError}>{status}</Text>:null}</GlassPanel></View>;
   return <View style={styles.authOverlay}><Pressable onPress={onClose} style={StyleSheet.absoluteFill} /><GlassPanel style={styles.authPanel} glow><View style={styles.notificationHeader}><View><Text style={styles.eyebrow}>PILOT IDENTITY</Text><Text style={styles.notificationTitle}>{mode === 'signin' ? 'ENTER NETWORK' : 'CREATE PILOT'}</Text></View><Pressable onPress={onClose} style={styles.closeButton}><X size={17} color={paper} /></Pressable></View>{hasCloudflareBackend ? <>{mode==='signup'?<View style={styles.freeAccountBanner}><ShieldCheck size={17} color={accent}/><View><Text style={styles.freeAccountTitle}>{inviteCode?'PRIVATE SLOT RESERVED':'DEVELOPER REGISTRATION'}</Text><Text style={styles.freeAccountMeta}>{inviteCode||'OWNER EMAIL REQUIRED'}</Text></View></View>:null}<ScrambleReadout value={email} label="IDENTITY SIGNAL"/><TextInput value={email} onChangeText={value=>{setEmail(value);playInterfaceSound('key');}} autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={muted} style={styles.authInput} /><ScrambleReadout value={password} masked label="PASSWORD SCRAMBLE"/><TextInput value={password} onChangeText={value=>{setPassword(value);playInterfaceSound('key');}} secureTextEntry placeholder="Password" placeholderTextColor={muted} style={styles.authInput} onSubmitEditing={submit} /><GlassButton label={mode === 'signin' ? 'SIGN IN' : 'CREATE PILOT'} icon={LockKeyhole} onPress={submit} active /><Pressable onPress={() => {setMode(value => value === 'signin' ? 'signup' : 'signin');setStatus('');}}><Text style={styles.authSwitch}>{mode === 'signin' ? 'DEVELOPER OR INVITED PILOT / CREATE ACCOUNT' : 'EXISTING PILOT / SIGN IN'}</Text></Pressable></> : <View style={styles.emptyNotification}><Radio size={26} color={accent} /><Text style={styles.emptyTitle}>BACKEND CONNECTION REQUIRED</Text><Text style={styles.emptyCopy}>The app will not invent an account or local network data.</Text></View>}{status ? <Text style={styles.networkError}>{status}</Text> : null}</GlassPanel></View>;
 }
 
@@ -1334,7 +1355,8 @@ export function ApexDesignPreview() {
 
   useEffect(() => {
     const initialize = async () => {
-      try{await Promise.all([useLiveNetworkStore.getState().initialize(), useContentStore.getState().initialize()]);
+      try{const local=await AsyncStorage.getItem(LOCAL_SETTINGS_KEY);if(local){try{const parsed=JSON.parse(local);setInterfaceAudioEnabled(parsed.audio!==false);setHapticsEnabled(parsed.haptics!==false);}catch{await AsyncStorage.removeItem(LOCAL_SETTINGS_KEY);}}
+        await Promise.all([useLiveNetworkStore.getState().initialize(), useContentStore.getState().initialize()]);
         const userId = useContentStore.getState().userId;
         if (userId) {
           await useNotificationStore.getState().fetchNotifications(userId);
@@ -1389,13 +1411,14 @@ export function ApexDesignPreview() {
     if (tab === 'shop') return <VaultScreen />;
     if (tab === 'leaderboard') return <LeaderboardScreen />;
     if (tab === 'access') return <DeveloperAccessScreen />;
+    if (tab === 'settings') return <SettingsScreen />;
     if (tab === 'world') return <WorldScreen onTab={setTab}/>;
     if (tab === 'meets' || tab === 'messages') return <UtilityScreen kind={tab} />;
     return <CommandScreen onTab={setTab} onProfile={()=>{setAuthMode('signin');setAuthOpen(true);}} />;
   }, [tab]);
 
   if(!booted)return <SafeAreaView style={styles.app}><AtmosphereBackdrop/><View style={styles.bootScreen}><View style={styles.bootLock}><LockKeyhole size={74} color={paper} strokeWidth={1.1}/></View><ApexLogo/><Text style={styles.bootLabel}>ESTABLISHING PRIVATE CHANNEL</Text></View></SafeAreaView>;
-  if(!userId)return <SafeAreaView style={styles.app}><AccessPortal onUnlock={code=>{setInviteCode(code);setAuthMode('signup');setAuthOpen(true);}} onExisting={()=>{setInviteCode(null);setAuthMode('signin');setAuthOpen(true);}}/>{authOpen?<AuthPanel key={`${authMode}-${inviteCode||'owner'}`} onClose={()=>setAuthOpen(false)} onOpen={setTab} initialMode={authMode} inviteCode={inviteCode}/>:null}</SafeAreaView>;
+  if(!userId)return <SafeAreaView style={styles.app}><AccessPortal onUnlock={code=>{setInviteCode(code);setAuthMode('signup');setAuthOpen(true);}}/>{authOpen?<AuthPanel key={`${authMode}-${inviteCode||'owner'}`} onClose={()=>setAuthOpen(false)} onOpen={setTab} initialMode={authMode} inviteCode={inviteCode}/>:null}</SafeAreaView>;
   if(!gameStarted)return <SafeAreaView style={styles.app}><GameLobby onEnter={next=>{setTab(next);setGameStarted(true);}}/></SafeAreaView>;
 
   return (
@@ -1422,7 +1445,7 @@ export function ApexDesignPreview() {
           <BlurView intensity={42} tint="dark" style={styles.tabBar}>
             {tabs.map(item => {
               const Icon = item.icon;
-              const activeTab = tab === item.key || (item.key === 'command' && ['vault', 'leaderboard', 'access', 'world', 'more'].includes(tab)) || (item.key === 'radar' && ['meets'].includes(tab)) || (item.key === 'feed' && ['messages'].includes(tab));
+              const activeTab = tab === item.key || (item.key === 'command' && ['vault', 'leaderboard', 'access', 'settings', 'world', 'more'].includes(tab)) || (item.key === 'radar' && ['meets'].includes(tab)) || (item.key === 'feed' && ['messages'].includes(tab));
               return (
                 <Pressable key={item.key} onPress={() => {playInterfaceSound();setTab(item.key);}} style={styles.tabItem}>
                   <View style={[styles.tabIcon, activeTab && styles.tabIconActive]}><Icon size={19} color={activeTab ? accent : muted} strokeWidth={2.1} /></View>
