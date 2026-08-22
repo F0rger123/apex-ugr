@@ -3,7 +3,7 @@
     "name": "Apex UGR",
     "slug": "apex-ugr",
     "scheme": "apexugr",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "icon": "./assets/apex-app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.apexugr.app",
-      "versionCode": 3,
+      "versionCode": 10,
       "adaptiveIcon": {
         "foregroundImage": "./assets/apex-app-icon.png",
         "backgroundColor": "#010201"
@@ -44,6 +44,7 @@
       "bundler": "metro",
       "name": "Apex UGR",
       "shortName": "Apex UGR",
+      "favicon": "./assets/apex-app-icon.png",
       "themeColor": "#010201",
       "backgroundColor": "#010201"
     },

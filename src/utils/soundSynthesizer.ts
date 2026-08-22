@@ -1,5 +1,12 @@
+let interfaceAudioEnabled = true;
+
+export const setInterfaceAudioEnabled = (enabled: boolean) => {
+  interfaceAudioEnabled = enabled;
+};
+
 // Engine Sound Synthesizer using Web Audio API for realistic supercar / tuner engine revs
 export const playEngineSound = (engineType: string = 'VR38DETT Twin-Turbo') => {
+  if (!interfaceAudioEnabled) return;
   if (typeof window === 'undefined' || !('AudioContext' in window || 'webkitAudioContext' in window)) {
     return;
   }
@@ -77,6 +84,7 @@ export const playEngineSound = (engineType: string = 'VR38DETT Twin-Turbo') => {
 };
 
 export const playInterfaceSound = (kind: 'select' | 'unlock' | 'error' | 'key' | 'toggle' | 'drive' | 'reward' = 'select') => {
+  if (!interfaceAudioEnabled) return;
   if (typeof window === 'undefined' || !('AudioContext' in window || 'webkitAudioContext' in window)) return;
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
