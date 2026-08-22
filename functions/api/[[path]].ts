@@ -888,7 +888,7 @@ async function handle(request: Request, env: Env, path: string) {
     const config = await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>() || {};
     return json({ config: {
       bountyEnabled: Boolean(config.bounty_enabled ?? 1),
-      roamingEnabled: Boolean(config.roaming_enabled ?? 1),
+      roamingEnabled: false,
       venueEnabled: Boolean(config.venue_enabled ?? 1),
       stageDurationSeconds: JSON.parse(config.stage_duration_seconds || '{"1": 600, "2": 600, "3": 600, "4": 600, "5": 900}'),
       stageRewardGc: JSON.parse(config.stage_reward_gc || '{"1": 300, "2": 500, "3": 850, "4": 1200, "5": 2500}'),
@@ -1035,7 +1035,10 @@ async function handle(request: Request, env: Env, path: string) {
 
   if (path === 'bounty/trigger' && method === 'POST') {
     const body = await request.json<any>();
-    const mode = body.mode === 'venue' ? 'venue' : 'roaming';
+    if (body.mode !== 'venue' || !String(body.venueName || '').trim()) {
+      return json({ error: 'Bounty sessions require an authorized venue.' }, 400);
+    }
+    const mode = 'venue';
     const starLevel = Math.max(1, Math.min(5, Number(body.starLevel) || 1));
 
     // Get active vehicle

@@ -377,6 +377,7 @@ function CommandScreen({ onTab, onProfile }: { onTab: (tab: TabKey) => void; onP
       <SectionTitle label="OPERATIONS" action={`${drivers.length} PILOTS LIVE`} />
       <View style={styles.operationGrid}>{[
         {label:'RACE',meta:`${drivers.length} available`,icon:Swords,tab:'race' as TabKey},
+        {label:'BOUNTY',meta:'Opt-in private venue',icon:Star,tab:'world' as TabKey},
         {label:'RADAR',meta:`${events.length} meet zones`,icon:Radio,tab:'radar' as TabKey},
         {label:'ROUTES',meta:'Favorites + saved',icon:Route,tab:'radar' as TabKey},
         {label:'MEETS',meta:'Host or join',icon:Users,tab:'meets' as TabKey},
@@ -426,6 +427,7 @@ function RadarMap({
   reports,
   rewards,
   ghostReplay,
+  followLocation,
 }: {
   location: { latitude: number; longitude: number } | null;
   revealOrigin: { latitude: number; longitude: number } | null;
@@ -447,7 +449,10 @@ function RadarMap({
   reports: RoadReport[];
   rewards: MapReward[];
   ghostReplay: GhostReplay | null;
+  followLocation?: boolean;
 }) {
+  const nativeMapRef=useRef<any>(null);
+  const lastCameraLocation=useRef<{latitude:number;longitude:number}|null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const listener = (event: MessageEvent) => {
@@ -512,10 +517,13 @@ function RadarMap({
   const allCoordinates=[...(routeFocused?routeCoordinates:location?[location]:[]),...drivers];
   const latitudes=allCoordinates.map(point=>point.latitude); const longitudes=allCoordinates.map(point=>point.longitude);
   const nativeCenter=(fitAll||routeFocused)&&allCoordinates.length?{latitude:(Math.min(...latitudes)+Math.max(...latitudes))/2,longitude:(Math.min(...longitudes)+Math.max(...longitudes))/2,latitudeDelta:Math.max(.04,(Math.max(...latitudes)-Math.min(...latitudes))*1.35),longitudeDelta:Math.max(.04,(Math.max(...longitudes)-Math.min(...longitudes))*1.35)}:{ latitude: focus?.latitude || location?.latitude || 20, longitude: focus?.longitude || location?.longitude || 0, latitudeDelta: focus ? 0.012 : location ? 0.04 : 90, longitudeDelta: focus ? 0.012 : location ? 0.04 : 90 };
+  const shouldFollowLocation=followLocation??Boolean(focus&&location&&Math.abs(focus.latitude-location.latitude)<.000001&&Math.abs(focus.longitude-location.longitude)<.000001);
+  useEffect(()=>{if(Platform.OS==='web'||!shouldFollowLocation||!location||!nativeMapRef.current)return;const previous=lastCameraLocation.current;const moved=!previous||Math.abs(previous.latitude-location.latitude)+Math.abs(previous.longitude-location.longitude)>.00012;if(!moved)return;lastCameraLocation.current={latitude:location.latitude,longitude:location.longitude};nativeMapRef.current.animateCamera({center:{latitude:location.latitude,longitude:location.longitude},zoom:17,pitch:42,heading:0},{duration:650});},[shouldFollowLocation,location?.latitude,location?.longitude]);
   return (
     <View style={styles.mapFrame}>
       <NativeMap
-        key={`${mode}-${followRevision}`}
+        ref={nativeMapRef}
+        key={mode}
         style={StyleSheet.absoluteFill}
         mapType={mode === 'satellite' ? 'satellite' : 'standard'}
         customMapStyle={darkMapStyle}
@@ -700,6 +708,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
           {rewards.length?<View style={styles.radarRewardBar}><CircleDollarSign size={17} color={accent}/><View style={styles.commandCopy}><Text style={styles.commandTitle}>{rewards.length} TIMED CACHE{rewards.length===1?'':'S'} ON GRID</Text><Text style={styles.commandMeta}>DRIVE INTO A COIN ZONE BEFORE THE SIGNAL EXPIRES</Text></View><Text style={styles.radarRewardTime}>{Math.max(0,Math.ceil((Math.min(...rewards.map(item=>Date.parse(item.expires_at)))-Date.now())/60000))}M</Text></View>:null}
           <View style={styles.shareTimer}><View style={styles.shareTimerTitle}><Text style={styles.eyebrow}>LOCATION VISIBILITY</Text><Text style={styles.shareTimerMeta}>{shareExpiresAt?`EXPIRES ${new Date(shareExpiresAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`:'NOT SHARING'}</Text></View><View style={styles.shareTimerOptions}>{[5,15,30,60].map(minutes=><Pressable key={minutes} onPress={()=>{playInterfaceSound('toggle');setShareMinutes(minutes);}} style={[styles.shareTimerOption,shareMinutes===minutes&&styles.shareTimerOptionActive]}><Text style={[styles.shareTimerOptionText,shareMinutes===minutes&&styles.shareTimerOptionTextActive]}>{minutes}M</Text></Pressable>)}<Pressable onPress={()=>{playInterfaceSound('toggle');void hideLocation();}} style={styles.ghostButton}><LockKeyhole size={12} color={paper}/><Text style={styles.ghostButtonText}>GHOST</Text></Pressable></View></View>
           {route ? <View style={styles.activeRoute}><Navigation size={15} color={accent} /><Pressable onPress={()=>{setRouteStops((route.stops||[]).map((stop,index)=>({id:`active-${index}`,type:'route',...stop})));setRouteOpen(true);}} style={styles.commandCopy}><Text numberOfLines={1} style={styles.activeRouteTitle}>{route.destination.toUpperCase()}</Text><Text style={styles.activeRouteMeta}>{navigationState==='navigating'?`${routeDistanceLabel(navDistance)} · ${navTimeLabel(navMinutes)} · ETA ${navEta}`:`${route.stops.length} STOP${route.stops.length===1?'':'S'} · ${routeDistanceLabel(route.distanceKm)} · ${navTimeLabel(Math.ceil(route.durationMinutes))}`}</Text></Pressable>{navigationState==='route_preview'?<Pressable onPress={()=>void startNavigation()} style={styles.routeStart}><Play size={13} color="#061008"/><Text style={styles.routeStartText}>START</Text></Pressable>:navigationState==='navigating'?<Pressable onPress={endNavigation} style={styles.routeClose}><X size={14} color={paper}/></Pressable>:<Pressable accessibilityLabel="Save route" onPress={()=>void saveCurrentRoute()} style={styles.routeClose}><Save size={14} color={accent}/></Pressable>}<Pressable onPress={clearRoute} style={styles.routeClose}><X size={14} color={paper} /></Pressable></View> : null}
+          {route&&navigationState==='route_preview'?<View style={styles.previewLaunch}><Text style={styles.previewLaunchMeta}>{routeDistanceLabel(route.distanceKm)} · {navTimeLabel(Math.ceil(route.durationMinutes))} · ETA {navEta}</Text><GlassButton label="START NAVIGATION" icon={Navigation} onPress={()=>void startNavigation()} active grow/></View>:null}
           <View style={styles.driveDock}>
             <Pressable onPress={isDriving ? stopDrive : startDrive} style={[styles.driveEnter, isDriving && styles.driveEnterActive]}><Play size={16} color={isDriving ? accent : paper} /><Text style={styles.driveEnterText}>{isDriving ? 'END DRIVE' : 'ENTER DRIVE MODE'}</Text></Pressable>
             <Pressable onPress={() => setRouteOpen(value => !value)} style={styles.routeButton}><Navigation size={16} color={route ? accent : paper} /><Text style={styles.routeButtonText}>SET ROUTE</Text></Pressable>
@@ -801,7 +810,7 @@ function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const userId = useContentStore(state => state.userId);
   const isDeveloper = useContentStore(state => Boolean(state.profile?.isDeveloper));
   const modules: { tab: TabKey; label: string; meta: string; icon: IconType }[] = [
-    { tab: 'world', label: 'UNDERGROUND WORLD', meta: 'Crews, territory, drops, seasons', icon: Map },
+    { tab: 'world', label: 'UNDERGROUND WORLD', meta: 'Bounty, crews, territory, drops', icon: Map },
     { tab: 'race', label: 'RACE CONTROL', meta: 'Stage, track, spectate', icon: Swords }, { tab: 'meets', label: 'MEETS', meta: 'Routes and live locations', icon: MapPin },
     { tab: 'shop', label: 'PARTS VAULT', meta: 'Verified vehicle fitment', icon: ShoppingBag }, { tab: 'leaderboard', label: 'RANKINGS', meta: 'Season tiers and records', icon: Trophy },
     { tab: 'messages', label: 'COMMS', meta: 'Groups and direct messages', icon: MessagesSquare }, { tab: 'vault', label: 'CREDITS', meta: 'Rewards, wagers, badges', icon: WalletCards },
@@ -811,8 +820,8 @@ function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
 }
 
 function VenueBountyProtocol(){
-  const {isDriving,startDrive}=useLiveNetworkStore();const [accepted,setAccepted]=useState(false);const [venueName,setVenueName]=useState('PRIVATE VENUE');const [session,setSession]=useState<any|null>(null);const [now,setNow]=useState(Date.now());
-  useEffect(()=>{if(!session)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[session]);
+  const {isDriving,startDrive}=useLiveNetworkStore();const [accepted,setAccepted]=useState(false);const [venueName,setVenueName]=useState('PRIVATE VENUE');const [session,setSession]=useState<any|null>(null);const [now,setNow]=useState(Date.now());const progressing=useRef(false);
+  useEffect(()=>{if(!session)return;const timer=setInterval(()=>{const current=Date.now();setNow(current);if(Date.parse(session.endsAt)>current||progressing.current)return;progressing.current=true;void cloudflareApi.request<any>(`/api/venue-bounties/${session.id}/progress`,{method:'POST'}).then(data=>{if(data.status==='escaped'){Alert.alert('Venue session complete',`+${data.reward} GC secured.`);setSession(null);}else setSession({id:session.id,stars:data.stars,endsAt:data.endsAt});}).catch(error=>Alert.alert('Session update failed',error instanceof Error?error.message:'Try again.')).finally(()=>{progressing.current=false;});},1000);return()=>clearInterval(timer);},[session]);
   const begin=async()=>{if(!accepted){Alert.alert('Safety acknowledgement required','Confirm authorized venue use and safe, legal driving.');return;}if(!isDriving)await startDrive();try{const data=await cloudflareApi.request<any>('/api/venue-bounties/start',{method:'POST',body:JSON.stringify({venueName,consented:true})});setSession({id:data.id,stars:data.stars,endsAt:data.endsAt});playInterfaceSound('unlock');}catch(error){Alert.alert('Venue session unavailable',error instanceof Error?error.message:'Could not start session.');}};
   const progress=async()=>{if(!session)return;try{const data=await cloudflareApi.request<any>(`/api/venue-bounties/${session.id}/progress`,{method:'POST'});if(data.status==='escaped'){Alert.alert('Venue session complete',`+${data.reward} GC secured.`);setSession(null);}else setSession({id:session.id,stars:data.stars,endsAt:data.endsAt});}catch(error){Alert.alert('Session update failed',error instanceof Error?error.message:'Try again.');}};
   const remaining=session?Math.max(0,Math.ceil((Date.parse(session.endsAt)-now)/1000)):600;
@@ -2002,6 +2011,8 @@ const styles = StyleSheet.create({
   commandDriveRow: { borderColor: 'rgba(255,255,255,.25)', backgroundColor: 'rgba(255,255,255,.055)' },
   networkError: { color: '#E8A7A7', fontSize: 8, fontWeight: '800', lineHeight: 13, marginTop: 7 },
   driveDock: { flexDirection: 'row', gap: 7, marginTop: 12 },
+  previewLaunch: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(44,255,131,.25)', gap: 8 },
+  previewLaunchMeta: { color: '#2CFF83', fontSize: 8, fontWeight: '900', textAlign: 'center', letterSpacing: .45 },
   navigationTop: { position: 'absolute', top: 70, left: 12, right: 12, minHeight: 108, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,.34)', backgroundColor: 'rgba(2,5,3,.92)', shadowColor: '#FFFFFF', shadowOpacity: .12, shadowRadius: 18 },
   navigationManeuver: { color: paper, fontSize: 15, fontWeight: '900', letterSpacing: .7 },
   navigationRoad: { color: '#2CFF83', fontSize: 10, fontWeight: '900', letterSpacing: .55, marginTop: 6 },
