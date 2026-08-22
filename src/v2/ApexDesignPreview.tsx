@@ -230,7 +230,12 @@ function VaporStory(){
 }
 
 function AndroidDownloadButton(){
-  const download=()=>void Linking.openURL(ANDROID_DOWNLOAD_URL);
+  const download=()=>{
+    if(Platform.OS==='web'&&typeof document!=='undefined'){
+      const link=document.createElement('a');link.href=ANDROID_DOWNLOAD_URL;link.download='apex-ugr.apk';link.rel='noopener';document.body.appendChild(link);link.click();link.remove();return;
+    }
+    void Linking.openURL(ANDROID_DOWNLOAD_URL);
+  };
   return <Pressable onPress={download} style={styles.androidDownload}><View style={styles.androidDownloadIcon}><PackageCheck size={19} color={paper}/></View><View style={{flex:1}}><Text style={styles.androidDownloadTitle}>DOWNLOAD ANDROID APK</Text><Text style={styles.androidDownloadMeta}>LATEST VERIFIED RELEASE · STABLE LINK</Text></View><ChevronRight size={17} color={muted}/></Pressable>;
 }
 
