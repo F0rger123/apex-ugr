@@ -79,6 +79,7 @@ jobs:
           unzip -t apex-ugr.apk >/dev/null
 
       - name: Publish public Cloudflare download
+        if: github.ref == 'refs/heads/main'
         env:
           RELEASE_UPLOAD_TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
         run: |
@@ -92,6 +93,7 @@ jobs:
             https://apex-ugr.pages.dev/api/admin/android-release
 
       - name: Publish immutable GitHub release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
