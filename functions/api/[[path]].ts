@@ -1307,6 +1307,7 @@ async function handle(request: Request, env: Env, path: string) {
       env.DB.prepare('UPDATE users SET points = points + ? WHERE id=?').bind(rewardRep, user.id),
       env.DB.prepare("UPDATE bounty_participants SET status='claimed' WHERE session_id=? AND user_id=?").bind(sessionId,user.id),
       env.DB.prepare("UPDATE bounty_user_settings SET cooldown_until=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(`+${Math.max(1,Number(config?.cooldown_minutes||30))} minutes`,session.target_user_id),
+      env.DB.prepare('UPDATE ghost_profiles SET bounty_claims = bounty_claims + 1 WHERE user_id=?').bind(user.id),
       env.DB.prepare(`
         INSERT INTO bounty_user_stats(user_id, successful_claims, highest_star_claimed, current_hunter_streak, best_hunter_streak, five_star_claims, hunter_gc_earned, hunter_rep_earned)
         VALUES(?, 1, ?, 1, 1, ?, ?, ?)
@@ -1414,6 +1415,7 @@ async function handle(request: Request, env: Env, path: string) {
     await env.DB.batch([
       env.DB.prepare('UPDATE users SET points = points + ? WHERE id=?').bind(rewardRep, session.target_user_id),
       env.DB.prepare("UPDATE bounty_user_settings SET cooldown_until=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(`+${Math.max(1,Number(config?.cooldown_minutes||30))} minutes`,session.target_user_id),
+      env.DB.prepare('UPDATE ghost_profiles SET bounty_escapes = bounty_escapes + 1 WHERE user_id=?').bind(session.target_user_id),
       env.DB.prepare(`
         INSERT INTO bounty_user_stats(user_id, escapes, highest_star_survived, five_star_survivals, current_survival_streak, best_survival_streak, survivor_gc_earned, survivor_rep_earned)
         VALUES(?, 1, 5, 1, 1, 1, ?, ?)
