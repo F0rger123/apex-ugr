@@ -55,7 +55,7 @@ export const cloudflareApi = {
     return request<{ published: boolean; size: number; version: string }>('/api/admin/android-release', {
       method: 'POST',
       body: file,
-      headers: { 'Content-Type': 'application/vnd.android.package-archive', 'X-Apex-Version': '1.3.1 (13)' },
+      headers: { 'Content-Type': 'application/vnd.android.package-archive', 'X-Apex-Version': '1.4.0 (14)' },
     });
   },
 };
