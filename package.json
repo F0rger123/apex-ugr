@@ -7,7 +7,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build": "npx expo export --platform web",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test:phase2": "node scripts/phase2Regression.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
