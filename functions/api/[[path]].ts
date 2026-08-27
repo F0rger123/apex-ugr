@@ -1,9 +1,13 @@
 /// <reference types="@cloudflare/workers-types" />
 
 // @ts-ignore JavaScript module is shared with the deterministic Node regression suite.
-import { grantCosmeticDrop, grantGhostKey, handlePhase2 } from '../lib/phase2-api.mjs';
+import { grantCosmeticDrop, grantGhostKey, handlePhase2 } from "../lib/phase2-api.mjs";
 // @ts-ignore JavaScript module is shared with the deterministic Node regression suite.
-import { nextSerial } from '../lib/phase2-core.mjs';
+import { nextSerial } from "../lib/phase2-core.mjs";
+// @ts-ignore JavaScript module is shared with the deterministic Node regression suite.
+import { handlePhase3 } from "../lib/phase3-api.mjs";
+// @ts-ignore JavaScript module is shared with the deterministic Node regression suite.
+import { racePayoutShare } from "../lib/phase3-core.mjs";
 
 interface Env {
   DB: D1Database;
@@ -16,69 +20,161 @@ interface Env {
 }
 
 type UserRow = {
-  id: string; email: string; username: string; display_name: string; avatar_url: string | null;
-  credits: number; points: number; tier: string; wins: number; losses: number; reputation: number; decline_streak: number;
+  id: string;
+  email: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  credits: number;
+  points: number;
+  tier: string;
+  wins: number;
+  losses: number;
+  reputation: number;
+  decline_streak: number;
 };
 
 const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization,content-type',
-  'Access-Control-Allow-Methods': 'GET,HEAD,POST,PUT,DELETE,OPTIONS',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization,content-type",
+  "Access-Control-Allow-Methods": "GET,HEAD,POST,PUT,DELETE,OPTIONS",
 };
 
-const DEVELOPER_EMAIL = 'drummerforger@gmail.com';
-const ROOT_ACCESS_CODE_HASH = '99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718';
-const ANDROID_RELEASE_KEY = 'releases/apex-ugr-latest.apk';
+const DEVELOPER_EMAIL = "drummerforger@gmail.com";
+const ROOT_ACCESS_CODE_HASH = "99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718";
+const ANDROID_RELEASE_KEY = "releases/apex-ugr-latest.apk";
 
 function normalizeInviteCode(value: string) {
-  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
 }
 
-async function isRootAccessCode(value:string){
-  const normalized=normalizeInviteCode(value);
-  return Boolean(normalized)&&await sha256Hex(normalized)===ROOT_ACCESS_CODE_HASH;
+async function isRootAccessCode(value: string) {
+  const normalized = normalizeInviteCode(value);
+  return Boolean(normalized) && (await sha256Hex(normalized)) === ROOT_ACCESS_CODE_HASH;
 }
 
 function createInviteCode() {
-  const bytes=crypto.getRandomValues(new Uint8Array(6));
-  return Array.from(bytes,byte=>String(byte%10)).join('');
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  return Array.from(bytes, (byte) => String(byte % 10)).join("");
 }
 
-let ebayAccessToken:{value:string;expiresAt:number}|null=null;
+let ebayAccessToken: { value: string; expiresAt: number } | null = null;
 
-async function ebayApplicationToken(env:Env){
-  if(!env.EBAY_CLIENT_ID||!env.EBAY_CLIENT_SECRET)throw new Error('eBay is not configured.');
-  if(ebayAccessToken&&ebayAccessToken.expiresAt>Date.now()+60_000)return ebayAccessToken.value;
-  const credentials=btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
-  const response=await fetch('https://api.ebay.com/identity/v1/oauth2/token',{method:'POST',headers:{Authorization:`Basic ${credentials}`,'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope'});
-  const payload=await response.json<{access_token?:string;expires_in?:number;error_description?:string}>();
-  if(!response.ok||!payload.access_token)throw new Error(payload.error_description||'eBay authorization failed.');
-  ebayAccessToken={value:payload.access_token,expiresAt:Date.now()+Math.max(60,payload.expires_in||7200)*1000};
+async function ebayApplicationToken(env: Env) {
+  if (!env.EBAY_CLIENT_ID || !env.EBAY_CLIENT_SECRET) throw new Error("eBay is not configured.");
+  if (ebayAccessToken && ebayAccessToken.expiresAt > Date.now() + 60_000) return ebayAccessToken.value;
+  const credentials = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
+  const response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
+  });
+  const payload = await response.json<{
+    access_token?: string;
+    expires_in?: number;
+    error_description?: string;
+  }>();
+  if (!response.ok || !payload.access_token) throw new Error(payload.error_description || "eBay authorization failed.");
+  ebayAccessToken = {
+    value: payload.access_token,
+    expiresAt: Date.now() + Math.max(60, payload.expires_in || 7200) * 1000,
+  };
   return ebayAccessToken.value;
 }
 
-function ebayCompatibilityFilter(vehicle:Record<string,string|number>){
-  const entries=[['Year',vehicle.year],['Make',vehicle.make],['Model',vehicle.model],['Trim',vehicle.trim],['Engine',vehicle.engine]].filter(([,value])=>String(value||'').trim());
-  return entries.map(([name,value])=>`${name}:${String(value).trim()}`).join(';');
+function ebayCompatibilityFilter(vehicle: Record<string, string | number>) {
+  const entries = [
+    ["Year", vehicle.year],
+    ["Make", vehicle.make],
+    ["Model", vehicle.model],
+    ["Trim", vehicle.trim],
+    ["Engine", vehicle.engine],
+  ].filter(([, value]) => String(value || "").trim());
+  return entries.map(([name, value]) => `${name}:${String(value).trim()}`).join(";");
 }
 
-async function ebayPartsSearch(env:Env,vehicle:Record<string,string|number>,query:string){
-  const token=await ebayApplicationToken(env);const params=new URLSearchParams({q:`${vehicle.year} ${vehicle.make} ${vehicle.model} ${query}`.slice(0,120),limit:'24',compatibility_filter:ebayCompatibilityFilter(vehicle)});
-  const response=await fetch(`https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`,{headers:{Authorization:`Bearer ${token}`,'X-EBAY-C-MARKETPLACE-ID':'EBAY_US','Accept':'application/json'}});
-  const payload=await response.json<{itemSummaries?:Array<any>;errors?:Array<{message?:string}>}>();
-  if(!response.ok)throw new Error(payload.errors?.[0]?.message||'eBay catalog search failed.');
-  return (payload.itemSummaries||[]).filter(item=>item.compatibilityMatch==='EXACT').map(item=>({
-    id:`ebay-${item.itemId}`,provider:'eBay Motors',title:String(item.title||'Untitled eBay listing'),imageUrl:item.image?.imageUrl||item.thumbnailImages?.[0]?.imageUrl||null,price:Number(item.price?.value||0),currency:String(item.price?.currency||'USD'),condition:item.condition||null,seller:item.seller?.username||null,shipping:item.shippingOptions?.[0]?.shippingCost?.value?`${item.shippingOptions[0].shippingCost.currency||'USD'} ${item.shippingOptions[0].shippingCost.value} shipping`:null,purchaseUrl:item.itemWebUrl||`https://www.ebay.com/itm/${String(item.itemId||'').replace(/^v1\|([^|]+).*/,'$1')}`,compatibility:'exact fitment',
-  }));
+async function ebayPartsSearch(env: Env, vehicle: Record<string, string | number>, query: string) {
+  const token = await ebayApplicationToken(env);
+  const params = new URLSearchParams({
+    q: `${vehicle.year} ${vehicle.make} ${vehicle.model} ${query}`.slice(0, 120),
+    limit: "24",
+    compatibility_filter: ebayCompatibilityFilter(vehicle),
+  });
+  const response = await fetch(`https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+      Accept: "application/json",
+    },
+  });
+  const payload = await response.json<{
+    itemSummaries?: Array<any>;
+    errors?: Array<{ message?: string }>;
+  }>();
+  if (!response.ok) throw new Error(payload.errors?.[0]?.message || "eBay catalog search failed.");
+  return (payload.itemSummaries || [])
+    .filter((item) => item.compatibilityMatch === "EXACT")
+    .map((item) => ({
+      id: `ebay-${item.itemId}`,
+      provider: "eBay Motors",
+      title: String(item.title || "Untitled eBay listing"),
+      imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || null,
+      price: Number(item.price?.value || 0),
+      currency: String(item.price?.currency || "USD"),
+      condition: item.condition || null,
+      seller: item.seller?.username || null,
+      shipping: item.shippingOptions?.[0]?.shippingCost?.value ? `${item.shippingOptions[0].shippingCost.currency || "USD"} ${item.shippingOptions[0].shippingCost.value} shipping` : null,
+      purchaseUrl: item.itemWebUrl || `https://www.ebay.com/itm/${String(item.itemId || "").replace(/^v1\|([^|]+).*/, "$1")}`,
+      compatibility: "exact fitment",
+    }));
 }
 
-function distanceMeters(aLat:number,aLng:number,bLat:number,bLng:number){const rad=Math.PI/180;const dLat=(bLat-aLat)*rad,dLng=(bLng-aLng)*rad;const h=Math.sin(dLat/2)**2+Math.cos(aLat*rad)*Math.cos(bLat*rad)*Math.sin(dLng/2)**2;return 6371000*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}
-function destinationPoint(latitude:number,longitude:number,distance:number,bearing:number){const radius=6371000,delta=distance/radius,theta=bearing*Math.PI/180,lat1=latitude*Math.PI/180,lng1=longitude*Math.PI/180;const lat2=Math.asin(Math.sin(lat1)*Math.cos(delta)+Math.cos(lat1)*Math.sin(delta)*Math.cos(theta));const lng2=lng1+Math.atan2(Math.sin(theta)*Math.sin(delta)*Math.cos(lat1),Math.cos(delta)-Math.sin(lat1)*Math.sin(lat2));return{latitude:lat2*180/Math.PI,longitude:lng2*180/Math.PI};}
+function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const rad = Math.PI / 180;
+  const dLat = (bLat - aLat) * rad,
+    dLng = (bLng - aLng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * rad) * Math.cos(bLat * rad) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+function destinationPoint(latitude: number, longitude: number, distance: number, bearing: number) {
+  const radius = 6371000,
+    delta = distance / radius,
+    theta = (bearing * Math.PI) / 180,
+    lat1 = (latitude * Math.PI) / 180,
+    lng1 = (longitude * Math.PI) / 180;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(delta) + Math.cos(lat1) * Math.sin(delta) * Math.cos(theta));
+  const lng2 = lng1 + Math.atan2(Math.sin(theta) * Math.sin(delta) * Math.cos(lat1), Math.cos(delta) - Math.sin(lat1) * Math.sin(lat2));
+  return {
+    latitude: (lat2 * 180) / Math.PI,
+    longitude: (lng2 * 180) / Math.PI,
+  };
+}
 
-function generatedImageBlock(value:unknown):{data:string;mimeType:string}|null{
-  if(!value||typeof value!=='object')return null;const row=value as Record<string,unknown>;
-  if(row.type==='image'&&typeof row.data==='string')return{data:row.data,mimeType:typeof row.mime_type==='string'?row.mime_type:'image/png'};
-  for(const child of Object.values(row)){if(Array.isArray(child)){for(const item of child){const found=generatedImageBlock(item);if(found)return found;}}else{const found=generatedImageBlock(child);if(found)return found;}}
+function generatedImageBlock(value: unknown): { data: string; mimeType: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (row.type === "image" && typeof row.data === "string")
+    return {
+      data: row.data,
+      mimeType: typeof row.mime_type === "string" ? row.mime_type : "image/png",
+    };
+  for (const child of Object.values(row)) {
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        const found = generatedImageBlock(item);
+        if (found) return found;
+      }
+    } else {
+      const found = generatedImageBlock(child);
+      if (found) return found;
+    }
+  }
   return null;
 }
 
@@ -87,853 +183,2127 @@ function json(body: unknown, status = 200) {
 }
 
 function bytesToBase64(bytes: Uint8Array) {
-  let value = '';
+  let value = "";
   for (const byte of bytes) value += String.fromCharCode(byte);
   return btoa(value);
 }
 
 function base64ToBytes(value: string) {
-  return Uint8Array.from(atob(value), char => char.charCodeAt(0));
+  return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 }
 
 async function sha256(value: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return bytesToBase64(new Uint8Array(digest));
 }
 
 async function sha256Hex(value: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function passwordHash(password: string, salt: Uint8Array) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100_000 }, key, 256);
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 100_000 }, key, 256);
   return bytesToBase64(new Uint8Array(bits));
 }
 
 function publicUser(user: UserRow) {
   return {
-    id: user.id, email: user.email, username: user.username, displayName: user.display_name,
-    avatarUrl: user.avatar_url, credits: user.credits, points: user.points, tier: user.tier,
-    wins: user.wins, losses: user.losses, reputation: user.reputation, declineStreak: user.decline_streak,
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    displayName: user.display_name,
+    avatarUrl: user.avatar_url,
+    credits: user.credits,
+    points: user.points,
+    tier: user.tier,
+    wins: user.wins,
+    losses: user.losses,
+    reputation: user.reputation,
+    declineStreak: user.decline_streak,
     isDeveloper: user.email.toLowerCase() === DEVELOPER_EMAIL,
   };
 }
 
 async function authenticatedUser(request: Request, env: Env) {
-  const bearer = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!bearer) return null;
   const tokenHash = await sha256(bearer);
-  return env.DB.prepare(`SELECT u.id,u.email,u.username,u.display_name,u.avatar_url,u.credits,u.points,u.tier,u.wins,u.losses,u.reputation,u.decline_streak
-    FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`)
-    .bind(tokenHash, new Date().toISOString()).first<UserRow>();
+  return env.DB.prepare(
+    `SELECT u.id,u.email,u.username,u.display_name,u.avatar_url,u.credits,u.points,u.tier,u.wins,u.losses,u.reputation,u.decline_streak
+    FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`,
+  )
+    .bind(tokenHash, new Date().toISOString())
+    .first<UserRow>();
 }
 
 async function createSession(user: UserRow, env: Env) {
-  const token = `${crypto.randomUUID()}${crypto.randomUUID().replaceAll('-', '')}`;
+  const token = `${crypto.randomUUID()}${crypto.randomUUID().replaceAll("-", "")}`;
   const tokenHash = await sha256(token);
   const expires = new Date(Date.now() + 30 * 86400_000).toISOString();
-  await env.DB.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)').bind(tokenHash, user.id, expires).run();
+  await env.DB.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)").bind(tokenHash, user.id, expires).run();
   return { token, user: publicUser(user) };
 }
 
-async function syncGameProgress(userId:string,env:Env){
-  const [discoveries,drops,territories,safeHouses]=await Promise.all([
-    env.DB.prepare('SELECT COUNT(*) count FROM map_discoveries WHERE user_id=?').bind(userId).first<{count:number}>(),
-    env.DB.prepare('SELECT COUNT(*) count FROM dead_drop_claims WHERE user_id=?').bind(userId).first<{count:number}>(),
-    env.DB.prepare('SELECT COUNT(*) count FROM territory_unlocks WHERE user_id=?').bind(userId).first<{count:number}>(),
-    env.DB.prepare('SELECT COUNT(*) count FROM safe_houses WHERE user_id=?').bind(userId).first<{count:number}>(),
-  ]);
-  const counts:Record<string,number>={discoveries:discoveries?.count||0,drops:drops?.count||0,territories:territories?.count||0,safe_houses:safeHouses?.count||0};
-  if(counts.discoveries>0)await env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'first-trace')").bind(userId).run();
-  const active=await env.DB.prepare(`SELECT p.contract_id,p.status,c.metric,c.target,c.reward_credits,c.badge_id FROM contract_progress p JOIN contracts c ON c.id=p.contract_id WHERE p.user_id=? AND p.status<>'completed'`).bind(userId).all<{contract_id:string;status:string;metric:string;target:number;reward_credits:number;badge_id:string|null}>();
-  const completed:string[]=[];
-  for(const contract of active.results){
-    const progress=Math.min(Number(contract.target),counts[contract.metric]||0);
-    if(progress<Number(contract.target)){await env.DB.prepare('UPDATE contract_progress SET progress=? WHERE contract_id=? AND user_id=?').bind(progress,contract.contract_id,userId).run();continue;}
-    const result=await env.DB.prepare("UPDATE contract_progress SET progress=?,status='completed',completed_at=CURRENT_TIMESTAMP WHERE contract_id=? AND user_id=? AND status<>'completed'").bind(progress,contract.contract_id,userId).run();
-    if(result.meta.changes){const statements=[env.DB.prepare('UPDATE users SET credits=credits+?,points=points+? WHERE id=?').bind(Number(contract.reward_credits),Math.max(10,Math.floor(Number(contract.reward_credits)/10)),userId)];if(contract.badge_id)statements.push(env.DB.prepare('INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,?)').bind(userId,contract.badge_id));await env.DB.batch(statements);completed.push(contract.contract_id);}
+async function syncGameProgress(userId: string, env: Env) {
+  const [discoveries, drops, territories, safeHouses] = await Promise.all([env.DB.prepare("SELECT COUNT(*) count FROM map_discoveries WHERE user_id=?").bind(userId).first<{ count: number }>(), env.DB.prepare("SELECT COUNT(*) count FROM dead_drop_claims WHERE user_id=?").bind(userId).first<{ count: number }>(), env.DB.prepare("SELECT COUNT(*) count FROM territory_unlocks WHERE user_id=?").bind(userId).first<{ count: number }>(), env.DB.prepare("SELECT COUNT(*) count FROM safe_houses WHERE user_id=?").bind(userId).first<{ count: number }>()]);
+  const counts: Record<string, number> = {
+    discoveries: discoveries?.count || 0,
+    drops: drops?.count || 0,
+    territories: territories?.count || 0,
+    safe_houses: safeHouses?.count || 0,
+  };
+  if (counts.discoveries > 0) await env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'first-trace')").bind(userId).run();
+  const active = await env.DB.prepare(`SELECT p.contract_id,p.status,c.metric,c.target,c.reward_credits,c.badge_id FROM contract_progress p JOIN contracts c ON c.id=p.contract_id WHERE p.user_id=? AND p.status<>'completed'`).bind(userId).all<{
+    contract_id: string;
+    status: string;
+    metric: string;
+    target: number;
+    reward_credits: number;
+    badge_id: string | null;
+  }>();
+  const completed: string[] = [];
+  for (const contract of active.results) {
+    const progress = Math.min(Number(contract.target), counts[contract.metric] || 0);
+    if (progress < Number(contract.target)) {
+      await env.DB.prepare("UPDATE contract_progress SET progress=? WHERE contract_id=? AND user_id=?").bind(progress, contract.contract_id, userId).run();
+      continue;
+    }
+    const result = await env.DB.prepare("UPDATE contract_progress SET progress=?,status='completed',completed_at=CURRENT_TIMESTAMP WHERE contract_id=? AND user_id=? AND status<>'completed'").bind(progress, contract.contract_id, userId).run();
+    if (result.meta.changes) {
+      const statements = [env.DB.prepare("UPDATE users SET credits=credits+?,points=points+? WHERE id=?").bind(Number(contract.reward_credits), Math.max(10, Math.floor(Number(contract.reward_credits) / 10)), userId)];
+      if (contract.badge_id) statements.push(env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,?)").bind(userId, contract.badge_id));
+      await env.DB.batch(statements);
+      completed.push(contract.contract_id);
+    }
   }
-  return {counts,completed};
+  return { counts, completed };
 }
 
-async function ghostProfile(userId:string,env:Env){
-  await env.DB.prepare('INSERT OR IGNORE INTO ghost_profiles(user_id) VALUES(?)').bind(userId).run();
-  return env.DB.prepare('SELECT * FROM ghost_profiles WHERE user_id=?').bind(userId).first<{credits:number;current_streak:number;best_streak:number;activities_completed:number;drops_claimed:number;trails_completed:number;bounty_escapes:number;bounty_claims:number}>();
+async function ghostProfile(userId: string, env: Env) {
+  await env.DB.prepare("INSERT OR IGNORE INTO ghost_profiles(user_id) VALUES(?)").bind(userId).run();
+  return env.DB.prepare("SELECT * FROM ghost_profiles WHERE user_id=?").bind(userId).first<{
+    credits: number;
+    current_streak: number;
+    best_streak: number;
+    activities_completed: number;
+    drops_claimed: number;
+    trails_completed: number;
+    bounty_escapes: number;
+    bounty_claims: number;
+  }>();
 }
 
-async function grantGhostCredits(userId:string,amount:number,source:string,activityId:string|undefined,env:Env){
-  const profile=await ghostProfile(userId,env);const before=Number(profile?.credits||0),after=before+Math.max(0,Math.floor(amount));
-  await env.DB.batch([env.DB.prepare('UPDATE ghost_profiles SET credits=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(after,userId),env.DB.prepare('INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),userId,after-before,source,activityId||null,before,after)]);
+async function grantGhostCredits(userId: string, amount: number, source: string, activityId: string | undefined, env: Env) {
+  const profile = await ghostProfile(userId, env);
+  const before = Number(profile?.credits || 0),
+    after = before + Math.max(0, Math.floor(amount));
+  await env.DB.batch([env.DB.prepare("UPDATE ghost_profiles SET credits=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(after, userId), env.DB.prepare("INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after) VALUES(?,?,?,?,?,?,?)").bind(crypto.randomUUID(), userId, after - before, source, activityId || null, before, after)]);
   return after;
 }
 
-async function refreshRank(userId:string,env:Env){
-  const user=await env.DB.prepare('SELECT points,tier FROM users WHERE id=?').bind(userId).first<{points:number;tier:string}>();const thresholds=await env.DB.prepare('SELECT * FROM rank_thresholds WHERE minimum_rep<=? ORDER BY minimum_rep DESC LIMIT 1').bind(Number(user?.points||0)).first<{rank:string;minimum_rep:number;reward_gc:number}>();if(!user||!thresholds||user.tier===thresholds.rank)return {rank:user?.tier||'ROOKIE',changed:false,next:null};
-  await env.DB.batch([env.DB.prepare('UPDATE users SET tier=? WHERE id=?').bind(thresholds.rank,userId),env.DB.prepare('INSERT INTO rank_history(id,user_id,rank,rep) VALUES(?,?,?,?)').bind(crypto.randomUUID(),userId,thresholds.rank,user.points),env.DB.prepare('INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)').bind(crypto.randomUUID(),userId,'rank_up','RANK UP',`You reached ${thresholds.rank}.`,JSON.stringify({rank:thresholds.rank}))]);if(thresholds.reward_gc)await grantGhostCredits(userId,thresholds.reward_gc,'RANK REWARD',thresholds.rank,env);return {rank:thresholds.rank,changed:true,next:null};
+async function refreshRank(userId: string, env: Env) {
+  const user = await env.DB.prepare("SELECT points,tier FROM users WHERE id=?").bind(userId).first<{ points: number; tier: string }>();
+  const thresholds = await env.DB.prepare("SELECT * FROM rank_thresholds WHERE minimum_rep<=? ORDER BY minimum_rep DESC LIMIT 1")
+    .bind(Number(user?.points || 0))
+    .first<{ rank: string; minimum_rep: number; reward_gc: number }>();
+  if (!user || !thresholds || user.tier === thresholds.rank) return { rank: user?.tier || "ROOKIE", changed: false, next: null };
+  await env.DB.batch([env.DB.prepare("UPDATE users SET tier=? WHERE id=?").bind(thresholds.rank, userId), env.DB.prepare("INSERT INTO rank_history(id,user_id,rank,rep) VALUES(?,?,?,?)").bind(crypto.randomUUID(), userId, thresholds.rank, user.points), env.DB.prepare("INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)").bind(crypto.randomUUID(), userId, "rank_up", "RANK UP", `You reached ${thresholds.rank}.`, JSON.stringify({ rank: thresholds.rank }))]);
+  if (thresholds.reward_gc) await grantGhostCredits(userId, thresholds.reward_gc, "RANK REWARD", thresholds.rank, env);
+  return { rank: thresholds.rank, changed: true, next: null };
 }
 
 function providerSearches(vehicle: Record<string, string | number>, query: string) {
-  const terms = encodeURIComponent(`${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ''} ${query}`.replace(/\s+/g, ' ').trim());
+  const terms = encodeURIComponent(`${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ""} ${query}`.replace(/\s+/g, " ").trim());
   const make = String(vehicle.make).toLowerCase();
   const providers = [
-    { name: 'AutoZone', mode: 'direct_search', url: `https://www.autozone.com/searchresult?searchText=${terms}` },
-    { name: 'Summit Racing', mode: 'direct_search', url: `https://www.summitracing.com/search?keyword=${terms}` },
-    { name: 'Vivid Racing', mode: 'direct_search', url: `https://www.vividracing.com/catalogsearch/result/?q=${terms}` },
+    {
+      name: "AutoZone",
+      mode: "direct_search",
+      url: `https://www.autozone.com/searchresult?searchText=${terms}`,
+    },
+    {
+      name: "Summit Racing",
+      mode: "direct_search",
+      url: `https://www.summitracing.com/search?keyword=${terms}`,
+    },
+    {
+      name: "Vivid Racing",
+      mode: "direct_search",
+      url: `https://www.vividracing.com/catalogsearch/result/?q=${terms}`,
+    },
   ];
-  const jdm = new Set(['acura','honda','infiniti','lexus','mazda','mitsubishi','nissan','scion','subaru','suzuki','toyota']);
-  const american = new Set(['buick','cadillac','chevrolet','chrysler','dodge','ford','gmc','jeep','lincoln','pontiac','ram']);
-  const european = new Set(['alfa romeo','audi','bentley','bmw','fiat','jaguar','land rover','mercedes-benz','mini','porsche','saab','volkswagen','volvo']);
-  if (jdm.has(make)) providers.push(
-    { name: 'Enjuku Racing', mode: 'direct_search', url: `https://www.enjukuracing.com/search.php?search_query=${terms}` },
-    { name: 'MAPerformance', mode: 'direct_search', url: `https://www.maperformance.com/search?type=product&q=${terms}` },
-    { name: 'Nengun Performance', mode: 'direct_search', url: `https://www.nengun.com/search?q=${terms}` },
-  );
-  if (american.has(make)) providers.push(
-    { name: 'AmericanMuscle', mode: 'direct_search', url: `https://www.americanmuscle.com/search?keywords=${terms}` },
-    { name: 'JEGS', mode: 'direct_search', url: `https://www.jegs.com/webapp/wcs/stores/servlet/SearchResultsPageCmd?Ntt=${terms}` },
-  );
-  if (european.has(make)) providers.push(
-    { name: 'ECS Tuning', mode: 'direct_search', url: `https://www.ecstuning.com/Search/SiteSearch/${terms}/` },
-    { name: 'FCP Euro', mode: 'direct_search', url: `https://www.fcpeuro.com/page/search?query=${terms}` },
-  );
+  const jdm = new Set(["acura", "honda", "infiniti", "lexus", "mazda", "mitsubishi", "nissan", "scion", "subaru", "suzuki", "toyota"]);
+  const american = new Set(["buick", "cadillac", "chevrolet", "chrysler", "dodge", "ford", "gmc", "jeep", "lincoln", "pontiac", "ram"]);
+  const european = new Set(["alfa romeo", "audi", "bentley", "bmw", "fiat", "jaguar", "land rover", "mercedes-benz", "mini", "porsche", "saab", "volkswagen", "volvo"]);
+  if (jdm.has(make))
+    providers.push(
+      {
+        name: "Enjuku Racing",
+        mode: "direct_search",
+        url: `https://www.enjukuracing.com/search.php?search_query=${terms}`,
+      },
+      {
+        name: "MAPerformance",
+        mode: "direct_search",
+        url: `https://www.maperformance.com/search?type=product&q=${terms}`,
+      },
+      {
+        name: "Nengun Performance",
+        mode: "direct_search",
+        url: `https://www.nengun.com/search?q=${terms}`,
+      },
+    );
+  if (american.has(make))
+    providers.push(
+      {
+        name: "AmericanMuscle",
+        mode: "direct_search",
+        url: `https://www.americanmuscle.com/search?keywords=${terms}`,
+      },
+      {
+        name: "JEGS",
+        mode: "direct_search",
+        url: `https://www.jegs.com/webapp/wcs/stores/servlet/SearchResultsPageCmd?Ntt=${terms}`,
+      },
+    );
+  if (european.has(make))
+    providers.push(
+      {
+        name: "ECS Tuning",
+        mode: "direct_search",
+        url: `https://www.ecstuning.com/Search/SiteSearch/${terms}/`,
+      },
+      {
+        name: "FCP Euro",
+        mode: "direct_search",
+        url: `https://www.fcpeuro.com/page/search?query=${terms}`,
+      },
+    );
   return providers;
 }
 
-async function geocode(destination: string, origin?: {latitude:number;longitude:number}) {
-  const geoUrl=new URL('https://nominatim.openstreetmap.org/search');
-  geoUrl.searchParams.set('q',destination.trim()); geoUrl.searchParams.set('format','jsonv2'); geoUrl.searchParams.set('limit','1');
-  if(origin){geoUrl.searchParams.set('viewbox',`${origin.longitude-.35},${origin.latitude+.28},${origin.longitude+.35},${origin.latitude-.28}`);geoUrl.searchParams.set('bounded','0');}
-  const geo=await fetch(geoUrl,{headers:{'User-Agent':'ApexUGR/1.0 (https://apex-ugr.pages.dev)'}});
-  const places=await geo.json<Array<{lat:string;lon:string;display_name:string}>>();
-  if(!places[0]) return null;
-  return {latitude:Number(places[0].lat),longitude:Number(places[0].lon),name:places[0].display_name};
+async function geocode(destination: string, origin?: { latitude: number; longitude: number }) {
+  const geoUrl = new URL("https://nominatim.openstreetmap.org/search");
+  geoUrl.searchParams.set("q", destination.trim());
+  geoUrl.searchParams.set("format", "jsonv2");
+  geoUrl.searchParams.set("limit", "1");
+  if (origin) {
+    geoUrl.searchParams.set("viewbox", `${origin.longitude - 0.35},${origin.latitude + 0.28},${origin.longitude + 0.35},${origin.latitude - 0.28}`);
+    geoUrl.searchParams.set("bounded", "0");
+  }
+  const geo = await fetch(geoUrl, {
+    headers: { "User-Agent": "ApexUGR/1.0 (https://apex-ugr.pages.dev)" },
+  });
+  const places = await geo.json<Array<{ lat: string; lon: string; display_name: string }>>();
+  if (!places[0]) return null;
+  return {
+    latitude: Number(places[0].lat),
+    longitude: Number(places[0].lon),
+    name: places[0].display_name,
+  };
 }
 
-async function osrmRoute(routePath:string){
-  const providers=['https://router.project-osrm.org','https://routing.openstreetmap.de/routed-car'];let lastStatus=0;
-  for(const provider of providers){const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);try{const response=await fetch(`${provider}/route/v1/driving/${routePath}?overview=full&geometries=geojson&steps=true`,{signal:controller.signal,headers:{Accept:'application/json','User-Agent':'ApexUGR/1.2 (https://apex-ugr.pages.dev)'}});lastStatus=response.status;if(!response.ok)continue;const data=await response.json<any>();if(data.routes?.[0])return{segment:data.routes[0],status:response.status};}catch(error){console.warn('routing_provider_failed',{provider:new URL(provider).hostname,message:error instanceof Error?error.message:'unknown'});}finally{clearTimeout(timeout);}}
-  return{segment:null,status:lastStatus};
+async function osrmRoute(routePath: string) {
+  const providers = ["https://router.project-osrm.org", "https://routing.openstreetmap.de/routed-car"];
+  let lastStatus = 0;
+  for (const provider of providers) {
+    const controller = new AbortController(),
+      timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(`${provider}/route/v1/driving/${routePath}?overview=full&geometries=geojson&steps=true`, {
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "ApexUGR/1.2 (https://apex-ugr.pages.dev)",
+        },
+      });
+      lastStatus = response.status;
+      if (!response.ok) continue;
+      const data = await response.json<any>();
+      if (data.routes?.[0]) return { segment: data.routes[0], status: response.status };
+    } catch (error) {
+      console.warn("routing_provider_failed", {
+        provider: new URL(provider).hostname,
+        message: error instanceof Error ? error.message : "unknown",
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return { segment: null, status: lastStatus };
 }
 
-async function addressSuggestions(query: string, origin?: {latitude:number;longitude:number}) {
-  const geoUrl=new URL('https://nominatim.openstreetmap.org/search');
-  geoUrl.searchParams.set('q',query.trim()); geoUrl.searchParams.set('format','jsonv2'); geoUrl.searchParams.set('limit','6'); geoUrl.searchParams.set('addressdetails','1');
-  if(origin){geoUrl.searchParams.set('viewbox',`${origin.longitude-.35},${origin.latitude+.28},${origin.longitude+.35},${origin.latitude-.28}`);geoUrl.searchParams.set('bounded','0');}
-  const response=await fetch(geoUrl,{headers:{'User-Agent':'ApexUGR/1.0 (https://apex-ugr.pages.dev)','Accept-Language':'en'}});
-  const places=await response.json<Array<{place_id:number;lat:string;lon:string;display_name:string;type?:string}>>();
-  const unique=new Map<string,{id:string;name:string;latitude:number;longitude:number;type:string}>();
-  for(const place of places){if(!unique.has(place.display_name))unique.set(place.display_name,{id:String(place.place_id),name:place.display_name,latitude:Number(place.lat),longitude:Number(place.lon),type:place.type||'place'});}
+async function addressSuggestions(query: string, origin?: { latitude: number; longitude: number }) {
+  const geoUrl = new URL("https://nominatim.openstreetmap.org/search");
+  geoUrl.searchParams.set("q", query.trim());
+  geoUrl.searchParams.set("format", "jsonv2");
+  geoUrl.searchParams.set("limit", "6");
+  geoUrl.searchParams.set("addressdetails", "1");
+  if (origin) {
+    geoUrl.searchParams.set("viewbox", `${origin.longitude - 0.35},${origin.latitude + 0.28},${origin.longitude + 0.35},${origin.latitude - 0.28}`);
+    geoUrl.searchParams.set("bounded", "0");
+  }
+  const response = await fetch(geoUrl, {
+    headers: {
+      "User-Agent": "ApexUGR/1.0 (https://apex-ugr.pages.dev)",
+      "Accept-Language": "en",
+    },
+  });
+  const places = await response.json<
+    Array<{
+      place_id: number;
+      lat: string;
+      lon: string;
+      display_name: string;
+      type?: string;
+    }>
+  >();
+  const unique = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      latitude: number;
+      longitude: number;
+      type: string;
+    }
+  >();
+  for (const place of places) {
+    if (!unique.has(place.display_name))
+      unique.set(place.display_name, {
+        id: String(place.place_id),
+        name: place.display_name,
+        latitude: Number(place.lat),
+        longitude: Number(place.lon),
+        type: place.type || "place",
+      });
+  }
   return [...unique.values()];
 }
 
 async function vehicleCatalog(year: string | null, make: string | null) {
-  if(make){
-    const url=`https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMakeYear/make/${encodeURIComponent(make)}/modelyear/${encodeURIComponent(year||String(new Date().getFullYear()))}?format=json`;
-    const response=await fetch(url); const data=await response.json<{Results?:Array<{Model_Name:string}>}>();
-    let models=[...new Set((data.Results||[]).map(row=>row.Model_Name).filter(Boolean))].sort();
-    if(!models.length){const fallback=await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMake/${encodeURIComponent(make)}?format=json`);const fallbackData=await fallback.json<{Results?:Array<{Model_Name:string}>}>();models=[...new Set((fallbackData.Results||[]).map(row=>row.Model_Name).filter(Boolean))].sort();}
-    return {models};
+  if (make) {
+    const url = `https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMakeYear/make/${encodeURIComponent(make)}/modelyear/${encodeURIComponent(year || String(new Date().getFullYear()))}?format=json`;
+    const response = await fetch(url);
+    const data = await response.json<{
+      Results?: Array<{ Model_Name: string }>;
+    }>();
+    let models = [...new Set((data.Results || []).map((row) => row.Model_Name).filter(Boolean))].sort();
+    if (!models.length) {
+      const fallback = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/GetModelsForMake/${encodeURIComponent(make)}?format=json`);
+      const fallbackData = await fallback.json<{
+        Results?: Array<{ Model_Name: string }>;
+      }>();
+      models = [...new Set((fallbackData.Results || []).map((row) => row.Model_Name).filter(Boolean))].sort();
+    }
+    return { models };
   }
-  const response=await fetch('https://vpic.nhtsa.dot.gov/api/vehicles/GetAllMakes?format=json');
-  const data=await response.json<{Results?:Array<{Make_Name:string}>}>();
-  return {makes:[...new Set((data.Results||[]).map(row=>row.Make_Name).filter(Boolean))].sort()};
+  const response = await fetch("https://vpic.nhtsa.dot.gov/api/vehicles/GetAllMakes?format=json");
+  const data = await response.json<{
+    Results?: Array<{ Make_Name: string }>;
+  }>();
+  return {
+    makes: [...new Set((data.Results || []).map((row) => row.Make_Name).filter(Boolean))].sort(),
+  };
 }
 
 async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
-  if (method === 'OPTIONS') return new Response(null, { headers: cors });
-  if (path === 'health') return json({ status: 'live', backend: 'cloudflare', storage: 'd1+r2' });
-  if(path==='download/android'&&(method==='GET'||method==='HEAD')){
-    const rangeHeader=request.headers.get('range');
-    const object=await env.MEDIA.get(ANDROID_RELEASE_KEY,rangeHeader?{range:request.headers}:undefined);
-    if(!object)return json({error:'Android release is not available yet.'},404);
-    const headers=new Headers(cors);object.writeHttpMetadata(headers);headers.set('etag',object.httpEtag);headers.set('Cache-Control','public,max-age=300');headers.set('Accept-Ranges','bytes');headers.set('Content-Disposition','attachment; filename="apex-ugr.apk"');
-    let status=200;
-    if(rangeHeader&&object.range){
-      const range=object.range as {offset?:number;length?:number;suffix?:number};
-      const offset=Number.isFinite(range.offset)?Number(range.offset):Math.max(0,object.size-Number(range.suffix||0));
-      const length=Number(range.length||Math.max(0,object.size-offset));
-      headers.set('Content-Range',`bytes ${offset}-${Math.max(offset,offset+length-1)}/${object.size}`);headers.set('Content-Length',String(length));status=206;
-    }else headers.set('Content-Length',String(object.size));
-    return new Response(method==='HEAD'?null:object.body,{headers,status});
+  if (method === "OPTIONS") return new Response(null, { headers: cors });
+  if (path === "health") return json({ status: "live", backend: "cloudflare", storage: "d1+r2" });
+  if (path === "download/android" && (method === "GET" || method === "HEAD")) {
+    const rangeHeader = request.headers.get("range");
+    const object = await env.MEDIA.get(ANDROID_RELEASE_KEY, rangeHeader ? { range: request.headers } : undefined);
+    if (!object) return json({ error: "Android release is not available yet." }, 404);
+    const headers = new Headers(cors);
+    object.writeHttpMetadata(headers);
+    headers.set("etag", object.httpEtag);
+    headers.set("Cache-Control", "public,max-age=300");
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Content-Disposition", 'attachment; filename="apex-ugr.apk"');
+    let status = 200;
+    if (rangeHeader && object.range) {
+      const range = object.range as {
+        offset?: number;
+        length?: number;
+        suffix?: number;
+      };
+      const offset = Number.isFinite(range.offset) ? Number(range.offset) : Math.max(0, object.size - Number(range.suffix || 0));
+      const length = Number(range.length || Math.max(0, object.size - offset));
+      headers.set("Content-Range", `bytes ${offset}-${Math.max(offset, offset + length - 1)}/${object.size}`);
+      headers.set("Content-Length", String(length));
+      status = 206;
+    } else headers.set("Content-Length", String(object.size));
+    return new Response(method === "HEAD" ? null : object.body, {
+      headers,
+      status,
+    });
   }
-  if(path==='admin/android-release'&&method==='POST'){
-    const user=await authenticatedUser(request,env);
-    const releaseToken=request.headers.get('x-apex-release-token')||'';
-    const automatedRelease=Boolean(env.RELEASE_UPLOAD_TOKEN)&&await sha256Hex(releaseToken)===await sha256Hex(env.RELEASE_UPLOAD_TOKEN||'');
-    if(!automatedRelease&&(!user||user.email.toLowerCase()!==DEVELOPER_EMAIL))return json({error:'Developer access required.'},403);
-    const size=Number(request.headers.get('content-length')||0);
-    if(!request.body||size>100*1024*1024)return json({error:'A valid APK under 100 MB is required.'},400);
-    const contentType=request.headers.get('content-type')||'';
-    if(!contentType.includes('android.package-archive')&&!contentType.includes('application/octet-stream'))return json({error:'Only Android APK files are accepted.'},400);
-    await env.MEDIA.put(ANDROID_RELEASE_KEY,request.body,{httpMetadata:{contentType:'application/vnd.android.package-archive',contentDisposition:'attachment; filename="apex-ugr.apk"',cacheControl:'public, max-age=300'},customMetadata:{publishedBy:user?.id||'github-actions',publishedAt:new Date().toISOString(),version:request.headers.get('x-apex-version')||'unknown'}});
-    const object=await env.MEDIA.head(ANDROID_RELEASE_KEY);
-    return json({published:true,size:object?.size||size,version:request.headers.get('x-apex-version')||'unknown'});
+  if (path === "admin/android-release" && method === "POST") {
+    const user = await authenticatedUser(request, env);
+    const releaseToken = request.headers.get("x-apex-release-token") || "";
+    const automatedRelease = Boolean(env.RELEASE_UPLOAD_TOKEN) && (await sha256Hex(releaseToken)) === (await sha256Hex(env.RELEASE_UPLOAD_TOKEN || ""));
+    if (!automatedRelease && (!user || user.email.toLowerCase() !== DEVELOPER_EMAIL)) return json({ error: "Developer access required." }, 403);
+    const size = Number(request.headers.get("content-length") || 0);
+    if (!request.body || size > 100 * 1024 * 1024) return json({ error: "A valid APK under 100 MB is required." }, 400);
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.includes("android.package-archive") && !contentType.includes("application/octet-stream")) return json({ error: "Only Android APK files are accepted." }, 400);
+    await env.MEDIA.put(ANDROID_RELEASE_KEY, request.body, {
+      httpMetadata: {
+        contentType: "application/vnd.android.package-archive",
+        contentDisposition: 'attachment; filename="apex-ugr.apk"',
+        cacheControl: "public, max-age=300",
+      },
+      customMetadata: {
+        publishedBy: user?.id || "github-actions",
+        publishedAt: new Date().toISOString(),
+        version: request.headers.get("x-apex-version") || "unknown",
+      },
+    });
+    const object = await env.MEDIA.head(ANDROID_RELEASE_KEY);
+    return json({
+      published: true,
+      size: object?.size || size,
+      version: request.headers.get("x-apex-version") || "unknown",
+    });
   }
-  if (path.startsWith('media/') && (method === 'GET' || method === 'HEAD')) {
-    const key=decodeURIComponent(path.slice(6));
-    const rangeHeader=request.headers.get('range');
-    const object=await env.MEDIA.get(key,rangeHeader?{range:request.headers}:undefined);
-    if(!object) return json({error:'Media not found.'},404);
-    const headers=new Headers(cors);object.writeHttpMetadata(headers);headers.set('etag',object.httpEtag);headers.set('Cache-Control','public,max-age=31536000,immutable');headers.set('Accept-Ranges','bytes');
-    let status=200;
-    if(rangeHeader&&object.range){
-      const range=object.range as {offset?:number;length?:number;suffix?:number};
-      const offset=Number.isFinite(range.offset)?Number(range.offset):Math.max(0,object.size-Number(range.suffix||0));
-      const length=Number(range.length||Math.max(0,object.size-offset));
-      headers.set('Content-Range',`bytes ${offset}-${Math.max(offset,offset+length-1)}/${object.size}`);
-      headers.set('Content-Length',String(length));
-      status=206;
-    }else headers.set('Content-Length',String(object.size));
-    return new Response(method==='HEAD'?null:object.body,{headers,status});
+  if (path.startsWith("media/") && (method === "GET" || method === "HEAD")) {
+    const key = decodeURIComponent(path.slice(6));
+    const rangeHeader = request.headers.get("range");
+    const object = await env.MEDIA.get(key, rangeHeader ? { range: request.headers } : undefined);
+    if (!object) return json({ error: "Media not found." }, 404);
+    const headers = new Headers(cors);
+    object.writeHttpMetadata(headers);
+    headers.set("etag", object.httpEtag);
+    headers.set("Cache-Control", "public,max-age=31536000,immutable");
+    headers.set("Accept-Ranges", "bytes");
+    let status = 200;
+    if (rangeHeader && object.range) {
+      const range = object.range as {
+        offset?: number;
+        length?: number;
+        suffix?: number;
+      };
+      const offset = Number.isFinite(range.offset) ? Number(range.offset) : Math.max(0, object.size - Number(range.suffix || 0));
+      const length = Number(range.length || Math.max(0, object.size - offset));
+      headers.set("Content-Range", `bytes ${offset}-${Math.max(offset, offset + length - 1)}/${object.size}`);
+      headers.set("Content-Length", String(length));
+      status = 206;
+    } else headers.set("Content-Length", String(object.size));
+    return new Response(method === "HEAD" ? null : object.body, {
+      headers,
+      status,
+    });
   }
 
-  if(path==='invite/verify'&&method==='POST'){
-    const body=await request.json<{code?:string}>();const code=normalizeInviteCode(body.code||'');
-    if(await isRootAccessCode(code))return json({valid:true,label:'APEX ROOT ACCESS',remaining:9999,expiresAt:null});
-    const invite=await env.DB.prepare(`SELECT label,max_uses,use_count,expires_at FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{label:string;max_uses:number;use_count:number;expires_at:string|null}>();
-    if(!invite)return json({error:'Access code is invalid, expired, or fully redeemed.'},404);
-    return json({valid:true,label:invite.label,remaining:invite.max_uses-invite.use_count,expiresAt:invite.expires_at});
+  if (path === "invite/verify" && method === "POST") {
+    const body = await request.json<{ code?: string }>();
+    const code = normalizeInviteCode(body.code || "");
+    if (await isRootAccessCode(code))
+      return json({
+        valid: true,
+        label: "APEX ROOT ACCESS",
+        remaining: 9999,
+        expiresAt: null,
+      });
+    const invite = await env.DB.prepare(`SELECT label,max_uses,use_count,expires_at FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code, new Date().toISOString()).first<{
+      label: string;
+      max_uses: number;
+      use_count: number;
+      expires_at: string | null;
+    }>();
+    if (!invite) return json({ error: "Access code is invalid, expired, or fully redeemed." }, 404);
+    return json({
+      valid: true,
+      label: invite.label,
+      remaining: invite.max_uses - invite.use_count,
+      expiresAt: invite.expires_at,
+    });
   }
 
   // eBay calls this endpoint before any Apex user session exists. Never use a
   // development fallback here: the challenge must be signed by configured
   // production secrets or fail visibly.
-  if (path === 'ebay/account-deletion') {
-    if (method !== 'GET') return json({ error: 'Method not allowed.' }, 405);
-    const challengeCode = new URL(request.url).searchParams.get('challenge_code');
-    if (!challengeCode) return json({ error: 'Missing challenge_code query parameter.' }, 400);
+  if (path === "ebay/account-deletion") {
+    if (method !== "GET") return json({ error: "Method not allowed." }, 405);
+    const challengeCode = new URL(request.url).searchParams.get("challenge_code");
+    if (!challengeCode) return json({ error: "Missing challenge_code query parameter." }, 400);
     if (!env.EBAY_DELETION_VERIFICATION_TOKEN || !env.EBAY_DELETION_ENDPOINT) {
-      return json({ error: 'eBay deletion verification is not configured.' }, 503);
+      return json({ error: "eBay deletion verification is not configured." }, 503);
     }
-    return json({ challengeResponse: await sha256Hex(challengeCode + env.EBAY_DELETION_VERIFICATION_TOKEN + env.EBAY_DELETION_ENDPOINT) });
+    return json({
+      challengeResponse: await sha256Hex(challengeCode + env.EBAY_DELETION_VERIFICATION_TOKEN + env.EBAY_DELETION_ENDPOINT),
+    });
   }
 
-  if (path === 'auth/signup' && method === 'POST') {
-    const body = await request.json<{ email?: string; password?: string; inviteCode?:string }>();
-    const email = body.email?.trim().toLowerCase() || '';
-    if (!/^\S+@\S+\.\S+$/.test(email) || (body.password?.length || 0) < 8) return json({ error: 'Use a valid email and at least 8 password characters.' }, 400);
-    const usernameBase = email.split('@')[0].replace(/[^a-z0-9_]/g, '').slice(0, 20) || 'pilot';
+  if (path === "auth/signup" && method === "POST") {
+    const body = await request.json<{
+      email?: string;
+      password?: string;
+      inviteCode?: string;
+    }>();
+    const email = body.email?.trim().toLowerCase() || "";
+    if (!/^\S+@\S+\.\S+$/.test(email) || (body.password?.length || 0) < 8) return json({ error: "Use a valid email and at least 8 password characters." }, 400);
+    const usernameBase =
+      email
+        .split("@")[0]
+        .replace(/[^a-z0-9_]/g, "")
+        .slice(0, 20) || "pilot";
     const username = `${usernameBase}_${crypto.randomUUID().slice(0, 5)}`;
-    const existing=await env.DB.prepare('SELECT 1 found FROM users WHERE email=?').bind(email).first();
-    if(existing)return json({error:'An account already exists for that email. Sign in instead or use another email.'},409);
-    let invite:{id:string;burn_after_use:number}|null=null;
-    if(email!==DEVELOPER_EMAIL&&!await isRootAccessCode(body.inviteCode||'')){
-      const code=normalizeInviteCode(body.inviteCode||'');
-      invite=await env.DB.prepare(`SELECT id,burn_after_use FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code,new Date().toISOString()).first<{id:string;burn_after_use:number}>();
-      if(!invite)return json({error:'A valid private access code is required.'},403);
-      const reserved=await env.DB.prepare(`UPDATE invite_codes SET use_count=use_count+1 WHERE id=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(invite.id,new Date().toISOString()).run();
-      if(!reserved.meta.changes)return json({error:'This access code has reached its limit.'},409);
+    const existing = await env.DB.prepare("SELECT 1 found FROM users WHERE email=?").bind(email).first();
+    if (existing)
+      return json(
+        {
+          error: "An account already exists for that email. Sign in instead or use another email.",
+        },
+        409,
+      );
+    let invite: { id: string; burn_after_use: number } | null = null;
+    if (email !== DEVELOPER_EMAIL && !(await isRootAccessCode(body.inviteCode || ""))) {
+      const code = normalizeInviteCode(body.inviteCode || "");
+      invite = await env.DB.prepare(`SELECT id,burn_after_use FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code, new Date().toISOString()).first<{ id: string; burn_after_use: number }>();
+      if (!invite) return json({ error: "A valid private access code is required." }, 403);
+      const reserved = await env.DB.prepare(`UPDATE invite_codes SET use_count=use_count+1 WHERE id=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(invite.id, new Date().toISOString()).run();
+      if (!reserved.meta.changes) return json({ error: "This access code has reached its limit." }, 409);
     }
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const id = crypto.randomUUID();
-    const hash=await passwordHash(body.password!,salt);
+    const hash = await passwordHash(body.password!, salt);
     try {
-      const statements=[env.DB.prepare(`INSERT INTO users(id,email,username,display_name,password_hash,password_salt) VALUES(?,?,?,?,?,?)`).bind(id,email,username,usernameBase.toUpperCase(),hash,bytesToBase64(salt))];
-      if(invite)statements.push(env.DB.prepare('INSERT INTO invite_redemptions(code_id,user_id,email) VALUES(?,?,?)').bind(invite.id,id,email));
-      if(invite?.burn_after_use)statements.push(env.DB.prepare('UPDATE invite_codes SET is_active=0 WHERE id=?').bind(invite.id));
+      const apexId = `AK-${id.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+      const statements = [env.DB.prepare(`INSERT INTO users(id,email,username,display_name,password_hash,password_salt,apex_id) VALUES(?,?,?,?,?,?,?)`).bind(id, email, username, usernameBase.toUpperCase(), hash, bytesToBase64(salt), apexId)];
+      if (invite) statements.push(env.DB.prepare("INSERT INTO invite_redemptions(code_id,user_id,email) VALUES(?,?,?)").bind(invite.id, id, email));
+      if (invite?.burn_after_use) statements.push(env.DB.prepare("UPDATE invite_codes SET is_active=0 WHERE id=?").bind(invite.id));
       await env.DB.batch(statements);
-    } catch(error) { if(invite)await env.DB.prepare('UPDATE invite_codes SET use_count=MAX(0,use_count-1) WHERE id=?').bind(invite.id).run();console.error('signup_insert_failed',error); return json({ error: 'Account creation failed. Please try again.' }, 500); }
-    const referrer=await env.DB.prepare('SELECT user_id FROM referral_codes WHERE code=?').bind(normalizeInviteCode(body.inviteCode||'')).first<{user_id:string}>();
-    if(referrer&&referrer.user_id!==id){
-      const referralId=crypto.randomUUID();
-      const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO referrals(id,referral_code,referrer_user_id,referred_user_id,qualified_at,rewarded_at,reward_ledger_key) VALUES(?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)`).bind(referralId,normalizeInviteCode(body.inviteCode||''),referrer.user_id,id,`referral:${referrer.user_id}:${id}`).run();
-      if(inserted.meta.changes){await Promise.all([grantGhostCredits(referrer.user_id,350,'QUALIFIED REFERRAL',referralId,env),grantGhostCredits(id,200,'REFERRAL WELCOME',referralId,env)]);await env.DB.prepare(`INSERT OR IGNORE INTO underground_broadcasts(id,event_type,actor_user_id,text,source_key,expires_at) SELECT ?,'referral',?,username||' BROUGHT A NEW PILOT ONLINE',?,datetime('now','+24 hours') FROM users WHERE id=?`).bind(crypto.randomUUID(),referrer.user_id,`referral:${referralId}`,referrer.user_id).run();}
+    } catch (error) {
+      if (invite) await env.DB.prepare("UPDATE invite_codes SET use_count=MAX(0,use_count-1) WHERE id=?").bind(invite.id).run();
+      console.error("signup_insert_failed", error);
+      return json({ error: "Account creation failed. Please try again." }, 500);
     }
-    const user = await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?').bind(id).first<UserRow>();
+    const referrer = await env.DB.prepare("SELECT user_id FROM referral_codes WHERE code=?")
+      .bind(normalizeInviteCode(body.inviteCode || ""))
+      .first<{ user_id: string }>();
+    if (referrer && referrer.user_id !== id) {
+      const referralId = crypto.randomUUID();
+      const inserted = await env.DB.prepare(`INSERT OR IGNORE INTO referrals(id,referral_code,referrer_user_id,referred_user_id,qualified_at,rewarded_at,reward_ledger_key) VALUES(?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)`)
+        .bind(referralId, normalizeInviteCode(body.inviteCode || ""), referrer.user_id, id, `referral:${referrer.user_id}:${id}`)
+        .run();
+      if (inserted.meta.changes) {
+        await Promise.all([grantGhostCredits(referrer.user_id, 350, "QUALIFIED REFERRAL", referralId, env), grantGhostCredits(id, 200, "REFERRAL WELCOME", referralId, env)]);
+        await env.DB.prepare(`INSERT OR IGNORE INTO underground_broadcasts(id,event_type,actor_user_id,text,source_key,expires_at) SELECT ?,'referral',?,username||' BROUGHT A NEW PILOT ONLINE',?,datetime('now','+24 hours') FROM users WHERE id=?`).bind(crypto.randomUUID(), referrer.user_id, `referral:${referralId}`, referrer.user_id).run();
+      }
+    }
+    const user = await env.DB.prepare("SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?").bind(id).first<UserRow>();
     return json(await createSession(user!, env), 201);
   }
 
-  if (path === 'auth/signin' && method === 'POST') {
+  if (path === "auth/signin" && method === "POST") {
     const body = await request.json<{ email?: string; password?: string }>();
     const row = await env.DB.prepare(`SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak,password_hash,password_salt FROM users WHERE email=?`)
-      .bind(body.email?.trim().toLowerCase() || '').first<UserRow & { password_hash: string; password_salt: string }>();
-    if (!row || await passwordHash(body.password || '', base64ToBytes(row.password_salt)) !== row.password_hash) return json({ error: 'Invalid email or password.' }, 401);
+      .bind(body.email?.trim().toLowerCase() || "")
+      .first<UserRow & { password_hash: string; password_salt: string }>();
+    if (!row || (await passwordHash(body.password || "", base64ToBytes(row.password_salt))) !== row.password_hash) return json({ error: "Invalid email or password." }, 401);
     return json(await createSession(row, env));
   }
 
   const user = await authenticatedUser(request, env);
-  if (!user) return json({ error: 'Authentication required.' }, 401);
+  if (!user) return json({ error: "Authentication required." }, 401);
 
-  const phase2Response=await handlePhase2({request,env,user,path,method});
-  if(phase2Response)return phase2Response;
+  const phase2Response = await handlePhase2({
+    request,
+    env,
+    user,
+    path,
+    method,
+  });
+  if (phase2Response) return phase2Response;
+  const phase3Response = await handlePhase3({
+    request,
+    env,
+    user,
+    path,
+    method,
+  });
+  if (phase3Response) return phase3Response;
 
-  if (path.startsWith('ghost-shop/')) return json({ error: 'Use the canonical Ghost Vault endpoint.' }, 410);
+  if (path.startsWith("ghost-shop/")) return json({ error: "Use the canonical Ghost Vault endpoint." }, 410);
 
-  if (path === 'session' && method === 'GET') return json({ user: publicUser(user) });
-  if(path==='profile'&&method==='PUT'){
-    const body=await request.json<{displayName?:string}>();const displayName=body.displayName?.trim();
-    if(!displayName||displayName.length<2)return json({error:'Use a display name with at least 2 characters.'},400);
-    await env.DB.prepare('UPDATE users SET display_name=? WHERE id=?').bind(displayName.slice(0,40),user.id).run();
-    const updated=await env.DB.prepare('SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?').bind(user.id).first<UserRow>();
-    return json({user:publicUser(updated!)});
+  if (path === "session" && method === "GET") return json({ user: publicUser(user) });
+  if (path === "profile" && method === "PUT") {
+    const body = await request.json<{ displayName?: string }>();
+    const displayName = body.displayName?.trim();
+    if (!displayName || displayName.length < 2) return json({ error: "Use a display name with at least 2 characters." }, 400);
+    await env.DB.prepare("UPDATE users SET display_name=? WHERE id=?").bind(displayName.slice(0, 40), user.id).run();
+    const updated = await env.DB.prepare("SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?").bind(user.id).first<UserRow>();
+    return json({ user: publicUser(updated!) });
   }
-  if(path==='profile/featured-badges'&&method==='GET'){
-    const badges=await env.DB.prepare(`SELECT b.id,b.name,b.description,b.category,fb.slot FROM featured_badges fb JOIN badges b ON b.id=fb.badge_id JOIN user_badges ub ON ub.user_id=fb.user_id AND ub.badge_id=fb.badge_id WHERE fb.user_id=? ORDER BY fb.slot`).bind(user.id).all();
-    return json({badges:badges.results});
+  if (path === "profile/featured-badges" && method === "GET") {
+    const badges = await env.DB.prepare(`SELECT b.id,b.name,b.description,b.category,fb.slot FROM featured_badges fb JOIN badges b ON b.id=fb.badge_id JOIN user_badges ub ON ub.user_id=fb.user_id AND ub.badge_id=fb.badge_id WHERE fb.user_id=? ORDER BY fb.slot`).bind(user.id).all();
+    return json({ badges: badges.results });
   }
-  if(path==='profile/featured-badges'&&method==='PUT'){
-    const body=await request.json<{badgeIds?:string[]}>();
-    const badgeIds=[...new Set((body.badgeIds||[]).map(value=>String(value).trim()).filter(Boolean))].slice(0,4);
-    if(badgeIds.length){
-      const placeholders=badgeIds.map(()=>'?').join(',');
-      const earned=await env.DB.prepare(`SELECT badge_id FROM user_badges WHERE user_id=? AND badge_id IN (${placeholders})`).bind(user.id,...badgeIds).all<{badge_id:string}>();
-      if(earned.results.length!==badgeIds.length)return json({error:'Only earned achievement badges can be featured.'},403);
+  if (path === "profile/featured-badges" && method === "PUT") {
+    const body = await request.json<{ badgeIds?: string[] }>();
+    const badgeIds = [...new Set((body.badgeIds || []).map((value) => String(value).trim()).filter(Boolean))].slice(0, 4);
+    if (badgeIds.length) {
+      const placeholders = badgeIds.map(() => "?").join(",");
+      const earned = await env.DB.prepare(`SELECT badge_id FROM user_badges WHERE user_id=? AND badge_id IN (${placeholders})`)
+        .bind(user.id, ...badgeIds)
+        .all<{ badge_id: string }>();
+      if (earned.results.length !== badgeIds.length) return json({ error: "Only earned achievement badges can be featured." }, 403);
     }
-    const statements=[env.DB.prepare('DELETE FROM featured_badges WHERE user_id=?').bind(user.id),...badgeIds.map((badgeId,index)=>env.DB.prepare('INSERT INTO featured_badges(user_id,badge_id,slot) VALUES(?,?,?)').bind(user.id,badgeId,index+1))];
+    const statements = [env.DB.prepare("DELETE FROM featured_badges WHERE user_id=?").bind(user.id), ...badgeIds.map((badgeId, index) => env.DB.prepare("INSERT INTO featured_badges(user_id,badge_id,slot) VALUES(?,?,?)").bind(user.id, badgeId, index + 1))];
     await env.DB.batch(statements);
-    return json({badgeIds});
+    return json({ badgeIds });
   }
-  if(path==='ghost/profile'&&method==='GET'){
-    const profile=await ghostProfile(user.id,env);const [transactions,inventory,equipped]=await Promise.all([env.DB.prepare('SELECT * FROM ghost_credit_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 50').bind(user.id).all(),env.DB.prepare(`SELECT i.*,s.name,s.category,s.rarity,s.metadata_json FROM ghost_inventory i JOIN ghost_shop_items s ON s.id=i.item_id WHERE i.user_id=? ORDER BY i.acquired_at DESC`).bind(user.id).all(),env.DB.prepare('SELECT category,item_id FROM ghost_equipped_items WHERE user_id=?').bind(user.id).all()]);return json({profile,transactions:transactions.results,inventory:inventory.results,equipped:equipped.results});
+  if (path === "ghost/profile" && method === "GET") {
+    const profile = await ghostProfile(user.id, env);
+    const [transactions, inventory, equipped] = await Promise.all([env.DB.prepare("SELECT * FROM ghost_credit_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 50").bind(user.id).all(), env.DB.prepare(`SELECT i.*,s.name,s.category,s.rarity,s.metadata_json FROM ghost_inventory i JOIN ghost_shop_items s ON s.id=i.item_id WHERE i.user_id=? ORDER BY i.acquired_at DESC`).bind(user.id).all(), env.DB.prepare("SELECT category,item_id FROM ghost_equipped_items WHERE user_id=?").bind(user.id).all()]);
+    return json({
+      profile,
+      transactions: transactions.results,
+      inventory: inventory.results,
+      equipped: equipped.results,
+    });
   }
-  if(path==='ghost/shop'&&method==='GET'){
-    const profile=await ghostProfile(user.id,env);const userRank=await refreshRank(user.id,env);const rankRow=await env.DB.prepare('SELECT shop_access FROM rank_thresholds WHERE rank=?').bind(userRank.rank).first<{shop_access:number}>();const now=new Date(),nextRefresh=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()+1));const items=await env.DB.prepare(`SELECT s.*,EXISTS(SELECT 1 FROM ghost_inventory i WHERE i.user_id=? AND i.item_id=s.id) owned FROM ghost_shop_items s WHERE s.is_active=1 AND (s.available_from IS NULL OR s.available_from<=?) AND (s.available_until IS NULL OR s.available_until>?) ORDER BY s.rarity DESC,s.price_gc`).bind(user.id,now.toISOString(),now.toISOString()).all();return json({credits:profile?.credits||0,streak:profile?.current_streak||0,rank:userRank.rank,shopAccess:rankRow?.shop_access||0,serverNow:now.toISOString(),refreshesAt:nextRefresh.toISOString(),items:items.results});
+  if (path === "ghost/shop" && method === "GET") {
+    const profile = await ghostProfile(user.id, env);
+    const userRank = await refreshRank(user.id, env);
+    const rankRow = await env.DB.prepare("SELECT shop_access FROM rank_thresholds WHERE rank=?").bind(userRank.rank).first<{ shop_access: number }>();
+    const now = new Date(),
+      nextRefresh = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+    const items = await env.DB.prepare(`SELECT s.*,EXISTS(SELECT 1 FROM ghost_inventory i WHERE i.user_id=? AND i.item_id=s.id) owned FROM ghost_shop_items s WHERE s.is_active=1 AND (s.available_from IS NULL OR s.available_from<=?) AND (s.available_until IS NULL OR s.available_until>?) ORDER BY s.rarity DESC,s.price_gc`).bind(user.id, now.toISOString(), now.toISOString()).all();
+    return json({
+      credits: profile?.credits || 0,
+      streak: profile?.current_streak || 0,
+      rank: userRank.rank,
+      shopAccess: rankRow?.shop_access || 0,
+      serverNow: now.toISOString(),
+      refreshesAt: nextRefresh.toISOString(),
+      items: items.results,
+    });
   }
-  const ghostPurchase=path.match(/^ghost\/shop\/([^/]+)\/purchase$/);if(ghostPurchase&&method==='POST'){
-    const profile=await ghostProfile(user.id,env);const item=await env.DB.prepare(`SELECT * FROM ghost_shop_items WHERE id=? AND is_active=1 AND (available_from IS NULL OR available_from<=?) AND (available_until IS NULL OR available_until>?)`).bind(ghostPurchase[1],new Date().toISOString(),new Date().toISOString()).first<any>();if(!item)return json({error:'This Ghost Shop item is unavailable.'},404);if(item.supply_limit!==null&&Number(item.quantity_minted)>=Number(item.supply_limit))return json({error:'This serialized cosmetic is sold out.'},409);if(item.requirement_type==='streak'&&Number(profile?.current_streak||0)<Number(item.requirement_value))return json({error:`Requires Ghost Streak x${item.requirement_value}.`},403);if(item.requirement_type==='rank'){const current=await env.DB.prepare('SELECT points FROM users WHERE id=?').bind(user.id).first<{points:number}>();const threshold=await env.DB.prepare('SELECT minimum_rep FROM rank_thresholds WHERE shop_access>=? ORDER BY shop_access LIMIT 1').bind(Number(item.requirement_value)).first<{minimum_rep:number}>();if(Number(current?.points||0)<Number(threshold?.minimum_rep||0))return json({error:'Your current rank does not unlock this item.'},403);}const owned=await env.DB.prepare('SELECT 1 found FROM ghost_inventory WHERE user_id=? AND item_id=?').bind(user.id,item.id).first();if(owned)return json({error:'You already own this item.'},409);const serialRow=await env.DB.prepare('SELECT MAX(serial_number) max_serial FROM cosmetic_instances WHERE item_id=?').bind(item.id).first<{max_serial:number|null}>();const serialNumber=nextSerial(item.quantity_minted,[serialRow?.max_serial]);const cost=Math.max(0,Number(item.price_gc)||0),orderId=crypto.randomUUID(),ledgerId=crypto.randomUUID(),instanceId=crypto.randomUUID();const results=await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO ghost_shop_orders(id,user_id,item_id,cost_gc) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM ghost_profiles WHERE user_id=? AND credits>=?) AND NOT EXISTS(SELECT 1 FROM ghost_inventory WHERE user_id=? AND item_id=?) AND EXISTS(SELECT 1 FROM ghost_shop_items WHERE id=? AND (supply_limit IS NULL OR quantity_minted<supply_limit))`).bind(orderId,user.id,item.id,cost,user.id,cost,user.id,item.id,item.id),env.DB.prepare('UPDATE ghost_profiles SET credits=credits-?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND EXISTS(SELECT 1 FROM ghost_shop_orders WHERE id=?)').bind(cost,user.id,orderId),env.DB.prepare(`INSERT INTO ghost_inventory(user_id,item_id,acquired_source,purchase_price_gc) SELECT user_id,item_id,'ghost_shop',cost_gc FROM ghost_shop_orders WHERE id=?`).bind(orderId),env.DB.prepare(`UPDATE ghost_shop_items SET quantity_minted=MAX(quantity_minted+1,?) WHERE id=? AND EXISTS(SELECT 1 FROM ghost_shop_orders WHERE id=?)`).bind(serialNumber,item.id,orderId),env.DB.prepare(`INSERT INTO cosmetic_instances(id,item_id,owner_user_id,serial_number,acquired_source) SELECT ?,item_id,user_id,?,'ghost_shop' FROM ghost_shop_orders WHERE id=?`).bind(instanceId,serialNumber,orderId),env.DB.prepare(`INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after) SELECT ?,user_id,-cost_gc,'GHOST SHOP',item_id,(SELECT credits+cost_gc FROM ghost_profiles WHERE user_id=ghost_shop_orders.user_id),(SELECT credits FROM ghost_profiles WHERE user_id=ghost_shop_orders.user_id) FROM ghost_shop_orders WHERE id=?`).bind(ledgerId,orderId)]);if(!results[0].meta.changes){const current=await env.DB.prepare('SELECT credits FROM ghost_profiles WHERE user_id=?').bind(user.id).first<{credits:number}>();return json({error:Number(current?.credits||0)<cost?'Not enough Ghost Credits.':'This item is already owned or sold out.'},409);}const current=await env.DB.prepare('SELECT credits FROM ghost_profiles WHERE user_id=?').bind(user.id).first<{credits:number}>();return json({purchased:true,balance:Number(current?.credits||0),instanceId,serialNumber});
+  const ghostPurchase = path.match(/^ghost\/shop\/([^/]+)\/purchase$/);
+  if (ghostPurchase && method === "POST") {
+    const profile = await ghostProfile(user.id, env);
+    const item = await env.DB.prepare(`SELECT * FROM ghost_shop_items WHERE id=? AND is_active=1 AND (available_from IS NULL OR available_from<=?) AND (available_until IS NULL OR available_until>?)`).bind(ghostPurchase[1], new Date().toISOString(), new Date().toISOString()).first<any>();
+    if (!item) return json({ error: "This Ghost Shop item is unavailable." }, 404);
+    if (item.supply_limit !== null && Number(item.quantity_minted) >= Number(item.supply_limit)) return json({ error: "This serialized cosmetic is sold out." }, 409);
+    if (item.requirement_type === "streak" && Number(profile?.current_streak || 0) < Number(item.requirement_value)) return json({ error: `Requires Ghost Streak x${item.requirement_value}.` }, 403);
+    if (item.requirement_type === "rank") {
+      const current = await env.DB.prepare("SELECT points FROM users WHERE id=?").bind(user.id).first<{ points: number }>();
+      const threshold = await env.DB.prepare("SELECT minimum_rep FROM rank_thresholds WHERE shop_access>=? ORDER BY shop_access LIMIT 1").bind(Number(item.requirement_value)).first<{ minimum_rep: number }>();
+      if (Number(current?.points || 0) < Number(threshold?.minimum_rep || 0)) return json({ error: "Your current rank does not unlock this item." }, 403);
+    }
+    const owned = await env.DB.prepare("SELECT 1 found FROM ghost_inventory WHERE user_id=? AND item_id=?").bind(user.id, item.id).first();
+    if (owned) return json({ error: "You already own this item." }, 409);
+    const serialRow = await env.DB.prepare("SELECT MAX(serial_number) max_serial FROM cosmetic_instances WHERE item_id=?").bind(item.id).first<{ max_serial: number | null }>();
+    const serialNumber = nextSerial(item.quantity_minted, [serialRow?.max_serial]);
+    const cost = Math.max(0, Number(item.price_gc) || 0),
+      orderId = crypto.randomUUID(),
+      ledgerId = crypto.randomUUID(),
+      instanceId = crypto.randomUUID();
+    const results = await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO ghost_shop_orders(id,user_id,item_id,cost_gc) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM ghost_profiles WHERE user_id=? AND credits>=?) AND NOT EXISTS(SELECT 1 FROM ghost_inventory WHERE user_id=? AND item_id=?) AND EXISTS(SELECT 1 FROM ghost_shop_items WHERE id=? AND (supply_limit IS NULL OR quantity_minted<supply_limit))`).bind(orderId, user.id, item.id, cost, user.id, cost, user.id, item.id, item.id), env.DB.prepare("UPDATE ghost_profiles SET credits=credits-?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND EXISTS(SELECT 1 FROM ghost_shop_orders WHERE id=?)").bind(cost, user.id, orderId), env.DB.prepare(`INSERT INTO ghost_inventory(user_id,item_id,acquired_source,purchase_price_gc) SELECT user_id,item_id,'ghost_shop',cost_gc FROM ghost_shop_orders WHERE id=?`).bind(orderId), env.DB.prepare(`UPDATE ghost_shop_items SET quantity_minted=MAX(quantity_minted+1,?) WHERE id=? AND EXISTS(SELECT 1 FROM ghost_shop_orders WHERE id=?)`).bind(serialNumber, item.id, orderId), env.DB.prepare(`INSERT INTO cosmetic_instances(id,item_id,owner_user_id,serial_number,acquired_source) SELECT ?,item_id,user_id,?,'ghost_shop' FROM ghost_shop_orders WHERE id=?`).bind(instanceId, serialNumber, orderId), env.DB.prepare(`INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after) SELECT ?,user_id,-cost_gc,'GHOST SHOP',item_id,(SELECT credits+cost_gc FROM ghost_profiles WHERE user_id=ghost_shop_orders.user_id),(SELECT credits FROM ghost_profiles WHERE user_id=ghost_shop_orders.user_id) FROM ghost_shop_orders WHERE id=?`).bind(ledgerId, orderId)]);
+    if (!results[0].meta.changes) {
+      const current = await env.DB.prepare("SELECT credits FROM ghost_profiles WHERE user_id=?").bind(user.id).first<{ credits: number }>();
+      return json(
+        {
+          error: Number(current?.credits || 0) < cost ? "Not enough Ghost Credits." : "This item is already owned or sold out.",
+        },
+        409,
+      );
+    }
+    const current = await env.DB.prepare("SELECT credits FROM ghost_profiles WHERE user_id=?").bind(user.id).first<{ credits: number }>();
+    return json({
+      purchased: true,
+      balance: Number(current?.credits || 0),
+      instanceId,
+      serialNumber,
+    });
   }
-  if(path==='ghost/equip'&&method==='POST'){
-    const body=await request.json<{itemId?:string}>();const item=await env.DB.prepare(`SELECT s.id,s.category FROM ghost_shop_items s JOIN ghost_inventory i ON i.item_id=s.id WHERE s.id=? AND i.user_id=?`).bind(body.itemId||'',user.id).first<{id:string;category:string}>();if(!item)return json({error:'You do not own this cosmetic.'},403);await env.DB.prepare(`INSERT INTO ghost_equipped_items(user_id,category,item_id) VALUES(?,?,?) ON CONFLICT(user_id,category) DO UPDATE SET item_id=excluded.item_id,equipped_at=CURRENT_TIMESTAMP`).bind(user.id,item.category,item.id).run();return json({equipped:true,category:item.category,itemId:item.id});
+  if (path === "ghost/equip" && method === "POST") {
+    const body = await request.json<{ itemId?: string }>();
+    const item = await env.DB.prepare(`SELECT s.id,s.category FROM ghost_shop_items s JOIN ghost_inventory i ON i.item_id=s.id WHERE s.id=? AND i.user_id=?`)
+      .bind(body.itemId || "", user.id)
+      .first<{ id: string; category: string }>();
+    if (!item) return json({ error: "You do not own this cosmetic." }, 403);
+    await env.DB.prepare(`INSERT INTO ghost_equipped_items(user_id,category,item_id) VALUES(?,?,?) ON CONFLICT(user_id,category) DO UPDATE SET item_id=excluded.item_id,equipped_at=CURRENT_TIMESTAMP`).bind(user.id, item.category, item.id).run();
+    return json({ equipped: true, category: item.category, itemId: item.id });
   }
-  const ghostUnequip=path.match(/^ghost\/equip\/([^/]+)$/);if(ghostUnequip&&method==='DELETE'){
-    await env.DB.prepare('DELETE FROM ghost_equipped_items WHERE user_id=? AND category=?').bind(user.id,ghostUnequip[1]).run();
-    return json({unequipped:true,category:ghostUnequip[1]});
+  const ghostUnequip = path.match(/^ghost\/equip\/([^/]+)$/);
+  if (ghostUnequip && method === "DELETE") {
+    await env.DB.prepare("DELETE FROM ghost_equipped_items WHERE user_id=? AND category=?").bind(user.id, ghostUnequip[1]).run();
+    return json({ unequipped: true, category: ghostUnequip[1] });
   }
-  if(path==='rank'&&method==='GET'){
-    const userRank=await refreshRank(user.id,env);const [userRow,thresholds,history]=await Promise.all([env.DB.prepare('SELECT points,tier FROM users WHERE id=?').bind(user.id).first<{points:number;tier:string}>(),env.DB.prepare('SELECT * FROM rank_thresholds ORDER BY minimum_rep').all(),env.DB.prepare('SELECT * FROM rank_history WHERE user_id=? ORDER BY awarded_at DESC LIMIT 20').bind(user.id).all()]);const next=thresholds.results.find((row:any)=>Number(row.minimum_rep)>Number(userRow?.points||0)) as any;return json({rank:userRank.rank,rep:userRow?.points||0,nextRank:next?.rank||null,repToNext:next?Math.max(0,Number(next.minimum_rep)-Number(userRow?.points||0)):0,thresholds:thresholds.results,history:history.results});
+  if (path === "rank" && method === "GET") {
+    const userRank = await refreshRank(user.id, env);
+    const [userRow, thresholds, history] = await Promise.all([env.DB.prepare("SELECT points,tier FROM users WHERE id=?").bind(user.id).first<{ points: number; tier: string }>(), env.DB.prepare("SELECT * FROM rank_thresholds ORDER BY minimum_rep").all(), env.DB.prepare("SELECT * FROM rank_history WHERE user_id=? ORDER BY awarded_at DESC LIMIT 20").bind(user.id).all()]);
+    const next = thresholds.results.find((row: any) => Number(row.minimum_rep) > Number(userRow?.points || 0)) as any;
+    return json({
+      rank: userRank.rank,
+      rep: userRow?.points || 0,
+      nextRank: next?.rank || null,
+      repToNext: next ? Math.max(0, Number(next.minimum_rep) - Number(userRow?.points || 0)) : 0,
+      thresholds: thresholds.results,
+      history: history.results,
+    });
   }
-  if(path==='venue-bounties'&&method==='GET'){
-    const now=new Date().toISOString();
-    const sessions=await env.DB.prepare(`SELECT b.*,u.username,u.tier FROM venue_bounty_sessions b JOIN users u ON u.id=b.host_user_id WHERE b.status='active' AND b.phase_ends_at>? ORDER BY b.stars DESC,b.phase_ends_at LIMIT 30`).bind(now).all();
-    return json({sessions:sessions.results.map((row:any)=>({
-      ...row,
-      remainingSeconds:Math.max(0,Math.ceil((Date.parse(row.phase_ends_at)-Date.now())/1000)),
-    }))});
+  if (path === "venue-bounties" && method === "GET") {
+    const now = new Date().toISOString();
+    const sessions = await env.DB.prepare(`SELECT b.*,u.username,u.tier FROM venue_bounty_sessions b JOIN users u ON u.id=b.host_user_id WHERE b.status='active' AND b.phase_ends_at>? ORDER BY b.stars DESC,b.phase_ends_at LIMIT 30`).bind(now).all();
+    return json({
+      sessions: sessions.results.map((row: any) => ({
+        ...row,
+        remainingSeconds: Math.max(0, Math.ceil((Date.parse(row.phase_ends_at) - Date.now()) / 1000)),
+      })),
+    });
   }
-  if(path==='venue-bounties/start'&&method==='POST'){
-    const body=await request.json<{venueName?:string;consented?:boolean}>();if(!body.consented||!body.venueName?.trim())return json({error:'A named authorized venue and safety consent are required.'},400);const activeLocation=await env.DB.prepare('SELECT 1 found FROM driver_locations WHERE user_id=? AND expires_at>?').bind(user.id,new Date().toISOString()).first();if(!activeLocation)return json({error:'Enter Drive Mode before starting a venue session.'},409);const existing=await env.DB.prepare("SELECT 1 found FROM venue_bounty_sessions WHERE host_user_id=? AND status='active'").bind(user.id).first();if(existing)return json({error:'You already have an active venue session.'},409);const id=crypto.randomUUID(),endsAt=new Date(Date.now()+10*60_000).toISOString();await env.DB.batch([env.DB.prepare('INSERT INTO venue_bounty_sessions(id,host_user_id,venue_name,consented_at,phase_ends_at) VALUES(?,?,?,?,?)').bind(id,user.id,body.venueName.trim().slice(0,80),new Date().toISOString(),endsAt),env.DB.prepare("INSERT INTO venue_bounty_participants(session_id,user_id,role) VALUES(?,?,'survivor')").bind(id,user.id)]);return json({id,stars:1,endsAt});
+  if (path === "venue-bounties/start" && method === "POST") {
+    const body = await request.json<{
+      venueName?: string;
+      consented?: boolean;
+    }>();
+    if (!body.consented || !body.venueName?.trim()) return json({ error: "A named authorized venue and safety consent are required." }, 400);
+    const activeLocation = await env.DB.prepare("SELECT 1 found FROM driver_locations WHERE user_id=? AND expires_at>?").bind(user.id, new Date().toISOString()).first();
+    if (!activeLocation) return json({ error: "Enter Drive Mode before starting a venue session." }, 409);
+    const existing = await env.DB.prepare("SELECT 1 found FROM venue_bounty_sessions WHERE host_user_id=? AND status='active'").bind(user.id).first();
+    if (existing) return json({ error: "You already have an active venue session." }, 409);
+    const id = crypto.randomUUID(),
+      endsAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    await env.DB.batch([env.DB.prepare("INSERT INTO venue_bounty_sessions(id,host_user_id,venue_name,consented_at,phase_ends_at) VALUES(?,?,?,?,?)").bind(id, user.id, body.venueName.trim().slice(0, 80), new Date().toISOString(), endsAt), env.DB.prepare("INSERT INTO venue_bounty_participants(session_id,user_id,role) VALUES(?,?,'survivor')").bind(id, user.id)]);
+    return json({ id, stars: 1, endsAt });
   }
-  const venueProgress=path.match(/^venue-bounties\/([^/]+)\/progress$/);if(venueProgress&&method==='POST'){
-    const session=await env.DB.prepare("SELECT * FROM venue_bounty_sessions WHERE id=? AND host_user_id=? AND status='active'").bind(venueProgress[1],user.id).first<any>();if(!session)return json({error:'Active venue session not found.'},404);if(Date.parse(session.phase_ends_at)>Date.now())return json({status:'active',stars:session.stars,endsAt:session.phase_ends_at});const nextStars=Number(session.stars)+1;if(nextStars<=5){const endsAt=new Date(Date.now()+10*60_000).toISOString();await env.DB.batch([env.DB.prepare('UPDATE venue_bounty_sessions SET stars=?,phase_started_at=CURRENT_TIMESTAMP,phase_ends_at=?,total_reward_gc=total_reward_gc+? WHERE id=?').bind(nextStars,endsAt,100*nextStars,session.id),env.DB.prepare('INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)').bind(crypto.randomUUID(),user.id,'bounty_escalated','VENUE SESSION ESCALATED',`Star ${nextStars} is active.`,JSON.stringify({sessionId:session.id,stars:nextStars}))]);return json({status:'escalated',stars:nextStars,endsAt});}const reward=1500;await env.DB.prepare("UPDATE venue_bounty_sessions SET status='escaped',ended_at=CURRENT_TIMESTAMP,total_reward_gc=total_reward_gc+? WHERE id=?").bind(reward,session.id).run();await grantGhostCredits(user.id,reward,'VENUE BOUNTY ESCAPE',session.id,env);await env.DB.batch([env.DB.prepare('UPDATE ghost_profiles SET bounty_escapes=bounty_escapes+1 WHERE user_id=?').bind(user.id),env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'survivor')").bind(user.id),env.DB.prepare('INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)').bind(crypto.randomUUID(),user.id,'bounty_escaped','VENUE SESSION COMPLETE','Your consented five-star venue session is complete.',JSON.stringify({sessionId:session.id,reward}))]);return json({status:'escaped',stars:5,reward});
+  const venueProgress = path.match(/^venue-bounties\/([^/]+)\/progress$/);
+  if (venueProgress && method === "POST") {
+    const session = await env.DB.prepare("SELECT * FROM venue_bounty_sessions WHERE id=? AND host_user_id=? AND status='active'").bind(venueProgress[1], user.id).first<any>();
+    if (!session) return json({ error: "Active venue session not found." }, 404);
+    if (Date.parse(session.phase_ends_at) > Date.now())
+      return json({
+        status: "active",
+        stars: session.stars,
+        endsAt: session.phase_ends_at,
+      });
+    const nextStars = Number(session.stars) + 1;
+    if (nextStars <= 5) {
+      const endsAt = new Date(Date.now() + 10 * 60_000).toISOString();
+      await env.DB.batch([env.DB.prepare("UPDATE venue_bounty_sessions SET stars=?,phase_started_at=CURRENT_TIMESTAMP,phase_ends_at=?,total_reward_gc=total_reward_gc+? WHERE id=?").bind(nextStars, endsAt, 100 * nextStars, session.id), env.DB.prepare("INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)").bind(crypto.randomUUID(), user.id, "bounty_escalated", "VENUE SESSION ESCALATED", `Star ${nextStars} is active.`, JSON.stringify({ sessionId: session.id, stars: nextStars }))]);
+      return json({ status: "escalated", stars: nextStars, endsAt });
+    }
+    const reward = 1500;
+    await env.DB.prepare("UPDATE venue_bounty_sessions SET status='escaped',ended_at=CURRENT_TIMESTAMP,total_reward_gc=total_reward_gc+? WHERE id=?").bind(reward, session.id).run();
+    await grantGhostCredits(user.id, reward, "VENUE BOUNTY ESCAPE", session.id, env);
+    await env.DB.batch([env.DB.prepare("UPDATE ghost_profiles SET bounty_escapes=bounty_escapes+1 WHERE user_id=?").bind(user.id), env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'survivor')").bind(user.id), env.DB.prepare("INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)").bind(crypto.randomUUID(), user.id, "bounty_escaped", "VENUE SESSION COMPLETE", "Your consented five-star venue session is complete.", JSON.stringify({ sessionId: session.id, reward }))]);
+    return json({ status: "escaped", stars: 5, reward });
   }
-  if (path === 'auth/signout' && method === 'POST') {
-    const bearer = request.headers.get('authorization')!.replace(/^Bearer\s+/i, '');
-    await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await sha256(bearer)).run();
+  if (path === "auth/signout" && method === "POST") {
+    const bearer = request.headers.get("authorization")!.replace(/^Bearer\s+/i, "");
+    await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?")
+      .bind(await sha256(bearer))
+      .run();
     return json({ success: true });
   }
 
-  if(path==='invites'&&method==='GET'){
-    const codes=await env.DB.prepare('SELECT * FROM invite_codes WHERE created_by=? ORDER BY created_at DESC').bind(user.id).all();
-    return json({codes:codes.results,redemptions:[]});
+  if (path === "invites" && method === "GET") {
+    const codes = await env.DB.prepare("SELECT * FROM invite_codes WHERE created_by=? ORDER BY created_at DESC").bind(user.id).all();
+    return json({ codes: codes.results, redemptions: [] });
   }
-  if(path==='invites'&&method==='POST'){
-    const body=await request.json<{label?:string;maxUses?:number;expiresAt?:string|null;burnAfterUse?:boolean}>();const requestedUses=Math.min(25,Math.max(1,Math.floor(Number(body.maxUses)||1)));const burnAfterUse=Boolean(body.burnAfterUse)||requestedUses===1;const maxUses=burnAfterUse?1:requestedUses;const requestedExpiry=body.expiresAt?Date.parse(body.expiresAt):NaN;const expiresAt=Number.isFinite(requestedExpiry)?new Date(Math.min(requestedExpiry,Date.now()+30*86400000)).toISOString():new Date(Date.now()+7*86400000).toISOString();
-    let code=createInviteCode();while(await env.DB.prepare('SELECT 1 found FROM invite_codes WHERE code=?').bind(code).first())code=createInviteCode();const id=crypto.randomUUID();
-    await env.DB.prepare('INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by,burn_after_use) VALUES(?,?,?,?,?,?,?)').bind(id,code,body.label?.trim().slice(0,60)||'PILOT INVITE',maxUses,expiresAt,user.id,burnAfterUse?1:0).run();return json({id,code,maxUses,expiresAt,burnAfterUse},201);
+  if (path === "invites" && method === "POST") {
+    const body = await request.json<{
+      label?: string;
+      maxUses?: number;
+      expiresAt?: string | null;
+      burnAfterUse?: boolean;
+    }>();
+    const requestedUses = Math.min(25, Math.max(1, Math.floor(Number(body.maxUses) || 1)));
+    const burnAfterUse = Boolean(body.burnAfterUse) || requestedUses === 1;
+    const maxUses = burnAfterUse ? 1 : requestedUses;
+    const requestedExpiry = body.expiresAt ? Date.parse(body.expiresAt) : NaN;
+    const expiresAt = Number.isFinite(requestedExpiry) ? new Date(Math.min(requestedExpiry, Date.now() + 30 * 86400000)).toISOString() : new Date(Date.now() + 7 * 86400000).toISOString();
+    let code = createInviteCode();
+    while (await env.DB.prepare("SELECT 1 found FROM invite_codes WHERE code=?").bind(code).first()) code = createInviteCode();
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by,burn_after_use) VALUES(?,?,?,?,?,?,?)")
+      .bind(id, code, body.label?.trim().slice(0, 60) || "PILOT INVITE", maxUses, expiresAt, user.id, burnAfterUse ? 1 : 0)
+      .run();
+    return json({ id, code, maxUses, expiresAt, burnAfterUse }, 201);
   }
-  const memberInviteToggle=path.match(/^invites\/([^/]+)\/toggle$/);if(memberInviteToggle&&method==='POST'){
-    await env.DB.prepare('UPDATE invite_codes SET is_active=CASE is_active WHEN 1 THEN 0 ELSE 1 END WHERE id=? AND created_by=?').bind(memberInviteToggle[1],user.id).run();return json({updated:true});
-  }
-
-  if(path==='admin/invites'&&method==='GET'){
-    if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
-    const [codes,redemptions]=await Promise.all([env.DB.prepare('SELECT * FROM invite_codes ORDER BY created_at DESC').all(),env.DB.prepare(`SELECT r.code_id,r.email,r.redeemed_at,u.id user_id,u.username,u.display_name,u.avatar_url FROM invite_redemptions r JOIN users u ON u.id=r.user_id ORDER BY r.redeemed_at DESC LIMIT 250`).all()]);
-    return json({codes:codes.results,redemptions:redemptions.results});
-  }
-  if(path==='admin/invites'&&method==='POST'){
-    if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
-    const body=await request.json<{label?:string;maxUses?:number;expiresAt?:string|null;burnAfterUse?:boolean}>();const requestedUses=Math.min(500,Math.max(1,Math.floor(Number(body.maxUses)||1)));const burnAfterUse=Boolean(body.burnAfterUse)||requestedUses===1;const maxUses=burnAfterUse?1:requestedUses;const expiresAt=body.expiresAt&&Number.isFinite(Date.parse(body.expiresAt))?new Date(body.expiresAt).toISOString():null;
-    let code=createInviteCode();while(await env.DB.prepare('SELECT 1 found FROM invite_codes WHERE code=?').bind(code).first())code=createInviteCode();
-    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by,burn_after_use) VALUES(?,?,?,?,?,?,?)').bind(id,code,body.label?.trim().slice(0,60)||'PRIVATE ACCESS',maxUses,expiresAt,user.id,burnAfterUse?1:0).run();
-    return json({id,code,label:body.label?.trim()||'PRIVATE ACCESS',maxUses,expiresAt,burnAfterUse},201);
-  }
-  const inviteToggle=path.match(/^admin\/invites\/([^/]+)\/toggle$/);
-  if(inviteToggle&&method==='POST'){
-    if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
-    await env.DB.prepare('UPDATE invite_codes SET is_active=CASE is_active WHEN 1 THEN 0 ELSE 1 END WHERE id=?').bind(inviteToggle[1]).run();
-    return json({updated:true});
+  const memberInviteToggle = path.match(/^invites\/([^/]+)\/toggle$/);
+  if (memberInviteToggle && method === "POST") {
+    await env.DB.prepare("UPDATE invite_codes SET is_active=CASE is_active WHEN 1 THEN 0 ELSE 1 END WHERE id=? AND created_by=?").bind(memberInviteToggle[1], user.id).run();
+    return json({ updated: true });
   }
 
-  if (path === 'vehicles' && method === 'GET') {
-    const result = await env.DB.prepare('SELECT * FROM vehicles WHERE user_id=? ORDER BY is_active DESC,created_at DESC').bind(user.id).all();
+  if (path === "admin/invites" && method === "GET") {
+    if (user.email.toLowerCase() !== DEVELOPER_EMAIL) return json({ error: "Developer access required." }, 403);
+    const [codes, redemptions] = await Promise.all([env.DB.prepare("SELECT * FROM invite_codes ORDER BY created_at DESC").all(), env.DB.prepare(`SELECT r.code_id,r.email,r.redeemed_at,u.id user_id,u.username,u.display_name,u.avatar_url FROM invite_redemptions r JOIN users u ON u.id=r.user_id ORDER BY r.redeemed_at DESC LIMIT 250`).all()]);
+    return json({ codes: codes.results, redemptions: redemptions.results });
+  }
+  if (path === "admin/invites" && method === "POST") {
+    if (user.email.toLowerCase() !== DEVELOPER_EMAIL) return json({ error: "Developer access required." }, 403);
+    const body = await request.json<{
+      label?: string;
+      maxUses?: number;
+      expiresAt?: string | null;
+      burnAfterUse?: boolean;
+    }>();
+    const requestedUses = Math.min(500, Math.max(1, Math.floor(Number(body.maxUses) || 1)));
+    const burnAfterUse = Boolean(body.burnAfterUse) || requestedUses === 1;
+    const maxUses = burnAfterUse ? 1 : requestedUses;
+    const expiresAt = body.expiresAt && Number.isFinite(Date.parse(body.expiresAt)) ? new Date(body.expiresAt).toISOString() : null;
+    let code = createInviteCode();
+    while (await env.DB.prepare("SELECT 1 found FROM invite_codes WHERE code=?").bind(code).first()) code = createInviteCode();
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by,burn_after_use) VALUES(?,?,?,?,?,?,?)")
+      .bind(id, code, body.label?.trim().slice(0, 60) || "PRIVATE ACCESS", maxUses, expiresAt, user.id, burnAfterUse ? 1 : 0)
+      .run();
+    return json(
+      {
+        id,
+        code,
+        label: body.label?.trim() || "PRIVATE ACCESS",
+        maxUses,
+        expiresAt,
+        burnAfterUse,
+      },
+      201,
+    );
+  }
+  const inviteToggle = path.match(/^admin\/invites\/([^/]+)\/toggle$/);
+  if (inviteToggle && method === "POST") {
+    if (user.email.toLowerCase() !== DEVELOPER_EMAIL) return json({ error: "Developer access required." }, 403);
+    await env.DB.prepare("UPDATE invite_codes SET is_active=CASE is_active WHEN 1 THEN 0 ELSE 1 END WHERE id=?").bind(inviteToggle[1]).run();
+    return json({ updated: true });
+  }
+
+  if (path === "vehicles" && method === "GET") {
+    const result = await env.DB.prepare("SELECT * FROM vehicles WHERE user_id=? ORDER BY is_active DESC,created_at DESC").bind(user.id).all();
     return json({ vehicles: result.results });
   }
-  if (path === 'vehicles' && method === 'POST') {
+  if (path === "vehicles" && method === "POST") {
     const body = await request.json<Record<string, string | number>>();
-    if (!Number.isInteger(Number(body.year)) || !body.make || !body.model) return json({ error: 'Year, make, and model are required.' }, 400);
+    if (!Number.isInteger(Number(body.year)) || !body.make || !body.model) return json({ error: "Year, make, and model are required." }, 400);
     const id = crypto.randomUUID();
-    const existing = await env.DB.prepare('SELECT COUNT(*) count FROM vehicles WHERE user_id=?').bind(user.id).first<{ count: number }>();
-    await env.DB.prepare(`INSERT INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,photo_url,is_active)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,body.nickname||`${body.make} ${body.model}`,Number(body.year),body.make,body.model,body.trim||null,body.engine||null,body.drivetrain||null,Number(body.horsepower)||0,body.color||null,body.photoUrl||null,existing?.count?0:1).run();
+    const existing = await env.DB.prepare("SELECT COUNT(*) count FROM vehicles WHERE user_id=?").bind(user.id).first<{ count: number }>();
+    await env.DB.prepare(
+      `INSERT INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,photo_url,is_active)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+      .bind(id, user.id, body.nickname || `${body.make} ${body.model}`, Number(body.year), body.make, body.model, body.trim || null, body.engine || null, body.drivetrain || null, Number(body.horsepower) || 0, body.color || null, body.photoUrl || null, existing?.count ? 0 : 1)
+      .run();
     return json({ id }, 201);
   }
-  const activateVehicle=path.match(/^vehicles\/([^/]+)\/active$/);
-  if(activateVehicle&&method==='POST'){
-    const vehicle=await env.DB.prepare('SELECT id FROM vehicles WHERE id=? AND user_id=?').bind(activateVehicle[1],user.id).first();
-    if(!vehicle)return json({error:'Vehicle not found.'},404);
-    await env.DB.batch([
-      env.DB.prepare('UPDATE vehicles SET is_active=0 WHERE user_id=?').bind(user.id),
-      env.DB.prepare('UPDATE vehicles SET is_active=1 WHERE id=? AND user_id=?').bind(activateVehicle[1],user.id),
-    ]);
-    return json({success:true});
+  const activateVehicle = path.match(/^vehicles\/([^/]+)\/active$/);
+  if (activateVehicle && method === "POST") {
+    const vehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND user_id=?").bind(activateVehicle[1], user.id).first();
+    if (!vehicle) return json({ error: "Vehicle not found." }, 404);
+    await env.DB.batch([env.DB.prepare("UPDATE vehicles SET is_active=0 WHERE user_id=?").bind(user.id), env.DB.prepare("UPDATE vehicles SET is_active=1 WHERE id=? AND user_id=?").bind(activateVehicle[1], user.id)]);
+    return json({ success: true });
   }
 
-  if (path === 'network' && method === 'GET') {
+  if (path === "network" && method === "GET") {
     const now = new Date().toISOString();
     const [drivers, events, cruises] = await Promise.all([
-      env.DB.prepare(`SELECT l.*,u.username,u.avatar_url,u.privacy_mode,u.tier,u.wins,u.losses,v.year,v.make,v.model,1 is_live FROM driver_locations l JOIN users u ON u.id=l.user_id LEFT JOIN vehicles v ON v.id=l.vehicle_id WHERE l.expires_at>? AND l.user_id<>? ORDER BY l.updated_at DESC LIMIT 500`).bind(now,user.id).all(),
-      env.DB.prepare('SELECT * FROM events WHERE ends_at IS NULL OR ends_at>? ORDER BY starts_at').bind(now).all(),
+      env.DB.prepare(`SELECT l.*,u.username,u.avatar_url,u.privacy_mode,u.tier,u.wins,u.losses,v.year,v.make,v.model,1 is_live FROM driver_locations l JOIN users u ON u.id=l.user_id LEFT JOIN vehicles v ON v.id=l.vehicle_id WHERE l.expires_at>? AND l.user_id<>? ORDER BY l.updated_at DESC LIMIT 500`).bind(now, user.id).all(),
+      env.DB.prepare(
+        `SELECT e.*,(SELECT COUNT(*) FROM event_registrations er WHERE er.event_id=e.id) attendees
+        FROM events e WHERE e.ends_at IS NULL OR e.ends_at>? ORDER BY e.starts_at`,
+      )
+        .bind(now)
+        .all(),
       env.DB.prepare(`SELECT c.*,EXISTS(SELECT 1 FROM cruise_members m WHERE m.cruise_id=c.id AND m.user_id=?) joined FROM cruises c WHERE c.status IN ('scheduled','live') ORDER BY c.starts_at`).bind(user.id).all(),
     ]);
-    return json({ drivers: drivers.results, events: events.results, cruises: cruises.results.map((row:any)=>({...row,route:JSON.parse(row.route_json||'[]')})) });
+    return json({
+      drivers: drivers.results,
+      events: events.results,
+      cruises: cruises.results.map((row: any) => ({
+        ...row,
+        route: JSON.parse(row.route_json || "[]"),
+      })),
+    });
   }
-  if(path==='pilots'&&method==='GET'){
-    const rows=await env.DB.prepare(`SELECT u.id,u.username,u.avatar_url,u.tier,u.points,u.wins,u.losses,u.reputation,v.year,v.make,v.model,v.photo_url,
-      l.latitude,l.longitude,l.speed_kph,l.drive_mode FROM users u LEFT JOIN vehicles v ON v.user_id=u.id AND v.is_active=1 LEFT JOIN driver_locations l ON l.user_id=u.id WHERE u.id<>? ORDER BY u.reputation DESC,u.points DESC LIMIT 100`).bind(user.id).all();
-    return json({pilots:rows.results});
+  if (path === "pilots" && method === "GET") {
+    const rows = await env.DB.prepare(
+      `SELECT u.id,u.username,u.avatar_url,u.tier,u.points,u.wins,u.losses,u.reputation,v.year,v.make,v.model,v.photo_url,
+      l.latitude,l.longitude,l.speed_kph,l.drive_mode FROM users u LEFT JOIN vehicles v ON v.user_id=u.id AND v.is_active=1 LEFT JOIN driver_locations l ON l.user_id=u.id WHERE u.id<>? ORDER BY u.reputation DESC,u.points DESC LIMIT 100`,
+    )
+      .bind(user.id)
+      .all();
+    return json({ pilots: rows.results });
   }
-  if (path === 'location' && method === 'POST') {
+  if (path === "location" && method === "POST") {
     const body = await request.json<Record<string, number | string | boolean | null>>();
-    if(!Number.isFinite(Number(body.latitude))||!Number.isFinite(Number(body.longitude)))return json({error:'Valid latitude and longitude are required.'},400);
-    const shareMinutes=Math.min(120,Math.max(5,Math.floor(Number(body.shareMinutes)||15)));
-    const requestedExpiry=typeof body.expiresAt==='string'?Date.parse(body.expiresAt):NaN;
-    const expiryMs=Number.isFinite(requestedExpiry)?Math.min(Date.now()+120*60_000,Math.max(Date.now()+60_000,requestedExpiry)):Date.now()+shareMinutes*60_000;
+    if (!Number.isFinite(Number(body.latitude)) || !Number.isFinite(Number(body.longitude))) return json({ error: "Valid latitude and longitude are required." }, 400);
+    const shareMinutes = Math.min(120, Math.max(5, Math.floor(Number(body.shareMinutes) || 15)));
+    const requestedExpiry = typeof body.expiresAt === "string" ? Date.parse(body.expiresAt) : NaN;
+    const expiryMs = Number.isFinite(requestedExpiry) ? Math.min(Date.now() + 120 * 60_000, Math.max(Date.now() + 60_000, requestedExpiry)) : Date.now() + shareMinutes * 60_000;
     const expires = new Date(expiryMs).toISOString();
-    await env.DB.prepare(`INSERT INTO driver_locations(user_id,vehicle_id,latitude,longitude,accuracy_m,altitude_m,speed_kph,heading,drive_mode,cruise_id,expires_at,updated_at)
-      VALUES(?,COALESCE(?,(SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1)),?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,altitude_m=excluded.altitude_m,speed_kph=excluded.speed_kph,heading=excluded.heading,drive_mode=excluded.drive_mode,cruise_id=excluded.cruise_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`)
-      .bind(user.id,body.vehicleId||null,user.id,Number(body.latitude),Number(body.longitude),body.accuracy??null,body.altitude??null,body.speedKph||0,body.heading||0,body.driveMode?1:0,body.cruiseId||null,expires).run();
-    if(body.driveMode&&typeof body.driveSessionId==='string'&&body.driveSessionId.length>=8){await env.DB.prepare(`INSERT INTO drive_trace_points(user_id,session_id,latitude,longitude,speed_kph,heading) SELECT ?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM drive_trace_points WHERE user_id=? AND session_id=? AND captured_at>datetime('now','-4 seconds'))`).bind(user.id,body.driveSessionId.slice(0,80),Number(body.latitude),Number(body.longitude),Math.max(0,Number(body.speedKph)||0),Number(body.heading)||0,user.id,body.driveSessionId.slice(0,80)).run();}
-    await env.DB.prepare('UPDATE users SET top_speed_kph=MAX(top_speed_kph,?) WHERE id=?').bind(Math.max(0,Number(body.speedKph)||0),user.id).run();
-    const latitude=Number(body.latitude),longitude=Number(body.longitude),cellLat=Math.round(latitude*500),cellLng=Math.round(longitude*500);
-    const discovery=await env.DB.prepare('INSERT OR IGNORE INTO map_discoveries(user_id,cell_lat,cell_lng,latitude,longitude) VALUES(?,?,?,?,?)').bind(user.id,cellLat,cellLng,latitude,longitude).run();
-    if(discovery.meta.changes)await env.DB.prepare("UPDATE users SET heat=MIN(100,heat+2),heat_updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(user.id).run();
-    const nearbyDrops=await env.DB.prepare(`SELECT d.* FROM dead_drops d LEFT JOIN dead_drop_claims c ON c.drop_id=d.id AND c.user_id=? WHERE d.is_active=1 AND c.drop_id IS NULL`).bind(user.id).all<Record<string,unknown>>();
-    const reachedDrops=nearbyDrops.results.filter(drop=>distanceMeters(latitude,longitude,Number(drop.latitude),Number(drop.longitude))<=Number(drop.radius_m));const claimed:Record<string,unknown>[]=[];
-    for(const drop of reachedDrops){const result=await env.DB.prepare('INSERT OR IGNORE INTO dead_drop_claims(drop_id,user_id) VALUES(?,?)').bind(drop.id,user.id).run();if(result.meta.changes){await env.DB.prepare('UPDATE users SET credits=credits+? WHERE id=?').bind(Number(drop.credits),user.id).run();await grantGhostCredits(user.id,Math.max(25,Math.floor(Number(drop.credits)/4)),'DEAD DROP',String(drop.id),env);await grantGhostKey(env,user.id,1,'DEAD DROP',String(drop.id));claimed.push(drop);}}
-    const activeRewardCount=await env.DB.prepare(`SELECT COUNT(*) count FROM map_rewards r LEFT JOIN map_reward_claims c ON c.reward_id=r.id AND c.user_id=? WHERE r.owner_id=? AND r.expires_at>? AND c.reward_id IS NULL`).bind(user.id,user.id,new Date().toISOString()).first<{count:number}>();
-    const rewardsToSpawn=(activeRewardCount?.count||0)===0?8:0;
-    if(rewardsToSpawn){const rewardStatements=[],regionLat=Math.round(latitude*4)/4,regionLng=Math.round(longitude*4)/4;for(let index=0;index<rewardsToSpawn;index++){const seed=await sha256Hex(`${user.id}:${regionLat}:${regionLng}:${index}`),angle=parseInt(seed.slice(0,8),16)%360,distance=4800+(parseInt(seed.slice(8,16),16)%32000),point=destinationPoint(regionLat,regionLng,distance,angle),lifeHours=index%2===0?1:2,credits=50+(parseInt(seed.slice(16,18),16)%5)*25;rewardStatements.push(env.DB.prepare('INSERT INTO map_rewards(id,owner_id,title,latitude,longitude,radius_m,credits,expires_at) VALUES(?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user.id,index===0?'DISTRICT SIGNAL CACHE':'GHOST COIN',point.latitude,point.longitude,70,credits,new Date(Date.now()+lifeHours*3600000).toISOString()));}await env.DB.batch(rewardStatements);}
-    const activeRewards=await env.DB.prepare(`SELECT r.* FROM map_rewards r LEFT JOIN map_reward_claims c ON c.reward_id=r.id AND c.user_id=? WHERE r.owner_id=? AND r.expires_at>? AND c.reward_id IS NULL`).bind(user.id,user.id,new Date().toISOString()).all<Record<string,unknown>>();
-    const reachedRewards=activeRewards.results.filter(reward=>distanceMeters(latitude,longitude,Number(reward.latitude),Number(reward.longitude))<=Number(reward.radius_m));const claimedRewards:Record<string,unknown>[]=[];
-    for(const reward of reachedRewards){const result=await env.DB.prepare('INSERT OR IGNORE INTO map_reward_claims(reward_id,user_id) VALUES(?,?)').bind(reward.id,user.id).run();if(result.meta.changes){await env.DB.prepare('UPDATE users SET credits=credits+? WHERE id=?').bind(Number(reward.credits),user.id).run();await grantGhostCredits(user.id,Math.max(10,Math.floor(Number(reward.credits)/5)),'GHOST CACHE',String(reward.id),env);await env.DB.prepare('UPDATE ghost_profiles SET current_streak=current_streak+1,best_streak=MAX(best_streak,current_streak+1),activities_completed=activities_completed+1,drops_claimed=drops_claimed+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(user.id).run();claimedRewards.push(reward);}}
-    const discoveryCount=await env.DB.prepare('SELECT COUNT(*) count FROM map_discoveries WHERE user_id=?').bind(user.id).first<{count:number}>();
-    const availableTerritories=await env.DB.prepare(`SELECT t.* FROM territories t JOIN crew_members m ON m.crew_id=t.crew_id AND m.user_id=? AND m.status='approved' LEFT JOIN territory_unlocks u ON u.territory_id=t.id AND u.user_id=? WHERE u.territory_id IS NULL`).bind(user.id,user.id).all<Record<string,unknown>>();
-    const unlocked=availableTerritories.results.filter(territory=>(discoveryCount?.count||0)>=Number(territory.required_cells)&&distanceMeters(latitude,longitude,Number(territory.latitude),Number(territory.longitude))<=Number(territory.radius_m));
-    if(unlocked.length)await env.DB.batch(unlocked.map(territory=>env.DB.prepare('INSERT OR IGNORE INTO territory_unlocks(territory_id,user_id) VALUES(?,?)').bind(territory.id,user.id)));
-    const progress=await syncGameProgress(user.id,env);
-    return json({ success: true,expiresAt:expires,shareMinutes,discoveredCells:discoveryCount?.count||1,claimedDrops:claimed.map(drop=>({id:drop.id,title:drop.title,credits:Number(drop.credits)})),claimedRewards:claimedRewards.map(reward=>({id:reward.id,title:reward.title,credits:Number(reward.credits)})),unlockedTerritories:unlocked.map(territory=>({id:territory.id,name:territory.name})),completedContracts:progress.completed });
+    await env.DB.prepare(
+      `INSERT INTO driver_locations(user_id,vehicle_id,latitude,longitude,accuracy_m,altitude_m,speed_kph,heading,drive_mode,cruise_id,expires_at,updated_at)
+      VALUES(?,COALESCE(?,(SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1)),?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,altitude_m=excluded.altitude_m,speed_kph=excluded.speed_kph,heading=excluded.heading,drive_mode=excluded.drive_mode,cruise_id=excluded.cruise_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`,
+    )
+      .bind(user.id, body.vehicleId || null, user.id, Number(body.latitude), Number(body.longitude), body.accuracy ?? null, body.altitude ?? null, body.speedKph || 0, body.heading || 0, body.driveMode ? 1 : 0, body.cruiseId || null, expires)
+      .run();
+    if (body.driveMode && typeof body.driveSessionId === "string" && body.driveSessionId.length >= 8) {
+      await env.DB.prepare(`INSERT INTO drive_trace_points(user_id,session_id,latitude,longitude,speed_kph,heading) SELECT ?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM drive_trace_points WHERE user_id=? AND session_id=? AND captured_at>datetime('now','-4 seconds'))`)
+        .bind(user.id, body.driveSessionId.slice(0, 80), Number(body.latitude), Number(body.longitude), Math.max(0, Number(body.speedKph) || 0), Number(body.heading) || 0, user.id, body.driveSessionId.slice(0, 80))
+        .run();
+    }
+    await env.DB.prepare("UPDATE users SET top_speed_kph=MAX(top_speed_kph,?) WHERE id=?")
+      .bind(Math.max(0, Number(body.speedKph) || 0), user.id)
+      .run();
+    const latitude = Number(body.latitude),
+      longitude = Number(body.longitude),
+      cellLat = Math.round(latitude * 500),
+      cellLng = Math.round(longitude * 500);
+    const discovery = await env.DB.prepare("INSERT OR IGNORE INTO map_discoveries(user_id,cell_lat,cell_lng,latitude,longitude) VALUES(?,?,?,?,?)").bind(user.id, cellLat, cellLng, latitude, longitude).run();
+    if (discovery.meta.changes) await env.DB.prepare("UPDATE users SET heat=MIN(100,heat+2),heat_updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(user.id).run();
+    const nearbyDrops = await env.DB.prepare(`SELECT d.* FROM dead_drops d LEFT JOIN dead_drop_claims c ON c.drop_id=d.id AND c.user_id=? WHERE d.is_active=1 AND c.drop_id IS NULL`).bind(user.id).all<Record<string, unknown>>();
+    const reachedDrops = nearbyDrops.results.filter((drop) => distanceMeters(latitude, longitude, Number(drop.latitude), Number(drop.longitude)) <= Number(drop.radius_m));
+    const claimed: Record<string, unknown>[] = [];
+    for (const drop of reachedDrops) {
+      const result = await env.DB.prepare("INSERT OR IGNORE INTO dead_drop_claims(drop_id,user_id) VALUES(?,?)").bind(drop.id, user.id).run();
+      if (result.meta.changes) {
+        await env.DB.prepare("UPDATE users SET credits=credits+? WHERE id=?").bind(Number(drop.credits), user.id).run();
+        await grantGhostCredits(user.id, Math.max(25, Math.floor(Number(drop.credits) / 4)), "DEAD DROP", String(drop.id), env);
+        await grantGhostKey(env, user.id, 1, "DEAD DROP", String(drop.id));
+        claimed.push(drop);
+      }
+    }
+    const activeRewardCount = await env.DB.prepare(`SELECT COUNT(*) count FROM map_rewards r LEFT JOIN map_reward_claims c ON c.reward_id=r.id AND c.user_id=? WHERE r.owner_id=? AND r.expires_at>? AND c.reward_id IS NULL`).bind(user.id, user.id, new Date().toISOString()).first<{ count: number }>();
+    const rewardsToSpawn = (activeRewardCount?.count || 0) === 0 ? 8 : 0;
+    if (rewardsToSpawn) {
+      const rewardStatements = [],
+        regionLat = Math.round(latitude * 4) / 4,
+        regionLng = Math.round(longitude * 4) / 4;
+      for (let index = 0; index < rewardsToSpawn; index++) {
+        const seed = await sha256Hex(`${user.id}:${regionLat}:${regionLng}:${index}`),
+          angle = parseInt(seed.slice(0, 8), 16) % 360,
+          distance = 4800 + (parseInt(seed.slice(8, 16), 16) % 32000),
+          point = destinationPoint(regionLat, regionLng, distance, angle),
+          lifeHours = index % 2 === 0 ? 1 : 2,
+          credits = 50 + (parseInt(seed.slice(16, 18), 16) % 5) * 25;
+        rewardStatements.push(env.DB.prepare("INSERT INTO map_rewards(id,owner_id,title,latitude,longitude,radius_m,credits,expires_at) VALUES(?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(), user.id, index === 0 ? "DISTRICT SIGNAL CACHE" : "GHOST COIN", point.latitude, point.longitude, 70, credits, new Date(Date.now() + lifeHours * 3600000).toISOString()));
+      }
+      await env.DB.batch(rewardStatements);
+    }
+    const activeRewards = await env.DB.prepare(`SELECT r.* FROM map_rewards r LEFT JOIN map_reward_claims c ON c.reward_id=r.id AND c.user_id=? WHERE r.owner_id=? AND r.expires_at>? AND c.reward_id IS NULL`).bind(user.id, user.id, new Date().toISOString()).all<Record<string, unknown>>();
+    const reachedRewards = activeRewards.results.filter((reward) => distanceMeters(latitude, longitude, Number(reward.latitude), Number(reward.longitude)) <= Number(reward.radius_m));
+    const claimedRewards: Record<string, unknown>[] = [];
+    for (const reward of reachedRewards) {
+      const result = await env.DB.prepare("INSERT OR IGNORE INTO map_reward_claims(reward_id,user_id) VALUES(?,?)").bind(reward.id, user.id).run();
+      if (result.meta.changes) {
+        await env.DB.prepare("UPDATE users SET credits=credits+? WHERE id=?").bind(Number(reward.credits), user.id).run();
+        await grantGhostCredits(user.id, Math.max(10, Math.floor(Number(reward.credits) / 5)), "GHOST CACHE", String(reward.id), env);
+        await env.DB.prepare("UPDATE ghost_profiles SET current_streak=current_streak+1,best_streak=MAX(best_streak,current_streak+1),activities_completed=activities_completed+1,drops_claimed=drops_claimed+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(user.id).run();
+        claimedRewards.push(reward);
+      }
+    }
+    const discoveryCount = await env.DB.prepare("SELECT COUNT(*) count FROM map_discoveries WHERE user_id=?").bind(user.id).first<{ count: number }>();
+    const availableTerritories = await env.DB.prepare(`SELECT t.* FROM territories t JOIN crew_members m ON m.crew_id=t.crew_id AND m.user_id=? AND m.status='approved' LEFT JOIN territory_unlocks u ON u.territory_id=t.id AND u.user_id=? WHERE u.territory_id IS NULL`).bind(user.id, user.id).all<Record<string, unknown>>();
+    const unlocked = availableTerritories.results.filter((territory) => (discoveryCount?.count || 0) >= Number(territory.required_cells) && distanceMeters(latitude, longitude, Number(territory.latitude), Number(territory.longitude)) <= Number(territory.radius_m));
+    if (unlocked.length) await env.DB.batch(unlocked.map((territory) => env.DB.prepare("INSERT OR IGNORE INTO territory_unlocks(territory_id,user_id) VALUES(?,?)").bind(territory.id, user.id)));
+    const progress = await syncGameProgress(user.id, env);
+    return json({
+      success: true,
+      expiresAt: expires,
+      shareMinutes,
+      discoveredCells: discoveryCount?.count || 1,
+      claimedDrops: claimed.map((drop) => ({
+        id: drop.id,
+        title: drop.title,
+        credits: Number(drop.credits),
+      })),
+      claimedRewards: claimedRewards.map((reward) => ({
+        id: reward.id,
+        title: reward.title,
+        credits: Number(reward.credits),
+      })),
+      unlockedTerritories: unlocked.map((territory) => ({
+        id: territory.id,
+        name: territory.name,
+      })),
+      completedContracts: progress.completed,
+    });
   }
-  if(path==='location'&&method==='DELETE'){await env.DB.prepare('DELETE FROM driver_locations WHERE user_id=?').bind(user.id).run();return json({hidden:true});}
+  if (path === "location" && method === "DELETE") {
+    await env.DB.prepare("DELETE FROM driver_locations WHERE user_id=?").bind(user.id).run();
+    return json({ hidden: true });
+  }
 
-  if(path==='world'&&method==='GET'){
-    const [discoveries,crewDiscoveries,territories,drops,reports,crews,seasons,requests,safeHouses,badges,contracts,heatRow,rewards,tracePoints,journeys]=await Promise.all([
-      env.DB.prepare('SELECT latitude,longitude,discovered_at FROM map_discoveries WHERE user_id=? ORDER BY discovered_at DESC LIMIT 1200').bind(user.id).all(),
-      env.DB.prepare(`SELECT DISTINCT d.latitude,d.longitude,d.discovered_at,u.username FROM map_discoveries d JOIN crew_members teammate ON teammate.user_id=d.user_id AND teammate.status='approved' JOIN crew_members mine ON mine.crew_id=teammate.crew_id AND mine.user_id=? AND mine.status='approved' JOIN users u ON u.id=d.user_id WHERE d.user_id<>? ORDER BY d.discovered_at DESC LIMIT 1200`).bind(user.id,user.id).all(),
+  if (path === "world" && method === "GET") {
+    const [discoveries, crewDiscoveries, territories, drops, reports, crews, seasons, requests, safeHouses, badges, contracts, heatRow, rewards, tracePoints, journeys] = await Promise.all([
+      env.DB.prepare("SELECT latitude,longitude,discovered_at FROM map_discoveries WHERE user_id=? ORDER BY discovered_at DESC LIMIT 1200").bind(user.id).all(),
+      env.DB.prepare(`SELECT DISTINCT d.latitude,d.longitude,d.discovered_at,u.username FROM map_discoveries d JOIN crew_members teammate ON teammate.user_id=d.user_id AND teammate.status='approved' JOIN crew_members mine ON mine.crew_id=teammate.crew_id AND mine.user_id=? AND mine.status='approved' JOIN users u ON u.id=d.user_id WHERE d.user_id<>? ORDER BY d.discovered_at DESC LIMIT 1200`).bind(user.id, user.id).all(),
       env.DB.prepare(`SELECT t.*,c.name crew_name,c.tag,EXISTS(SELECT 1 FROM territory_unlocks u WHERE u.territory_id=t.id AND u.user_id=?) unlocked FROM territories t JOIN crews c ON c.id=t.crew_id`).bind(user.id).all(),
       env.DB.prepare(`SELECT d.*,EXISTS(SELECT 1 FROM dead_drop_claims c WHERE c.drop_id=d.id AND c.user_id=?) claimed FROM dead_drops d WHERE d.is_active=1`).bind(user.id).all(),
       env.DB.prepare(`SELECT r.*,u.username FROM road_reports r JOIN users u ON u.id=r.user_id WHERE r.is_active=1 ORDER BY r.created_at DESC LIMIT 500`).all(),
       env.DB.prepare(`SELECT c.*,m.status member_status,m.role member_role,(SELECT COUNT(*) FROM crew_members x WHERE x.crew_id=c.id AND x.status='approved') member_count FROM crews c LEFT JOIN crew_members m ON m.crew_id=c.id AND m.user_id=? ORDER BY member_count DESC`).bind(user.id).all(),
-      env.DB.prepare(`SELECT s.*,e.points,CASE WHEN e.user_id IS NULL THEN 0 ELSE 1 END joined FROM seasons s LEFT JOIN season_entries e ON e.season_id=s.id AND e.user_id=? WHERE s.ends_at>? ORDER BY s.starts_at`).bind(user.id,new Date().toISOString()).all(),
+      env.DB.prepare(`SELECT s.*,e.points,CASE WHEN e.user_id IS NULL THEN 0 ELSE 1 END joined FROM seasons s LEFT JOIN season_entries e ON e.season_id=s.id AND e.user_id=? WHERE s.ends_at>? ORDER BY s.starts_at`).bind(user.id, new Date().toISOString()).all(),
       env.DB.prepare(`SELECT m.crew_id,m.user_id,m.created_at,u.username,u.avatar_url FROM crew_members m JOIN crews c ON c.id=m.crew_id AND c.owner_id=? JOIN users u ON u.id=m.user_id WHERE m.status='pending' ORDER BY m.created_at`).bind(user.id).all(),
-      env.DB.prepare('SELECT id,vehicle_id,name,latitude,longitude,created_at FROM safe_houses WHERE user_id=? ORDER BY created_at DESC').bind(user.id).all(),
+      env.DB.prepare("SELECT id,vehicle_id,name,latitude,longitude,created_at FROM safe_houses WHERE user_id=? ORDER BY created_at DESC").bind(user.id).all(),
       env.DB.prepare(`SELECT b.*,CASE WHEN ub.user_id IS NULL THEN 0 ELSE 1 END earned,ub.earned_at FROM badges b LEFT JOIN user_badges ub ON ub.badge_id=b.id AND ub.user_id=? ORDER BY earned DESC,b.name`).bind(user.id).all(),
       env.DB.prepare(`SELECT c.*,p.progress,p.status progress_status,p.accepted_at,p.completed_at FROM contracts c LEFT JOIN contract_progress p ON p.contract_id=c.id AND p.user_id=? WHERE c.status='live' ORDER BY c.title`).bind(user.id).all(),
-      env.DB.prepare(`SELECT MAX(0,heat-CAST((julianday('now')-julianday(COALESCE(heat_updated_at,CURRENT_TIMESTAMP)))*24 AS INTEGER)) heat FROM users WHERE id=?`).bind(user.id).first<{heat:number}>(),
-      env.DB.prepare(`SELECT r.*,0 claimed FROM map_rewards r LEFT JOIN map_reward_claims c ON c.reward_id=r.id AND c.user_id=? WHERE r.owner_id=? AND r.expires_at>? AND c.reward_id IS NULL ORDER BY r.expires_at LIMIT 20`).bind(user.id,user.id,new Date().toISOString()).all(),
-      env.DB.prepare(`SELECT session_id,latitude,longitude,speed_kph,heading,captured_at FROM drive_trace_points WHERE user_id=? AND captured_at>datetime('now','-7 days') ORDER BY captured_at DESC LIMIT 1800`).bind(user.id).all<{session_id:string;latitude:number;longitude:number;speed_kph:number;heading:number;captured_at:string}>(),
-      env.DB.prepare(`SELECT j.*,p.current_checkpoint,p.status progress_status,p.completed_at,CASE WHEN p.user_id IS NULL THEN 0 ELSE 1 END joined FROM season_journeys j LEFT JOIN journey_progress p ON p.journey_id=j.id AND p.user_id=? WHERE j.ends_at>? ORDER BY j.starts_at`).bind(user.id,new Date().toISOString()).all<Record<string,unknown>>(),
+      env.DB.prepare(`SELECT MAX(0,heat-CAST((julianday('now')-julianday(COALESCE(heat_updated_at,CURRENT_TIMESTAMP)))*24 AS INTEGER)) heat FROM users WHERE id=?`).bind(user.id).first<{ heat: number }>(),
+      env.DB.prepare(`SELECT r.*,0 claimed FROM map_rewards r LEFT JOIN map_reward_claims c ON c.reward_id=r.id AND c.user_id=? WHERE r.owner_id=? AND r.expires_at>? AND c.reward_id IS NULL ORDER BY r.expires_at LIMIT 20`).bind(user.id, user.id, new Date().toISOString()).all(),
+      env.DB.prepare(`SELECT session_id,latitude,longitude,speed_kph,heading,captured_at FROM drive_trace_points WHERE user_id=? AND captured_at>datetime('now','-7 days') ORDER BY captured_at DESC LIMIT 1800`).bind(user.id).all<{
+        session_id: string;
+        latitude: number;
+        longitude: number;
+        speed_kph: number;
+        heading: number;
+        captured_at: string;
+      }>(),
+      env.DB.prepare(`SELECT j.*,p.current_checkpoint,p.status progress_status,p.completed_at,CASE WHEN p.user_id IS NULL THEN 0 ELSE 1 END joined FROM season_journeys j LEFT JOIN journey_progress p ON p.journey_id=j.id AND p.user_id=? WHERE j.ends_at>? ORDER BY j.starts_at`).bind(user.id, new Date().toISOString()).all<Record<string, unknown>>(),
     ]);
-    const territoryProgress=territories.results.map((territory:any)=>{const discoveredCells=discoveries.results.filter((cell:any)=>distanceMeters(Number(cell.latitude),Number(cell.longitude),Number(territory.latitude),Number(territory.longitude))<=Number(territory.radius_m)).length;return{...territory,discovered_cells:discoveredCells,completion:territory.unlocked?100:Math.min(100,Math.round(discoveredCells/Math.max(1,Number(territory.required_cells))*100))};});
-    const orderedDiscoveries=[...discoveries.results].reverse() as Array<{discovered_at:string}>;let currentChain=0,bestChain=0,previous=0;for(const cell of orderedDiscoveries){const timestamp=Date.parse(cell.discovered_at);currentChain=previous&&timestamp-previous<=10*60_000?currentChain+1:1;bestChain=Math.max(bestChain,currentChain);previous=timestamp;}if(previous&&Date.now()-previous>10*60_000)currentChain=0;
-    const replayMap=new Map<string,typeof tracePoints.results>();for(const point of tracePoints.results){const points=replayMap.get(point.session_id)||[];points.push(point);replayMap.set(point.session_id,points);}
-    const ghostReplays=[...replayMap.entries()].map(([sessionId,points])=>{const ordered=[...points].reverse();let distanceKm=0;for(let index=1;index<ordered.length;index++)distanceKm+=distanceMeters(ordered[index-1].latitude,ordered[index-1].longitude,ordered[index].latitude,ordered[index].longitude)/1000;return{sessionId,startedAt:ordered[0]?.captured_at,endedAt:ordered[ordered.length-1]?.captured_at,distanceKm,maxSpeedKph:Math.max(0,...ordered.map(point=>Number(point.speed_kph)||0)),points:ordered};}).filter(replay=>replay.points.length>1).slice(0,12);
-    return json({discoveries:discoveries.results,crewDiscoveries:crewDiscoveries.results,discoveryChain:{current:currentChain,best:bestChain},territories:territoryProgress,drops:drops.results,reports:reports.results,crews:crews.results,seasons:seasons.results,journeys:journeys.results.map((row:any)=>({...row,route:JSON.parse(row.route_json||'[]')})),crewRequests:requests.results,safeHouses:safeHouses.results,badges:badges.results,contracts:contracts.results,heat:heatRow?.heat||0,rewards:rewards.results,ghostReplays});
+    const territoryProgress = territories.results.map((territory: any) => {
+      const discoveredCells = discoveries.results.filter((cell: any) => distanceMeters(Number(cell.latitude), Number(cell.longitude), Number(territory.latitude), Number(territory.longitude)) <= Number(territory.radius_m)).length;
+      return {
+        ...territory,
+        discovered_cells: discoveredCells,
+        completion: territory.unlocked ? 100 : Math.min(100, Math.round((discoveredCells / Math.max(1, Number(territory.required_cells))) * 100)),
+      };
+    });
+    const orderedDiscoveries = [...discoveries.results].reverse() as Array<{
+      discovered_at: string;
+    }>;
+    let currentChain = 0,
+      bestChain = 0,
+      previous = 0;
+    for (const cell of orderedDiscoveries) {
+      const timestamp = Date.parse(cell.discovered_at);
+      currentChain = previous && timestamp - previous <= 10 * 60_000 ? currentChain + 1 : 1;
+      bestChain = Math.max(bestChain, currentChain);
+      previous = timestamp;
+    }
+    if (previous && Date.now() - previous > 10 * 60_000) currentChain = 0;
+    const replayMap = new Map<string, typeof tracePoints.results>();
+    for (const point of tracePoints.results) {
+      const points = replayMap.get(point.session_id) || [];
+      points.push(point);
+      replayMap.set(point.session_id, points);
+    }
+    const ghostReplays = [...replayMap.entries()]
+      .map(([sessionId, points]) => {
+        const ordered = [...points].reverse();
+        let distanceKm = 0;
+        for (let index = 1; index < ordered.length; index++) distanceKm += distanceMeters(ordered[index - 1].latitude, ordered[index - 1].longitude, ordered[index].latitude, ordered[index].longitude) / 1000;
+        return {
+          sessionId,
+          startedAt: ordered[0]?.captured_at,
+          endedAt: ordered[ordered.length - 1]?.captured_at,
+          distanceKm,
+          maxSpeedKph: Math.max(0, ...ordered.map((point) => Number(point.speed_kph) || 0)),
+          points: ordered,
+        };
+      })
+      .filter((replay) => replay.points.length > 1)
+      .slice(0, 12);
+    return json({
+      discoveries: discoveries.results,
+      crewDiscoveries: crewDiscoveries.results,
+      discoveryChain: { current: currentChain, best: bestChain },
+      territories: territoryProgress,
+      drops: drops.results,
+      reports: reports.results,
+      crews: crews.results,
+      seasons: seasons.results,
+      journeys: journeys.results.map((row: any) => ({
+        ...row,
+        route: JSON.parse(row.route_json || "[]"),
+      })),
+      crewRequests: requests.results,
+      safeHouses: safeHouses.results,
+      badges: badges.results,
+      contracts: contracts.results,
+      heat: heatRow?.heat || 0,
+      rewards: rewards.results,
+      ghostReplays,
+    });
   }
-  if(path==='safe-houses'&&method==='POST'){
-    const body=await request.json<{name?:string;latitude?:number;longitude?:number;vehicleId?:string|null}>();if(!body.name?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Safe-house name and current GPS point are required.'},400);
-    const count=await env.DB.prepare('SELECT COUNT(*) count FROM safe_houses WHERE user_id=?').bind(user.id).first<{count:number}>();if((count?.count||0)>=8)return json({error:'Safe-house limit reached.'},409);
-    if(body.vehicleId){const owned=await env.DB.prepare('SELECT 1 found FROM vehicles WHERE id=? AND user_id=?').bind(body.vehicleId,user.id).first();if(!owned)return json({error:'Vehicle is not in your garage.'},403);}
-    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO safe_houses(id,user_id,vehicle_id,name,latitude,longitude) VALUES(?,?,?,?,?,?)').bind(id,user.id,body.vehicleId||null,body.name.trim().slice(0,60),body.latitude,body.longitude).run();await syncGameProgress(user.id,env);return json({id},201);
+  if (path === "safe-houses" && method === "POST") {
+    const body = await request.json<{
+      name?: string;
+      latitude?: number;
+      longitude?: number;
+      vehicleId?: string | null;
+    }>();
+    if (!body.name?.trim() || !Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) return json({ error: "Safe-house name and current GPS point are required." }, 400);
+    const count = await env.DB.prepare("SELECT COUNT(*) count FROM safe_houses WHERE user_id=?").bind(user.id).first<{ count: number }>();
+    if ((count?.count || 0) >= 8) return json({ error: "Safe-house limit reached." }, 409);
+    if (body.vehicleId) {
+      const owned = await env.DB.prepare("SELECT 1 found FROM vehicles WHERE id=? AND user_id=?").bind(body.vehicleId, user.id).first();
+      if (!owned) return json({ error: "Vehicle is not in your garage." }, 403);
+    }
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO safe_houses(id,user_id,vehicle_id,name,latitude,longitude) VALUES(?,?,?,?,?,?)")
+      .bind(id, user.id, body.vehicleId || null, body.name.trim().slice(0, 60), body.latitude, body.longitude)
+      .run();
+    await syncGameProgress(user.id, env);
+    return json({ id }, 201);
   }
-  const safeHouseDelete=path.match(/^safe-houses\/([^/]+)$/);if(safeHouseDelete&&method==='DELETE'){await env.DB.prepare('DELETE FROM safe_houses WHERE id=? AND user_id=?').bind(safeHouseDelete[1],user.id).run();return json({deleted:true});}
-  const contractAccept=path.match(/^contracts\/([^/]+)\/accept$/);if(contractAccept&&method==='POST'){
-    const contract=await env.DB.prepare("SELECT 1 found FROM contracts WHERE id=? AND status='live'").bind(contractAccept[1]).first();if(!contract)return json({error:'Contract is no longer available.'},404);
-    await env.DB.prepare("INSERT INTO contract_progress(contract_id,user_id,status) VALUES(?,?,'active') ON CONFLICT(contract_id,user_id) DO NOTHING").bind(contractAccept[1],user.id).run();const progress=await syncGameProgress(user.id,env);return json({accepted:true,completed:progress.completed.includes(contractAccept[1])});
+  const safeHouseDelete = path.match(/^safe-houses\/([^/]+)$/);
+  if (safeHouseDelete && method === "DELETE") {
+    await env.DB.prepare("DELETE FROM safe_houses WHERE id=? AND user_id=?").bind(safeHouseDelete[1], user.id).run();
+    return json({ deleted: true });
   }
-  if(path==='road-reports'&&method==='POST'){
-    const body=await request.json<{type?:string;note?:string;latitude?:number;longitude?:number}>();if(!['fixed_camera','hazard','closure','dangerous_road'].includes(body.type||'')||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Choose a supported safety report and valid map point.'},400);
-    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO road_reports(id,user_id,type,note,latitude,longitude) VALUES(?,?,?,?,?,?)').bind(id,user.id,body.type,body.note?.trim().slice(0,240)||'',body.latitude,body.longitude).run();return json({id},201);
+  const contractAccept = path.match(/^contracts\/([^/]+)\/accept$/);
+  if (contractAccept && method === "POST") {
+    const contract = await env.DB.prepare("SELECT 1 found FROM contracts WHERE id=? AND status='live'").bind(contractAccept[1]).first();
+    if (!contract) return json({ error: "Contract is no longer available." }, 404);
+    await env.DB.prepare("INSERT INTO contract_progress(contract_id,user_id,status) VALUES(?,?,'active') ON CONFLICT(contract_id,user_id) DO NOTHING").bind(contractAccept[1], user.id).run();
+    const progress = await syncGameProgress(user.id, env);
+    return json({
+      accepted: true,
+      completed: progress.completed.includes(contractAccept[1]),
+    });
   }
-  if(path==='crews'&&method==='POST'){
-    const body=await request.json<{name?:string;tag?:string}>();const name=body.name?.trim().slice(0,50)||'',tag=body.tag?.trim().toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5)||'';if(name.length<3||tag.length<2)return json({error:'Crew name and 2-5 character tag are required.'},400);
-    const id=crypto.randomUUID();try{await env.DB.batch([env.DB.prepare('INSERT INTO crews(id,owner_id,name,tag) VALUES(?,?,?,?)').bind(id,user.id,name,tag),env.DB.prepare("INSERT INTO crew_members(crew_id,user_id,status,role) VALUES(?,?,'approved','owner')").bind(id,user.id)]);}catch{return json({error:'That crew tag is already claimed.'},409);}return json({id,name,tag},201);
+  if (path === "road-reports" && method === "POST") {
+    const body = await request.json<{
+      type?: string;
+      note?: string;
+      latitude?: number;
+      longitude?: number;
+    }>();
+    if (!["fixed_camera", "hazard", "closure", "dangerous_road"].includes(body.type || "") || !Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) return json({ error: "Choose a supported safety report and valid map point." }, 400);
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO road_reports(id,user_id,type,note,latitude,longitude) VALUES(?,?,?,?,?,?)")
+      .bind(id, user.id, body.type, body.note?.trim().slice(0, 240) || "", body.latitude, body.longitude)
+      .run();
+    return json({ id }, 201);
   }
-  const crewJoin=path.match(/^crews\/([^/]+)\/join$/);if(crewJoin&&method==='POST'){await env.DB.prepare(`INSERT INTO crew_members(crew_id,user_id,status) VALUES(?,?,'pending') ON CONFLICT(crew_id,user_id) DO UPDATE SET status='pending'`).bind(crewJoin[1],user.id).run();return json({status:'pending'});}
-  const crewApprove=path.match(/^crews\/([^/]+)\/members\/([^/]+)\/approve$/);if(crewApprove&&method==='POST'){const crew=await env.DB.prepare('SELECT 1 found FROM crews WHERE id=? AND owner_id=?').bind(crewApprove[1],user.id).first();if(!crew)return json({error:'Crew owner access required.'},403);await env.DB.prepare("UPDATE crew_members SET status='approved' WHERE crew_id=? AND user_id=?").bind(crewApprove[1],crewApprove[2]).run();return json({status:'approved'});}
-  const territoryCreate=path.match(/^crews\/([^/]+)\/territories$/);if(territoryCreate&&method==='POST'){const crew=await env.DB.prepare('SELECT 1 found FROM crews WHERE id=? AND owner_id=?').bind(territoryCreate[1],user.id).first();if(!crew)return json({error:'Crew owner access required.'},403);const body=await request.json<{name?:string;latitude?:number;longitude?:number;radiusM?:number;requiredCells?:number}>();if(!body.name?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Territory name and center point are required.'},400);const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO territories(id,crew_id,name,latitude,longitude,radius_m,required_cells) VALUES(?,?,?,?,?,?,?)').bind(id,territoryCreate[1],body.name.trim().slice(0,60),body.latitude,body.longitude,Math.min(10000,Math.max(200,Number(body.radiusM)||1000)),Math.min(100,Math.max(3,Number(body.requiredCells)||12))).run();return json({id},201);}
-  if(path==='admin/dead-drops'&&method==='POST'){if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);const body=await request.json<{title?:string;latitude?:number;longitude?:number;credits?:number;radiusM?:number}>();if(!body.title?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'Drop title and location required.'},400);const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO dead_drops(id,title,latitude,longitude,radius_m,credits) VALUES(?,?,?,?,?,?)').bind(id,body.title.trim().slice(0,60),body.latitude,body.longitude,Math.min(500,Math.max(20,Number(body.radiusM)||60)),Math.min(10000,Math.max(10,Number(body.credits)||100))).run();return json({id},201);}
-  if(path==='admin/seasons'&&method==='POST'){if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);const body=await request.json<{name?:string;startsAt?:string;endsAt?:string;rewardCredits?:number}>();if(!body.name?.trim()||!body.startsAt||!body.endsAt)return json({error:'Season name and dates required.'},400);const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO seasons(id,name,starts_at,ends_at,status,reward_credits) VALUES(?,?,?,?,?,?)').bind(id,body.name.trim().slice(0,70),body.startsAt,body.endsAt,'live',Math.max(100,Number(body.rewardCredits)||5000)).run();return json({id},201);}
-  const seasonJoin=path.match(/^seasons\/([^/]+)\/join$/);if(seasonJoin&&method==='POST'){await env.DB.prepare('INSERT OR IGNORE INTO season_entries(season_id,user_id) VALUES(?,?)').bind(seasonJoin[1],user.id).run();return json({joined:true});}
+  if (path === "crews" && method === "POST") {
+    const body = await request.json<{ name?: string; tag?: string }>();
+    const name = body.name?.trim().slice(0, 50) || "",
+      tag =
+        body.tag
+          ?.trim()
+          .toUpperCase()
+          .replace(/[^A-Z0-9]/g, "")
+          .slice(0, 5) || "";
+    if (name.length < 3 || tag.length < 2) return json({ error: "Crew name and 2-5 character tag are required." }, 400);
+    const id = crypto.randomUUID();
+    try {
+      await env.DB.batch([env.DB.prepare("INSERT INTO crews(id,owner_id,name,tag) VALUES(?,?,?,?)").bind(id, user.id, name, tag), env.DB.prepare("INSERT INTO crew_members(crew_id,user_id,status,role) VALUES(?,?,'approved','owner')").bind(id, user.id)]);
+    } catch {
+      return json({ error: "That crew tag is already claimed." }, 409);
+    }
+    return json({ id, name, tag }, 201);
+  }
+  const crewJoin = path.match(/^crews\/([^/]+)\/join$/);
+  if (crewJoin && method === "POST") {
+    await env.DB.prepare(`INSERT INTO crew_members(crew_id,user_id,status) VALUES(?,?,'pending') ON CONFLICT(crew_id,user_id) DO UPDATE SET status='pending'`).bind(crewJoin[1], user.id).run();
+    return json({ status: "pending" });
+  }
+  const crewApprove = path.match(/^crews\/([^/]+)\/members\/([^/]+)\/approve$/);
+  if (crewApprove && method === "POST") {
+    const crew = await env.DB.prepare("SELECT 1 found FROM crews WHERE id=? AND owner_id=?").bind(crewApprove[1], user.id).first();
+    if (!crew) return json({ error: "Crew owner access required." }, 403);
+    await env.DB.prepare("UPDATE crew_members SET status='approved' WHERE crew_id=? AND user_id=?").bind(crewApprove[1], crewApprove[2]).run();
+    return json({ status: "approved" });
+  }
+  const territoryCreate = path.match(/^crews\/([^/]+)\/territories$/);
+  if (territoryCreate && method === "POST") {
+    const crew = await env.DB.prepare("SELECT 1 found FROM crews WHERE id=? AND owner_id=?").bind(territoryCreate[1], user.id).first();
+    if (!crew) return json({ error: "Crew owner access required." }, 403);
+    const body = await request.json<{
+      name?: string;
+      latitude?: number;
+      longitude?: number;
+      radiusM?: number;
+      requiredCells?: number;
+    }>();
+    if (!body.name?.trim() || !Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) return json({ error: "Territory name and center point are required." }, 400);
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO territories(id,crew_id,name,latitude,longitude,radius_m,required_cells) VALUES(?,?,?,?,?,?,?)")
+      .bind(id, territoryCreate[1], body.name.trim().slice(0, 60), body.latitude, body.longitude, Math.min(10000, Math.max(200, Number(body.radiusM) || 1000)), Math.min(100, Math.max(3, Number(body.requiredCells) || 12)))
+      .run();
+    return json({ id }, 201);
+  }
+  if (path === "admin/dead-drops" && method === "POST") {
+    if (user.email.toLowerCase() !== DEVELOPER_EMAIL) return json({ error: "Developer access required." }, 403);
+    const body = await request.json<{
+      title?: string;
+      latitude?: number;
+      longitude?: number;
+      credits?: number;
+      radiusM?: number;
+    }>();
+    if (!body.title?.trim() || !Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) return json({ error: "Drop title and location required." }, 400);
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO dead_drops(id,title,latitude,longitude,radius_m,credits) VALUES(?,?,?,?,?,?)")
+      .bind(id, body.title.trim().slice(0, 60), body.latitude, body.longitude, Math.min(500, Math.max(20, Number(body.radiusM) || 60)), Math.min(10000, Math.max(10, Number(body.credits) || 100)))
+      .run();
+    return json({ id }, 201);
+  }
+  if (path === "admin/seasons" && method === "POST") {
+    if (user.email.toLowerCase() !== DEVELOPER_EMAIL) return json({ error: "Developer access required." }, 403);
+    const body = await request.json<{
+      name?: string;
+      startsAt?: string;
+      endsAt?: string;
+      rewardCredits?: number;
+    }>();
+    if (!body.name?.trim() || !body.startsAt || !body.endsAt) return json({ error: "Season name and dates required." }, 400);
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO seasons(id,name,starts_at,ends_at,status,reward_credits) VALUES(?,?,?,?,?,?)")
+      .bind(id, body.name.trim().slice(0, 70), body.startsAt, body.endsAt, "live", Math.max(100, Number(body.rewardCredits) || 5000))
+      .run();
+    return json({ id }, 201);
+  }
+  const seasonJoin = path.match(/^seasons\/([^/]+)\/join$/);
+  if (seasonJoin && method === "POST") {
+    await env.DB.prepare("INSERT OR IGNORE INTO season_entries(season_id,user_id) VALUES(?,?)").bind(seasonJoin[1], user.id).run();
+    return json({ joined: true });
+  }
 
-  if(path==='admin/journeys'&&method==='POST'){
-    if(user.email.toLowerCase()!==DEVELOPER_EMAIL)return json({error:'Developer access required.'},403);
-    const body=await request.json<{seasonId?:string;title?:string;description?:string;route?:Array<{name?:string;latitude?:number;longitude?:number}>;distanceKm?:number;rewardCredits?:number;startsAt?:string;endsAt?:string}>();
-    const route=(body.route||[]).filter(point=>point.name&&Number.isFinite(point.latitude)&&Number.isFinite(point.longitude)).slice(0,24);
-    if(!body.seasonId||!body.title?.trim()||route.length<2||!body.startsAt||!body.endsAt)return json({error:'Season, title, dates, and at least two checkpoints are required.'},400);
-    const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO season_journeys(id,season_id,title,description,route_json,distance_km,reward_credits,starts_at,ends_at) VALUES(?,?,?,?,?,?,?,?,?)').bind(id,body.seasonId,body.title.trim().slice(0,80),body.description?.trim().slice(0,500)||'',JSON.stringify(route),Math.max(0,Number(body.distanceKm)||0),Math.max(50,Number(body.rewardCredits)||500),body.startsAt,body.endsAt).run();return json({id},201);
+  if (path === "admin/journeys" && method === "POST") {
+    if (user.email.toLowerCase() !== DEVELOPER_EMAIL) return json({ error: "Developer access required." }, 403);
+    const body = await request.json<{
+      seasonId?: string;
+      title?: string;
+      description?: string;
+      route?: Array<{ name?: string; latitude?: number; longitude?: number }>;
+      distanceKm?: number;
+      rewardCredits?: number;
+      startsAt?: string;
+      endsAt?: string;
+    }>();
+    const route = (body.route || []).filter((point) => point.name && Number.isFinite(point.latitude) && Number.isFinite(point.longitude)).slice(0, 24);
+    if (!body.seasonId || !body.title?.trim() || route.length < 2 || !body.startsAt || !body.endsAt)
+      return json(
+        {
+          error: "Season, title, dates, and at least two checkpoints are required.",
+        },
+        400,
+      );
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO season_journeys(id,season_id,title,description,route_json,distance_km,reward_credits,starts_at,ends_at) VALUES(?,?,?,?,?,?,?,?,?)")
+      .bind(id, body.seasonId, body.title.trim().slice(0, 80), body.description?.trim().slice(0, 500) || "", JSON.stringify(route), Math.max(0, Number(body.distanceKm) || 0), Math.max(50, Number(body.rewardCredits) || 500), body.startsAt, body.endsAt)
+      .run();
+    return json({ id }, 201);
   }
-  const journeyJoin=path.match(/^journeys\/([^/]+)\/join$/);if(journeyJoin&&method==='POST'){
-    const journey=await env.DB.prepare('SELECT 1 found FROM season_journeys WHERE id=? AND ends_at>?').bind(journeyJoin[1],new Date().toISOString()).first();if(!journey)return json({error:'Journey is no longer available.'},404);
-    await env.DB.prepare("INSERT INTO journey_progress(journey_id,user_id,status) VALUES(?,?,'active') ON CONFLICT(journey_id,user_id) DO NOTHING").bind(journeyJoin[1],user.id).run();return json({joined:true});
+  const journeyJoin = path.match(/^journeys\/([^/]+)\/join$/);
+  if (journeyJoin && method === "POST") {
+    const journey = await env.DB.prepare("SELECT 1 found FROM season_journeys WHERE id=? AND ends_at>?").bind(journeyJoin[1], new Date().toISOString()).first();
+    if (!journey) return json({ error: "Journey is no longer available." }, 404);
+    await env.DB.prepare("INSERT INTO journey_progress(journey_id,user_id,status) VALUES(?,?,'active') ON CONFLICT(journey_id,user_id) DO NOTHING").bind(journeyJoin[1], user.id).run();
+    return json({ joined: true });
   }
-  const journeyCheckpoint=path.match(/^journeys\/([^/]+)\/checkpoint$/);if(journeyCheckpoint&&method==='POST'){
-    const body=await request.json<{latitude?:number;longitude?:number;accuracy?:number}>();if(!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude)||Number(body.accuracy||0)>65)return json({error:'A precise GPS fix is required.'},400);
-    const journey=await env.DB.prepare('SELECT route_json,reward_credits FROM season_journeys WHERE id=? AND starts_at<=? AND ends_at>?').bind(journeyCheckpoint[1],new Date().toISOString(),new Date().toISOString()).first<{route_json:string;reward_credits:number}>();
-    const progress=await env.DB.prepare("SELECT current_checkpoint,status FROM journey_progress WHERE journey_id=? AND user_id=?").bind(journeyCheckpoint[1],user.id).first<{current_checkpoint:number;status:string}>();if(!journey||!progress||progress.status==='completed')return json({error:'Join this live journey before checking in.'},409);
-    const route=JSON.parse(journey.route_json||'[]') as Array<{latitude:number;longitude:number}>;const target=route[progress.current_checkpoint];if(!target)return json({error:'Journey checkpoint is unavailable.'},409);if(distanceMeters(Number(body.latitude),Number(body.longitude),target.latitude,target.longitude)>120)return json({error:'Move within 120 meters of the checkpoint.'},409);
-    const next=progress.current_checkpoint+1,complete=next>=route.length;const statements=[env.DB.prepare("UPDATE journey_progress SET current_checkpoint=?,status=?,completed_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE completed_at END WHERE journey_id=? AND user_id=?").bind(next,complete?'completed':'active',complete?1:0,journeyCheckpoint[1],user.id)];if(complete){statements.push(env.DB.prepare('UPDATE users SET credits=credits+?,points=points+? WHERE id=?').bind(journey.reward_credits,Math.max(25,Math.floor(journey.reward_credits/10)),user.id));statements.push(env.DB.prepare('UPDATE season_entries SET points=points+? WHERE season_id=(SELECT season_id FROM season_journeys WHERE id=?) AND user_id=?').bind(Math.max(25,Math.floor(journey.reward_credits/10)),journeyCheckpoint[1],user.id));}await env.DB.batch(statements);return json({checkpoint:next,complete,rewardCredits:complete?journey.reward_credits:0});
+  const journeyCheckpoint = path.match(/^journeys\/([^/]+)\/checkpoint$/);
+  if (journeyCheckpoint && method === "POST") {
+    const body = await request.json<{
+      latitude?: number;
+      longitude?: number;
+      accuracy?: number;
+    }>();
+    if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude) || Number(body.accuracy || 0) > 65) return json({ error: "A precise GPS fix is required." }, 400);
+    const journey = await env.DB.prepare("SELECT route_json,reward_credits FROM season_journeys WHERE id=? AND starts_at<=? AND ends_at>?").bind(journeyCheckpoint[1], new Date().toISOString(), new Date().toISOString()).first<{ route_json: string; reward_credits: number }>();
+    const progress = await env.DB.prepare("SELECT current_checkpoint,status FROM journey_progress WHERE journey_id=? AND user_id=?").bind(journeyCheckpoint[1], user.id).first<{ current_checkpoint: number; status: string }>();
+    if (!journey || !progress || progress.status === "completed") return json({ error: "Join this live journey before checking in." }, 409);
+    const route = JSON.parse(journey.route_json || "[]") as Array<{
+      latitude: number;
+      longitude: number;
+    }>;
+    const target = route[progress.current_checkpoint];
+    if (!target) return json({ error: "Journey checkpoint is unavailable." }, 409);
+    if (distanceMeters(Number(body.latitude), Number(body.longitude), target.latitude, target.longitude) > 120) return json({ error: "Move within 120 meters of the checkpoint." }, 409);
+    const next = progress.current_checkpoint + 1,
+      complete = next >= route.length;
+    const statements = [env.DB.prepare("UPDATE journey_progress SET current_checkpoint=?,status=?,completed_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE completed_at END WHERE journey_id=? AND user_id=?").bind(next, complete ? "completed" : "active", complete ? 1 : 0, journeyCheckpoint[1], user.id)];
+    if (complete) {
+      statements.push(env.DB.prepare("UPDATE users SET credits=credits+?,points=points+? WHERE id=?").bind(journey.reward_credits, Math.max(25, Math.floor(journey.reward_credits / 10)), user.id));
+      statements.push(env.DB.prepare("UPDATE season_entries SET points=points+? WHERE season_id=(SELECT season_id FROM season_journeys WHERE id=?) AND user_id=?").bind(Math.max(25, Math.floor(journey.reward_credits / 10)), journeyCheckpoint[1], user.id));
+    }
+    await env.DB.batch(statements);
+    return json({
+      checkpoint: next,
+      complete,
+      rewardCredits: complete ? journey.reward_credits : 0,
+    });
   }
 
-  if (path === 'feed' && method === 'GET') {
-    const posts = await env.DB.prepare(`SELECT p.id,p.user_id,p.media_url,p.media_type,p.caption,p.created_at,u.username,u.avatar_url,
+  if (path === "feed" && method === "GET") {
+    const mode = (new URL(request.url).searchParams.get("mode") || "FOR_YOU").toUpperCase();
+    const categoryModes = ["BUILDS", "MEETS", "PERFORMANCE", "GHOST"];
+    const filter = mode === "CREWS" ? `AND EXISTS(SELECT 1 FROM crew_members mine JOIN crew_members author ON author.crew_id=mine.crew_id WHERE mine.user_id=? AND mine.status='approved' AND author.user_id=p.user_id AND author.status='approved')` : categoryModes.includes(mode) ? "AND p.feed_category=?" : "";
+    const filterBinding = mode === "CREWS" ? user.id : categoryModes.includes(mode) ? mode : null;
+    const posts = await env.DB.prepare(
+      `SELECT p.id,p.user_id,p.media_url,p.media_type,p.caption,p.created_at,u.username,u.avatar_url,
+      p.feed_category,
       (SELECT COUNT(*) FROM post_likes l WHERE l.post_id=p.id) likes,
       (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id) comments,
       EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=?) liked,
       EXISTS(SELECT 1 FROM post_saves s WHERE s.post_id=p.id AND s.user_id=?) saved,
       EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.following_id=p.user_id) following
-      FROM posts p JOIN users u ON u.id=p.user_id ORDER BY p.created_at DESC LIMIT 50`).bind(user.id,user.id,user.id).all();
+      FROM posts p JOIN users u ON u.id=p.user_id WHERE 1=1 ${filter} ORDER BY p.created_at DESC LIMIT 50`,
+    )
+      .bind(user.id, user.id, user.id, ...(filterBinding ? [filterBinding] : []))
+      .all();
     return json({ posts: posts.results });
   }
-  if (path === 'posts' && method === 'POST') {
-    const body = await request.json<{ mediaUrl?: string; mediaType?: string; caption?: string }>();
-    if (!body.mediaUrl || !['photo','video'].includes(body.mediaType || '')) return json({ error: 'Uploaded photo or video required.' }, 400);
-    const id=crypto.randomUUID();
-    await env.DB.prepare('INSERT INTO posts(id,user_id,media_url,media_type,caption) VALUES(?,?,?,?,?)').bind(id,user.id,body.mediaUrl,body.mediaType,body.caption?.slice(0,1000)||'').run();
-    return json({ id },201);
+  if (path === "posts" && method === "POST") {
+    const body = await request.json<{
+      mediaUrl?: string;
+      mediaType?: string;
+      caption?: string;
+      category?: string;
+    }>();
+    if (!body.mediaUrl || !["photo", "video"].includes(body.mediaType || "")) return json({ error: "Uploaded photo or video required." }, 400);
+    if (!body.mediaUrl.startsWith("/api/media/")) return json({ error: "Publish media through the encrypted Apex uploader first." }, 400);
+    const mediaKey = decodeURIComponent(body.mediaUrl.slice("/api/media/".length));
+    if (!mediaKey.startsWith(`${user.id}/`)) return json({ error: "This media upload belongs to another pilot." }, 403);
+    const mediaObject = await env.MEDIA.head(mediaKey);
+    if (!mediaObject) return json({ error: "Uploaded media is no longer available." }, 404);
+    const contentType = mediaObject.httpMetadata?.contentType || "";
+    if ((body.mediaType === "photo" && !contentType.startsWith("image/")) || (body.mediaType === "video" && !contentType.startsWith("video/"))) return json({ error: "Media type does not match the uploaded file." }, 400);
+    const id = crypto.randomUUID(),
+      category = ["BUILDS", "MEETS", "PERFORMANCE", "GHOST"].includes(String(body.category || "").toUpperCase()) ? String(body.category).toUpperCase() : "FOR_YOU";
+    await env.DB.prepare("INSERT INTO posts(id,user_id,media_url,media_type,caption,feed_category) VALUES(?,?,?,?,?,?)")
+      .bind(id, user.id, body.mediaUrl, body.mediaType, body.caption?.slice(0, 1000) || "", category)
+      .run();
+    return json({ id }, 201);
   }
   const postAction = path.match(/^posts\/([^/]+)\/(like|save|comment)$/);
-  if (postAction && method === 'POST') {
-    const [,postId,action]=postAction;
-    if (action==='comment') {
-      const body=await request.json<{ body?: string }>();
-      if (!body.body?.trim()) return json({error:'Comment required.'},400);
-      await env.DB.prepare('INSERT INTO comments(id,post_id,user_id,body) VALUES(?,?,?,?)').bind(crypto.randomUUID(),postId,user.id,body.body.trim().slice(0,500)).run();
-      return json({active:true});
+  if (postAction && method === "POST") {
+    const [, postId, action] = postAction;
+    const post = await env.DB.prepare("SELECT id FROM posts WHERE id=?").bind(postId).first();
+    if (!post) return json({ error: "Post not found." }, 404);
+    if (action === "comment") {
+      const body = await request.json<{ body?: string }>();
+      if (!body.body?.trim()) return json({ error: "Comment required." }, 400);
+      await env.DB.prepare("INSERT INTO comments(id,post_id,user_id,body) VALUES(?,?,?,?)").bind(crypto.randomUUID(), postId, user.id, body.body.trim().slice(0, 500)).run();
+      return json({ active: true });
     }
-    const table=action==='like'?'post_likes':'post_saves';
-    const current=await env.DB.prepare(`SELECT 1 found FROM ${table} WHERE post_id=? AND user_id=?`).bind(postId,user.id).first();
-    if(current) await env.DB.prepare(`DELETE FROM ${table} WHERE post_id=? AND user_id=?`).bind(postId,user.id).run();
-    else await env.DB.prepare(`INSERT INTO ${table}(post_id,user_id) VALUES(?,?)`).bind(postId,user.id).run();
-    return json({active:!current});
+    const table = action === "like" ? "post_likes" : "post_saves";
+    const current = await env.DB.prepare(`SELECT 1 found FROM ${table} WHERE post_id=? AND user_id=?`).bind(postId, user.id).first();
+    if (current) await env.DB.prepare(`DELETE FROM ${table} WHERE post_id=? AND user_id=?`).bind(postId, user.id).run();
+    else await env.DB.prepare(`INSERT INTO ${table}(post_id,user_id) VALUES(?,?)`).bind(postId, user.id).run();
+    return json({ active: !current });
   }
 
-  const followAction=path.match(/^users\/([^/]+)\/follow$/);
-  if(followAction&&method==='POST'){
-    const targetId=followAction[1]; if(targetId===user.id)return json({error:'You already follow your own build.'},400);
-    const target=await env.DB.prepare('SELECT username FROM users WHERE id=?').bind(targetId).first<{username:string}>();if(!target)return json({error:'Pilot not found.'},404);
-    const current=await env.DB.prepare('SELECT 1 found FROM follows WHERE follower_id=? AND following_id=?').bind(user.id,targetId).first();
-    if(current)await env.DB.prepare('DELETE FROM follows WHERE follower_id=? AND following_id=?').bind(user.id,targetId).run();
-    else await env.DB.batch([env.DB.prepare('INSERT INTO follows(follower_id,following_id) VALUES(?,?)').bind(user.id,targetId),env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(),targetId,'new_follower','NEW FOLLOWER',`${user.username} followed your build`,JSON.stringify({userId:user.id}))]);
-    return json({following:!current});
+  const followAction = path.match(/^users\/([^/]+)\/follow$/);
+  if (followAction && method === "POST") {
+    const targetId = followAction[1];
+    if (targetId === user.id) return json({ error: "You already follow your own build." }, 400);
+    const target = await env.DB.prepare("SELECT username FROM users WHERE id=?").bind(targetId).first<{ username: string }>();
+    if (!target) return json({ error: "Pilot not found." }, 404);
+    const current = await env.DB.prepare("SELECT 1 found FROM follows WHERE follower_id=? AND following_id=?").bind(user.id, targetId).first();
+    if (current) await env.DB.prepare("DELETE FROM follows WHERE follower_id=? AND following_id=?").bind(user.id, targetId).run();
+    else await env.DB.batch([env.DB.prepare("INSERT INTO follows(follower_id,following_id) VALUES(?,?)").bind(user.id, targetId), env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(), targetId, "new_follower", "NEW FOLLOWER", `${user.username} followed your build`, JSON.stringify({ userId: user.id }))]);
+    return json({ following: !current });
   }
 
-  if (path === 'leaderboard' && method === 'GET') {
-    const rows=await env.DB.prepare(`SELECT id,username,avatar_url,tier,points,wins,losses,reputation,credits,top_speed_kph,(wins+losses) entered FROM users ORDER BY points DESC,wins DESC,reputation DESC,created_at ASC LIMIT 250`).all();
+  if (path === "leaderboard" && method === "GET") {
+    const rows = await env.DB.prepare(`SELECT id,username,avatar_url,tier,points,wins,losses,reputation,credits,top_speed_kph,(wins+losses) entered FROM users ORDER BY points DESC,wins DESC,reputation DESC,created_at ASC LIMIT 250`).all();
     return json({ rankings: rows.results });
   }
 
-  if (path === 'races' && method === 'POST') {
-    const body=await request.json<{opponentIds?:string[];raceType?:string;raceMode?:string;routeName?:string;distanceMiles?:number;rules?:string;startsAt?:string;wagerCredits?:number;maxParticipants?:number;courseVerified?:boolean;route?:Array<{name?:string;latitude?:number;longitude?:number;assignedUserId?:string|null}>}>();
-    const opponents=[...new Set((body.opponentIds||[]).filter(id=>id&&id!==user.id))].slice(0,12);
-    const wager=Math.max(0,Math.floor(Number(body.wagerCredits)||0)),raceMode=['route','relay'].includes(body.raceMode||'')?String(body.raceMode):'challenge';
-    const course=(body.route||[]).filter(point=>point.name&&Number.isFinite(point.latitude)&&Number.isFinite(point.longitude)).slice(0,24);
-    if(!opponents.length||!body.raceType||!body.startsAt) return json({error:'Opponent, race type, and start time are required.'},400);
-    if(raceMode!=='challenge'&&(course.length<2||!body.courseVerified))return json({error:'Route races require a verified controlled course with start and finish checkpoints.'},400);
-    if(wager>user.credits) return json({error:'Wager exceeds available Apex Credits.'},400);
-    const id=crypto.randomUUID();
-    const statements=[env.DB.prepare(`INSERT INTO race_contracts(id,challenger_id,race_type,route_name,distance_miles,rules,starts_at,wager_credits,race_mode,route_json,max_participants,course_verified) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,body.raceType,body.routeName||body.raceType,Number(body.distanceMiles)||0,body.rules||'',body.startsAt,wager,raceMode,JSON.stringify(course),Math.max(opponents.length+1,Math.min(16,Number(body.maxParticipants)||opponents.length+1)),raceMode==='challenge'?0:1),env.DB.prepare("INSERT INTO race_entries(race_id,user_id,status) VALUES(?,?,'joined')").bind(id,user.id)];
-    course.forEach((point,index)=>statements.push(env.DB.prepare('INSERT INTO race_checkpoints(id,race_id,stop_order,label,latitude,longitude,assigned_user_id) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),id,index,String(point.name).slice(0,100),point.latitude,point.longitude,raceMode==='relay'?(point.assignedUserId||([user.id,...opponents][index%([user.id,...opponents].length)])):null)));
-    for(const opponentId of opponents){
-      statements.push(env.DB.prepare('INSERT OR IGNORE INTO race_opponents(race_id,user_id) VALUES(?,?)').bind(id,opponentId));
-      statements.push(env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(),opponentId,'race_challenge','RACE CHALLENGE',`${user.username} staged a ${body.raceType} run`,JSON.stringify({raceId:id})));
+  if (path === "races" && method === "POST") {
+    const body = await request.json<{
+      opponentIds?: string[];
+      raceType?: string;
+      raceMode?: string;
+      routeName?: string;
+      distanceMiles?: number;
+      rules?: string;
+      startsAt?: string;
+      wagerCredits?: number;
+      maxParticipants?: number;
+      courseVerified?: boolean;
+      route?: Array<{
+        name?: string;
+        latitude?: number;
+        longitude?: number;
+        assignedUserId?: string | null;
+      }>;
+    }>();
+    const opponents = [...new Set((body.opponentIds || []).filter((id) => id && id !== user.id))].slice(0, 12);
+    const wager = Math.max(0, Math.floor(Number(body.wagerCredits) || 0)),
+      raceMode = ["route", "relay"].includes(body.raceMode || "") ? String(body.raceMode) : "challenge";
+    const course = (body.route || []).filter((point) => point.name && Number.isFinite(point.latitude) && Number.isFinite(point.longitude)).slice(0, 24);
+    if (!opponents.length || !body.raceType || !body.startsAt) return json({ error: "Opponent, race type, and start time are required." }, 400);
+    if (raceMode !== "challenge" && (course.length < 2 || !body.courseVerified))
+      return json(
+        {
+          error: "Route races require a verified controlled course with start and finish checkpoints.",
+        },
+        400,
+      );
+    if (wager > user.credits) return json({ error: "Wager exceeds available Apex Credits." }, 400);
+    const id = crypto.randomUUID();
+    const statements = [env.DB.prepare(`INSERT INTO race_contracts(id,challenger_id,race_type,route_name,distance_miles,rules,starts_at,wager_credits,race_mode,route_json,max_participants,course_verified) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, user.id, body.raceType, body.routeName || body.raceType, Number(body.distanceMiles) || 0, body.rules || "", body.startsAt, wager, raceMode, JSON.stringify(course), Math.max(opponents.length + 1, Math.min(16, Number(body.maxParticipants) || opponents.length + 1)), raceMode === "challenge" ? 0 : 1), env.DB.prepare("INSERT INTO race_entries(race_id,user_id,status) VALUES(?,?,'joined')").bind(id, user.id)];
+    course.forEach((point, index) => statements.push(env.DB.prepare("INSERT INTO race_checkpoints(id,race_id,stop_order,label,latitude,longitude,assigned_user_id) VALUES(?,?,?,?,?,?,?)").bind(crypto.randomUUID(), id, index, String(point.name).slice(0, 100), point.latitude, point.longitude, raceMode === "relay" ? point.assignedUserId || [user.id, ...opponents][index % [user.id, ...opponents].length] : null)));
+    for (const opponentId of opponents) {
+      statements.push(env.DB.prepare("INSERT OR IGNORE INTO race_opponents(race_id,user_id) VALUES(?,?)").bind(id, opponentId));
+      statements.push(env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(), opponentId, "race_challenge", "RACE CHALLENGE", `${user.username} staged a ${body.raceType} run`, JSON.stringify({ raceId: id })));
     }
     await env.DB.batch(statements);
     await env.DB.prepare("UPDATE users SET heat=MIN(100,heat+8),heat_updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(user.id).run();
-    return json({id,status:'pending'},201);
+    return json({ id, status: "pending" }, 201);
   }
-  if(path==='races'&&method==='GET'){
-    const rows=await env.DB.prepare(`SELECT DISTINCT r.*,u.username challenger_name FROM race_contracts r JOIN users u ON u.id=r.challenger_id LEFT JOIN race_opponents o ON o.race_id=r.id LEFT JOIN race_entries e ON e.race_id=r.id WHERE r.challenger_id=? OR o.user_id=? OR e.user_id=? ORDER BY r.starts_at DESC LIMIT 60`).bind(user.id,user.id,user.id).all<Record<string,unknown>>();
-    const races=await Promise.all(rows.results.map(async race=>{
-      const [participants,entries,checkpoints]=await Promise.all([env.DB.prepare(`SELECT o.user_id,o.status,u.username,u.tier,u.reputation FROM race_opponents o JOIN users u ON u.id=o.user_id WHERE o.race_id=?`).bind(race.id).all(),env.DB.prepare(`SELECT e.*,u.username,u.tier FROM race_entries e JOIN users u ON u.id=e.user_id WHERE e.race_id=? ORDER BY COALESCE(e.place,999),e.joined_at`).bind(race.id).all(),env.DB.prepare('SELECT * FROM race_checkpoints WHERE race_id=? ORDER BY stop_order').bind(race.id).all()]);
-      return {...race,route:JSON.parse(String(race.route_json||'[]')),participants:participants.results,entries:entries.results,checkpoints:checkpoints.results,is_challenger:race.challenger_id===user.id};
-    }));
-    return json({races});
+  if (path === "races" && method === "GET") {
+    const rows = await env.DB.prepare(`SELECT DISTINCT r.*,u.username challenger_name FROM race_contracts r JOIN users u ON u.id=r.challenger_id LEFT JOIN race_opponents o ON o.race_id=r.id LEFT JOIN race_entries e ON e.race_id=r.id WHERE r.challenger_id=? OR o.user_id=? OR e.user_id=? ORDER BY r.starts_at DESC LIMIT 60`).bind(user.id, user.id, user.id).all<Record<string, unknown>>();
+    const races = await Promise.all(
+      rows.results.map(async (race) => {
+        const [participants, entries, checkpoints] = await Promise.all([env.DB.prepare(`SELECT o.user_id,o.status,u.username,u.tier,u.reputation FROM race_opponents o JOIN users u ON u.id=o.user_id WHERE o.race_id=?`).bind(race.id).all(), env.DB.prepare(`SELECT e.*,u.username,u.tier FROM race_entries e JOIN users u ON u.id=e.user_id WHERE e.race_id=? ORDER BY COALESCE(e.place,999),e.joined_at`).bind(race.id).all(), env.DB.prepare("SELECT * FROM race_checkpoints WHERE race_id=? ORDER BY stop_order").bind(race.id).all()]);
+        return {
+          ...race,
+          route: JSON.parse(String(race.route_json || "[]")),
+          participants: participants.results,
+          entries: entries.results,
+          checkpoints: checkpoints.results,
+          is_challenger: race.challenger_id === user.id,
+        };
+      }),
+    );
+    return json({ races });
   }
-  const raceAction=path.match(/^races\/([^/]+)\/(accept|decline|reschedule)$/);
-  if(raceAction&&method==='POST'){
-    const raceId=raceAction[1],action=raceAction[2];
-    const race=await env.DB.prepare('SELECT * FROM race_contracts WHERE id=?').bind(raceId).first<Record<string,unknown>>();
-    if(!race)return json({error:'Race challenge not found.'},404);
-    const opponent=await env.DB.prepare('SELECT status FROM race_opponents WHERE race_id=? AND user_id=?').bind(raceId,user.id).first<{status:string}>();
-    const isChallenger=race.challenger_id===user.id;
-    if(!opponent&&!isChallenger)return json({error:'Race challenge not found.'},404);
-    if(action==='decline'){
-      if(!opponent)return json({error:'The challenger cannot decline their own contract.'},400);
-      const next=user.decline_streak+1,penalty=next>=3?25:0;
-      await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='declined' WHERE race_id=? AND user_id=?").bind(raceId,user.id),env.DB.prepare("UPDATE race_contracts SET status='declined',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId),env.DB.prepare('UPDATE users SET decline_streak=?,reputation=MAX(0,reputation-?) WHERE id=?').bind(next>=3?0:next,penalty,user.id)]);
-      return json({status:'declined',reputationPenalty:penalty});
+  const raceAction = path.match(/^races\/([^/]+)\/(accept|decline|reschedule)$/);
+  if (raceAction && method === "POST") {
+    const raceId = raceAction[1],
+      action = raceAction[2];
+    const race = await env.DB.prepare("SELECT * FROM race_contracts WHERE id=?").bind(raceId).first<Record<string, unknown>>();
+    if (!race) return json({ error: "Race challenge not found." }, 404);
+    const opponent = await env.DB.prepare("SELECT status FROM race_opponents WHERE race_id=? AND user_id=?").bind(raceId, user.id).first<{ status: string }>();
+    const isChallenger = race.challenger_id === user.id;
+    if (!opponent && !isChallenger) return json({ error: "Race challenge not found." }, 404);
+    if (action === "decline") {
+      if (!opponent) return json({ error: "The challenger cannot decline their own contract." }, 400);
+      const next = user.decline_streak + 1,
+        penalty = next >= 3 ? 25 : 0;
+      await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='declined' WHERE race_id=? AND user_id=?").bind(raceId, user.id), env.DB.prepare("UPDATE race_contracts SET status='declined',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId), env.DB.prepare("UPDATE users SET decline_streak=?,reputation=MAX(0,reputation-?) WHERE id=?").bind(next >= 3 ? 0 : next, penalty, user.id)]);
+      return json({ status: "declined", reputationPenalty: penalty });
     }
-    if(action==='reschedule'){
-      const body=await request.json<{startsAt?:string}>();
-      if(!body.startsAt||Number.isNaN(Date.parse(body.startsAt)))return json({error:'A valid new start time is required.'},400);
-      await env.DB.batch([env.DB.prepare("UPDATE race_contracts SET starts_at=?,status='rescheduled',reschedule_count=reschedule_count+1,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(body.startsAt,raceId),env.DB.prepare("UPDATE race_opponents SET status='invited' WHERE race_id=?").bind(raceId)]);
-      return json({status:'rescheduled',startsAt:body.startsAt});
+    if (action === "reschedule") {
+      const body = await request.json<{ startsAt?: string }>();
+      if (!body.startsAt || Number.isNaN(Date.parse(body.startsAt))) return json({ error: "A valid new start time is required." }, 400);
+      await env.DB.batch([env.DB.prepare("UPDATE race_contracts SET starts_at=?,status='rescheduled',reschedule_count=reschedule_count+1,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(body.startsAt, raceId), env.DB.prepare("UPDATE race_opponents SET status='invited' WHERE race_id=?").bind(raceId)]);
+      return json({ status: "rescheduled", startsAt: body.startsAt });
     }
-    if(!opponent)return json({error:'Challenge is already accepted by the host.'},400);
-    if(Number(race.wager_credits||0)>user.credits)return json({error:'You do not have enough credits to accept this wager.'},409);
-    await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='accepted' WHERE race_id=? AND user_id=?").bind(raceId,user.id),env.DB.prepare('UPDATE users SET decline_streak=0 WHERE id=?').bind(user.id)]);
-    const pending=await env.DB.prepare("SELECT COUNT(*) count FROM race_opponents WHERE race_id=? AND status<>'accepted'").bind(raceId).first<{count:number}>();
-    if((pending?.count||0)===0){
-      const wager=Number(race.wager_credits||0); const opponentRows=await env.DB.prepare('SELECT user_id FROM race_opponents WHERE race_id=?').bind(raceId).all<{user_id:string}>(); const ids=[String(race.challenger_id),...opponentRows.results.map(row=>row.user_id)];
-      const placeholders=ids.map(()=>'?').join(','); const poor=await env.DB.prepare(`SELECT id FROM users WHERE id IN (${placeholders}) AND credits<? LIMIT 1`).bind(...ids,wager).first();
-      if(poor){await env.DB.prepare("UPDATE race_contracts SET status='credit_failed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId).run();return json({error:'A pilot no longer has enough credits for this wager.'},409);}
-      const statements=ids.map(id=>env.DB.prepare('UPDATE users SET credits=credits-? WHERE id=?').bind(wager,id));ids.forEach(id=>statements.push(env.DB.prepare("INSERT INTO race_entries(race_id,user_id,status) VALUES(?,?,'joined') ON CONFLICT(race_id,user_id) DO NOTHING").bind(raceId,id)));statements.push(env.DB.prepare("UPDATE race_contracts SET status='scheduled',prize_pool=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(wager*ids.length,raceId)); await env.DB.batch(statements);
-      return json({status:'scheduled'});
+    if (!opponent) return json({ error: "Challenge is already accepted by the host." }, 400);
+    if (Number(race.wager_credits || 0) > user.credits) return json({ error: "You do not have enough credits to accept this wager." }, 409);
+    await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='accepted' WHERE race_id=? AND user_id=?").bind(raceId, user.id), env.DB.prepare("UPDATE users SET decline_streak=0 WHERE id=?").bind(user.id)]);
+    const pending = await env.DB.prepare("SELECT COUNT(*) count FROM race_opponents WHERE race_id=? AND status<>'accepted'").bind(raceId).first<{ count: number }>();
+    if ((pending?.count || 0) === 0) {
+      const wager = Number(race.wager_credits || 0);
+      const opponentRows = await env.DB.prepare("SELECT user_id FROM race_opponents WHERE race_id=?").bind(raceId).all<{ user_id: string }>();
+      const ids = [String(race.challenger_id), ...opponentRows.results.map((row) => row.user_id)];
+      const placeholders = ids.map(() => "?").join(",");
+      const poor = await env.DB.prepare(`SELECT id FROM users WHERE id IN (${placeholders}) AND credits<? LIMIT 1`)
+        .bind(...ids, wager)
+        .first();
+      if (poor) {
+        await env.DB.prepare("UPDATE race_contracts SET status='credit_failed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId).run();
+        return json({ error: "A pilot no longer has enough credits for this wager." }, 409);
+      }
+      const statements = ids.map((id) => env.DB.prepare("UPDATE users SET credits=credits-? WHERE id=?").bind(wager, id));
+      ids.forEach((id) => statements.push(env.DB.prepare("INSERT INTO race_entries(race_id,user_id,status) VALUES(?,?,'joined') ON CONFLICT(race_id,user_id) DO NOTHING").bind(raceId, id)));
+      statements.push(env.DB.prepare("UPDATE race_contracts SET status='scheduled',prize_pool=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(wager * ids.length, raceId));
+      await env.DB.batch(statements);
+      return json({ status: "scheduled" });
     }
-    return json({status:'accepted'});
+    return json({ status: "accepted" });
   }
 
-  const raceStart=path.match(/^races\/([^/]+)\/start$/);if(raceStart&&method==='POST'){
-    const race=await env.DB.prepare("SELECT status,challenger_id,course_verified FROM race_contracts WHERE id=?").bind(raceStart[1]).first<{status:string;challenger_id:string;course_verified:number}>();if(!race)return json({error:'Race not found.'},404);if(race.challenger_id!==user.id)return json({error:'Only the race host can launch the grid.'},403);if(race.status!=='scheduled')return json({error:'Every invited pilot must accept before launch.'},409);
-    const count=await env.DB.prepare('SELECT COUNT(*) count FROM race_entries WHERE race_id=?').bind(raceStart[1]).first<{count:number}>();if((count?.count||0)<2)return json({error:'At least two pilots are required.'},409);
-    const now=new Date().toISOString();await env.DB.batch([env.DB.prepare("UPDATE race_contracts SET status='live',started_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(now,raceStart[1]),env.DB.prepare("UPDATE race_entries SET status='racing',started_at=? WHERE race_id=?").bind(now,raceStart[1])]);return json({status:'live',startedAt:now});
+  const raceStart = path.match(/^races\/([^/]+)\/start$/);
+  if (raceStart && method === "POST") {
+    const race = await env.DB.prepare("SELECT status,challenger_id,course_verified FROM race_contracts WHERE id=?").bind(raceStart[1]).first<{
+      status: string;
+      challenger_id: string;
+      course_verified: number;
+    }>();
+    if (!race) return json({ error: "Race not found." }, 404);
+    if (race.challenger_id !== user.id) return json({ error: "Only the race host can launch the grid." }, 403);
+    if (race.status !== "scheduled") return json({ error: "Every invited pilot must accept before launch." }, 409);
+    const count = await env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=?").bind(raceStart[1]).first<{ count: number }>();
+    if ((count?.count || 0) < 2) return json({ error: "At least two pilots are required." }, 409);
+    const now = new Date().toISOString();
+    await env.DB.batch([env.DB.prepare("UPDATE race_contracts SET status='live',started_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(now, raceStart[1]), env.DB.prepare("UPDATE race_entries SET status='racing',started_at=? WHERE race_id=?").bind(now, raceStart[1])]);
+    return json({ status: "live", startedAt: now });
   }
-  const raceCheckpoint=path.match(/^races\/([^/]+)\/checkpoint$/);if(raceCheckpoint&&method==='POST'){
-    const body=await request.json<{latitude?:number;longitude?:number;accuracy?:number}>();if(!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude)||Number(body.accuracy||0)>65)return json({error:'A precise GPS fix is required.'},400);
-    const race=await env.DB.prepare("SELECT status,race_mode,prize_pool,started_at FROM race_contracts WHERE id=? AND course_verified=1").bind(raceCheckpoint[1]).first<{status:string;race_mode:string;prize_pool:number;started_at:string}>();const entry=await env.DB.prepare("SELECT current_checkpoint,status FROM race_entries WHERE race_id=? AND user_id=?").bind(raceCheckpoint[1],user.id).first<{current_checkpoint:number;status:string}>();if(!race||race.status!=='live'||!entry||entry.status!=='racing')return json({error:'This route race is not live for your pilot.'},409);
-    const relayProgress=race.race_mode==='relay'?await env.DB.prepare('SELECT MAX(current_checkpoint) current_checkpoint FROM race_entries WHERE race_id=?').bind(raceCheckpoint[1]).first<{current_checkpoint:number}>():null;const checkpointIndex=race.race_mode==='relay'?Number(relayProgress?.current_checkpoint||0):entry.current_checkpoint;
-    const checkpoint=await env.DB.prepare('SELECT * FROM race_checkpoints WHERE race_id=? AND stop_order=?').bind(raceCheckpoint[1],checkpointIndex).first<Record<string,unknown>>();if(!checkpoint)return json({error:'No remaining checkpoint.'},409);if(race.race_mode==='relay'&&checkpoint.assigned_user_id!==user.id)return json({error:'This relay leg belongs to another pilot.'},403);if(distanceMeters(Number(body.latitude),Number(body.longitude),Number(checkpoint.latitude),Number(checkpoint.longitude))>120)return json({error:'Move within 120 meters of the checkpoint.'},409);
-    const total=await env.DB.prepare('SELECT COUNT(*) count FROM race_checkpoints WHERE race_id=?').bind(raceCheckpoint[1]).first<{count:number}>();const next=checkpointIndex+1,complete=next>=(total?.count||0);if(!complete){if(race.race_mode==='relay')await env.DB.prepare('UPDATE race_entries SET current_checkpoint=? WHERE race_id=?').bind(next,raceCheckpoint[1]).run();else await env.DB.prepare('UPDATE race_entries SET current_checkpoint=? WHERE race_id=? AND user_id=?').bind(next,raceCheckpoint[1],user.id).run();return json({checkpoint:next,complete:false,relay:race.race_mode==='relay'});}
-    if(race.race_mode==='relay'){const elapsed=Math.max(0,Date.now()-Date.parse(race.started_at));await env.DB.batch([env.DB.prepare("UPDATE race_entries SET status='finished',current_checkpoint=?,finished_at=CURRENT_TIMESTAMP,elapsed_ms=? WHERE race_id=?").bind(next,elapsed,raceCheckpoint[1]),env.DB.prepare("UPDATE race_contracts SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceCheckpoint[1]),env.DB.prepare('UPDATE users SET points=points+100 WHERE id IN (SELECT user_id FROM race_entries WHERE race_id=?)').bind(raceCheckpoint[1])]);return json({checkpoint:next,complete:true,relay:true,elapsedMs:elapsed,payoutCredits:0});}
-    const placed=await env.DB.prepare('SELECT COUNT(*) count FROM race_entries WHERE race_id=? AND place IS NOT NULL').bind(raceCheckpoint[1]).first<{count:number}>();const place=(placed?.count||0)+1,share=place===1?0.6:place===2?0.25:place===3?0.15:0,payout=Math.floor(Number(race.prize_pool||0)*share),elapsed=Math.max(0,Date.now()-Date.parse(race.started_at));const statements=[env.DB.prepare("UPDATE race_entries SET status='finished',current_checkpoint=?,finished_at=CURRENT_TIMESTAMP,elapsed_ms=?,place=?,payout_credits=? WHERE race_id=? AND user_id=?").bind(next,elapsed,place,payout,raceCheckpoint[1],user.id),env.DB.prepare('UPDATE users SET credits=credits+?,points=points+?,wins=wins+?,losses=losses+? WHERE id=?').bind(payout,place===1?250:place===2?120:60,place===1?1:0,place===1?0:1,user.id)];const entrants=await env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=? AND status<>'finished'").bind(raceCheckpoint[1]).first<{count:number}>();if((entrants?.count||0)<=1)statements.push(env.DB.prepare("UPDATE race_contracts SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceCheckpoint[1]));await env.DB.batch(statements);return json({checkpoint:next,complete:true,place,payoutCredits:payout,elapsedMs:elapsed});
-  }
-
-  if(path==='convoys'&&method==='POST'){
-    const body=await request.json<{title?:string;startsAt?:string;route?:{destination?:string;distanceKm?:number;durationMinutes?:number;coordinates?:Array<{latitude:number;longitude:number}>;stops?:Array<{name:string;latitude:number;longitude:number}>};maxMembers?:number}>();const route=body.route;if(!body.title?.trim()||!body.startsAt||!route?.destination||!route.coordinates?.length||!route.stops?.length)return json({error:'Convoy title, start time, and a complete route are required.'},400);
-    const id=crypto.randomUUID(),routeData={destination:route.destination,distanceKm:Number(route.distanceKm)||0,durationMinutes:Number(route.durationMinutes)||0,coordinates:route.coordinates.slice(0,4000),stops:route.stops.slice(0,8)};await env.DB.batch([env.DB.prepare('INSERT INTO cruises(id,host_id,title,status,starts_at,member_count,destination_name,route_json,max_members) VALUES(?,?,?,?,?,?,?,?,?)').bind(id,user.id,body.title.trim().slice(0,80),'scheduled',body.startsAt,1,route.destination.slice(0,300),JSON.stringify(routeData),Math.min(30,Math.max(2,Number(body.maxMembers)||12))),env.DB.prepare("INSERT INTO cruise_members(cruise_id,user_id,status) VALUES(?,?,'joined')").bind(id,user.id)]);return json({id,status:'scheduled'},201);
-  }
-  const convoyJoin=path.match(/^convoys\/([^/]+)\/join$/);if(convoyJoin&&method==='POST'){
-    const convoy=await env.DB.prepare("SELECT member_count,max_members,status FROM cruises WHERE id=? AND status IN ('scheduled','live')").bind(convoyJoin[1]).first<{member_count:number;max_members:number;status:string}>();if(!convoy)return json({error:'Convoy is unavailable.'},404);if(convoy.member_count>=convoy.max_members)return json({error:'Convoy is full.'},409);const joined=await env.DB.prepare("INSERT OR IGNORE INTO cruise_members(cruise_id,user_id,status) VALUES(?,?,'joined')").bind(convoyJoin[1],user.id).run();if(joined.meta.changes)await env.DB.prepare('UPDATE cruises SET member_count=member_count+1 WHERE id=?').bind(convoyJoin[1]).run();return json({joined:true,status:convoy.status});
-  }
-  const convoyStart=path.match(/^convoys\/([^/]+)\/start$/);if(convoyStart&&method==='POST'){const result=await env.DB.prepare("UPDATE cruises SET status='live' WHERE id=? AND host_id=? AND status='scheduled'").bind(convoyStart[1],user.id).run();if(!result.meta.changes)return json({error:'Only the convoy host can launch this route.'},403);return json({status:'live'});}
-
-  if (path === 'notifications' && method === 'GET') {
-    const rows=await env.DB.prepare('SELECT id,user_id,type,title,body,data_json,is_read,created_at FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 50').bind(user.id).all();
-    return json({notifications:rows.results.map(row=>({...row,data:JSON.parse(String(row.data_json||'{}')),read:Boolean(row.is_read)}))});
-  }
-  if (path === 'notifications/read-all' && method === 'POST') {
-    await env.DB.prepare('UPDATE notifications SET is_read=1 WHERE user_id=?').bind(user.id).run();
-    return json({success:true});
-  }
-  const readNotification=path.match(/^notifications\/([^/]+)\/read$/);
-  if(readNotification&&method==='POST'){
-    await env.DB.prepare('UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?').bind(readNotification[1],user.id).run();
-    return json({success:true});
-  }
-
-  if(path==='conversations'&&method==='GET'){
-    const rows=await env.DB.prepare(`SELECT c.* FROM conversations c JOIN conversation_members m ON m.conversation_id=c.id WHERE m.user_id=? ORDER BY c.updated_at DESC`).bind(user.id).all<Record<string,unknown>>();
-    const conversations=await Promise.all(rows.results.map(async conversation=>{
-      const other=await env.DB.prepare(`SELECT u.id,u.username,u.display_name,u.avatar_url FROM conversation_members m JOIN users u ON u.id=m.user_id WHERE m.conversation_id=? AND m.user_id<>? LIMIT 1`).bind(conversation.id,user.id).first();
-      return {...conversation,other_profile:other||null};
-    }));
-    return json({conversations});
-  }
-  if(path==='conversations'&&method==='POST'){
-    const body=await request.json<{participantId?:string;groupName?:string}>();
-    if(!body.participantId||body.participantId===user.id)return json({error:'Choose another pilot.'},400);
-    const existing=await env.DB.prepare(`SELECT c.id FROM conversations c JOIN conversation_members a ON a.conversation_id=c.id AND a.user_id=? JOIN conversation_members b ON b.conversation_id=c.id AND b.user_id=? WHERE c.is_group=0 LIMIT 1`).bind(user.id,body.participantId).first<{id:string}>();
-    if(existing)return json({id:existing.id});
-    const id=crypto.randomUUID();
-    await env.DB.batch([env.DB.prepare('INSERT INTO conversations(id,group_name,is_group) VALUES(?,?,0)').bind(id,body.groupName||null),env.DB.prepare('INSERT INTO conversation_members(conversation_id,user_id) VALUES(?,?)').bind(id,user.id),env.DB.prepare('INSERT INTO conversation_members(conversation_id,user_id) VALUES(?,?)').bind(id,body.participantId)]);
-    return json({id},201);
-  }
-  const conversationMessages=path.match(/^conversations\/([^/]+)\/messages$/);
-  if(conversationMessages){
-    const conversationId=conversationMessages[1];
-    const member=await env.DB.prepare('SELECT 1 found FROM conversation_members WHERE conversation_id=? AND user_id=?').bind(conversationId,user.id).first();
-    if(!member)return json({error:'Conversation not found.'},404);
-    if(method==='GET'){
-      const rows=await env.DB.prepare(`SELECT m.*,u.username,u.avatar_url FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.conversation_id=? ORDER BY m.created_at ASC LIMIT 100`).bind(conversationId).all();
-      return json({messages:rows.results});
+  const raceCheckpoint = path.match(/^races\/([^/]+)\/checkpoint$/);
+  if (raceCheckpoint && method === "POST") {
+    const body = await request.json<{
+      latitude?: number;
+      longitude?: number;
+      accuracy?: number;
+    }>();
+    if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude) || Number(body.accuracy || 0) > 65) return json({ error: "A precise GPS fix is required." }, 400);
+    const race = await env.DB.prepare("SELECT status,race_mode,prize_pool,started_at FROM race_contracts WHERE id=? AND course_verified=1").bind(raceCheckpoint[1]).first<{
+      status: string;
+      race_mode: string;
+      prize_pool: number;
+      started_at: string;
+    }>();
+    const entry = await env.DB.prepare("SELECT current_checkpoint,status FROM race_entries WHERE race_id=? AND user_id=?").bind(raceCheckpoint[1], user.id).first<{ current_checkpoint: number; status: string }>();
+    if (!race || race.status !== "live" || !entry || entry.status !== "racing") return json({ error: "This route race is not live for your pilot." }, 409);
+    const relayProgress = race.race_mode === "relay" ? await env.DB.prepare("SELECT MAX(current_checkpoint) current_checkpoint FROM race_entries WHERE race_id=?").bind(raceCheckpoint[1]).first<{ current_checkpoint: number }>() : null;
+    const checkpointIndex = race.race_mode === "relay" ? Number(relayProgress?.current_checkpoint || 0) : entry.current_checkpoint;
+    const checkpoint = await env.DB.prepare("SELECT * FROM race_checkpoints WHERE race_id=? AND stop_order=?").bind(raceCheckpoint[1], checkpointIndex).first<Record<string, unknown>>();
+    if (!checkpoint) return json({ error: "No remaining checkpoint." }, 409);
+    if (race.race_mode === "relay" && checkpoint.assigned_user_id !== user.id) return json({ error: "This relay leg belongs to another pilot." }, 403);
+    if (distanceMeters(Number(body.latitude), Number(body.longitude), Number(checkpoint.latitude), Number(checkpoint.longitude)) > 120) return json({ error: "Move within 120 meters of the checkpoint." }, 409);
+    const checkpointTotal = await env.DB.prepare("SELECT COUNT(*) count FROM race_checkpoints WHERE race_id=?").bind(raceCheckpoint[1]).first<{ count: number }>();
+    const next = checkpointIndex + 1,
+      complete = next >= (checkpointTotal?.count || 0);
+    if (!complete) {
+      if (race.race_mode === "relay") await env.DB.prepare("UPDATE race_entries SET current_checkpoint=? WHERE race_id=?").bind(next, raceCheckpoint[1]).run();
+      else await env.DB.prepare("UPDATE race_entries SET current_checkpoint=? WHERE race_id=? AND user_id=?").bind(next, raceCheckpoint[1], user.id).run();
+      return json({
+        checkpoint: next,
+        complete: false,
+        relay: race.race_mode === "relay",
+      });
     }
-    if(method==='POST'){
-      const body=await request.json<{content?:string;mediaUrl?:string;mediaType?:string}>();
-      if(!body.content?.trim()&&!body.mediaUrl)return json({error:'Message cannot be empty.'},400);
-      const id=crypto.randomUUID(); const content=body.content?.trim().slice(0,2000)||'';
-      await env.DB.batch([env.DB.prepare('INSERT INTO messages(id,conversation_id,sender_id,content,media_url,media_type) VALUES(?,?,?,?,?,?)').bind(id,conversationId,user.id,content,body.mediaUrl||null,body.mediaType||'text'),env.DB.prepare('UPDATE conversations SET last_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(content||'Media',conversationId)]);
-      return json({message:{id,conversation_id:conversationId,sender_id:user.id,content,media_url:body.mediaUrl||null,media_type:body.mediaType||'text',created_at:new Date().toISOString()}},201);
+    if (race.race_mode === "relay") {
+      const elapsed = Math.max(0, Date.now() - Date.parse(race.started_at));
+      await env.DB.batch([env.DB.prepare("UPDATE race_entries SET status='finished',current_checkpoint=?,finished_at=CURRENT_TIMESTAMP,elapsed_ms=? WHERE race_id=?").bind(next, elapsed, raceCheckpoint[1]), env.DB.prepare("UPDATE race_contracts SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceCheckpoint[1]), env.DB.prepare("UPDATE users SET points=points+100 WHERE id IN (SELECT user_id FROM race_entries WHERE race_id=?)").bind(raceCheckpoint[1])]);
+      return json({
+        checkpoint: next,
+        complete: true,
+        relay: true,
+        elapsedMs: elapsed,
+        payoutCredits: 0,
+      });
+    }
+    const [placed, totalEntries] = await Promise.all([env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=? AND place IS NOT NULL").bind(raceCheckpoint[1]).first<{ count: number }>(), env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=?").bind(raceCheckpoint[1]).first<{ count: number }>()]);
+    const place = (placed?.count || 0) + 1,
+      entrantTotal = Math.max(1, Number(totalEntries?.count || 1)),
+      payout = Math.floor(Number(race.prize_pool || 0) * racePayoutShare(entrantTotal, place)),
+      elapsed = Math.max(0, Date.now() - Date.parse(race.started_at));
+    const statements = [env.DB.prepare("UPDATE race_entries SET status='finished',current_checkpoint=?,finished_at=CURRENT_TIMESTAMP,elapsed_ms=?,place=?,payout_credits=? WHERE race_id=? AND user_id=?").bind(next, elapsed, place, payout, raceCheckpoint[1], user.id), env.DB.prepare("UPDATE users SET credits=credits+?,points=points+?,wins=wins+?,losses=losses+? WHERE id=?").bind(payout, place === 1 ? 250 : place === 2 ? 120 : 60, place === 1 ? 1 : 0, place === 1 ? 0 : 1, user.id)];
+    const entrants = await env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=? AND status<>'finished'").bind(raceCheckpoint[1]).first<{ count: number }>();
+    if ((entrants?.count || 0) <= 1) statements.push(env.DB.prepare("UPDATE race_contracts SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceCheckpoint[1]));
+    await env.DB.batch(statements);
+    return json({
+      checkpoint: next,
+      complete: true,
+      place,
+      payoutCredits: payout,
+      elapsedMs: elapsed,
+    });
+  }
+
+  if (path === "convoys" && method === "POST") {
+    const body = await request.json<{
+      title?: string;
+      startsAt?: string;
+      route?: {
+        destination?: string;
+        distanceKm?: number;
+        durationMinutes?: number;
+        coordinates?: Array<{ latitude: number; longitude: number }>;
+        stops?: Array<{ name: string; latitude: number; longitude: number }>;
+      };
+      maxMembers?: number;
+    }>();
+    const route = body.route;
+    if (!body.title?.trim() || !body.startsAt || !route?.destination || !route.coordinates?.length || !route.stops?.length)
+      return json(
+        {
+          error: "Convoy title, start time, and a complete route are required.",
+        },
+        400,
+      );
+    const id = crypto.randomUUID(),
+      routeData = {
+        destination: route.destination,
+        distanceKm: Number(route.distanceKm) || 0,
+        durationMinutes: Number(route.durationMinutes) || 0,
+        coordinates: route.coordinates.slice(0, 4000),
+        stops: route.stops.slice(0, 8),
+      };
+    await env.DB.batch([env.DB.prepare("INSERT INTO cruises(id,host_id,title,status,starts_at,member_count,destination_name,route_json,max_members) VALUES(?,?,?,?,?,?,?,?,?)").bind(id, user.id, body.title.trim().slice(0, 80), "scheduled", body.startsAt, 1, route.destination.slice(0, 300), JSON.stringify(routeData), Math.min(30, Math.max(2, Number(body.maxMembers) || 12))), env.DB.prepare("INSERT INTO cruise_members(cruise_id,user_id,status) VALUES(?,?,'joined')").bind(id, user.id)]);
+    return json({ id, status: "scheduled" }, 201);
+  }
+  const convoyJoin = path.match(/^convoys\/([^/]+)\/join$/);
+  if (convoyJoin && method === "POST") {
+    const convoy = await env.DB.prepare("SELECT member_count,max_members,status FROM cruises WHERE id=? AND status IN ('scheduled','live')").bind(convoyJoin[1]).first<{ member_count: number; max_members: number; status: string }>();
+    if (!convoy) return json({ error: "Convoy is unavailable." }, 404);
+    if (convoy.member_count >= convoy.max_members) return json({ error: "Convoy is full." }, 409);
+    const joined = await env.DB.prepare("INSERT OR IGNORE INTO cruise_members(cruise_id,user_id,status) VALUES(?,?,'joined')").bind(convoyJoin[1], user.id).run();
+    if (joined.meta.changes) await env.DB.prepare("UPDATE cruises SET member_count=member_count+1 WHERE id=?").bind(convoyJoin[1]).run();
+    return json({ joined: true, status: convoy.status });
+  }
+  const convoyStart = path.match(/^convoys\/([^/]+)\/start$/);
+  if (convoyStart && method === "POST") {
+    const result = await env.DB.prepare("UPDATE cruises SET status='live' WHERE id=? AND host_id=? AND status='scheduled'").bind(convoyStart[1], user.id).run();
+    if (!result.meta.changes) return json({ error: "Only the convoy host can launch this route." }, 403);
+    return json({ status: "live" });
+  }
+
+  if (path === "notifications" && method === "GET") {
+    const rows = await env.DB.prepare("SELECT id,user_id,type,title,body,data_json,is_read,created_at FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 50").bind(user.id).all();
+    return json({
+      notifications: rows.results.map((row) => ({
+        ...row,
+        data: JSON.parse(String(row.data_json || "{}")),
+        read: Boolean(row.is_read),
+      })),
+    });
+  }
+  if (path === "notifications/read-all" && method === "POST") {
+    await env.DB.prepare("UPDATE notifications SET is_read=1 WHERE user_id=?").bind(user.id).run();
+    return json({ success: true });
+  }
+  const readNotification = path.match(/^notifications\/([^/]+)\/read$/);
+  if (readNotification && method === "POST") {
+    await env.DB.prepare("UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?").bind(readNotification[1], user.id).run();
+    return json({ success: true });
+  }
+
+  if (path === "conversations" && method === "GET") {
+    const rows = await env.DB.prepare(`SELECT c.* FROM conversations c JOIN conversation_members m ON m.conversation_id=c.id WHERE m.user_id=? ORDER BY c.updated_at DESC`).bind(user.id).all<Record<string, unknown>>();
+    const conversations = await Promise.all(
+      rows.results.map(async (conversation) => {
+        const other = await env.DB.prepare(`SELECT u.id,u.username,u.display_name,u.avatar_url FROM conversation_members m JOIN users u ON u.id=m.user_id WHERE m.conversation_id=? AND m.user_id<>? LIMIT 1`).bind(conversation.id, user.id).first();
+        return { ...conversation, other_profile: other || null };
+      }),
+    );
+    return json({ conversations });
+  }
+  if (path === "conversations" && method === "POST") {
+    const body = await request.json<{
+      participantId?: string;
+      groupName?: string;
+    }>();
+    if (!body.participantId || body.participantId === user.id) return json({ error: "Choose another pilot." }, 400);
+    const existing = await env.DB.prepare(`SELECT c.id FROM conversations c JOIN conversation_members a ON a.conversation_id=c.id AND a.user_id=? JOIN conversation_members b ON b.conversation_id=c.id AND b.user_id=? WHERE c.is_group=0 LIMIT 1`).bind(user.id, body.participantId).first<{ id: string }>();
+    if (existing) return json({ id: existing.id });
+    const id = crypto.randomUUID();
+    await env.DB.batch([env.DB.prepare("INSERT INTO conversations(id,group_name,is_group) VALUES(?,?,0)").bind(id, body.groupName || null), env.DB.prepare("INSERT INTO conversation_members(conversation_id,user_id) VALUES(?,?)").bind(id, user.id), env.DB.prepare("INSERT INTO conversation_members(conversation_id,user_id) VALUES(?,?)").bind(id, body.participantId)]);
+    return json({ id }, 201);
+  }
+  const conversationMessages = path.match(/^conversations\/([^/]+)\/messages$/);
+  if (conversationMessages) {
+    const conversationId = conversationMessages[1];
+    const member = await env.DB.prepare("SELECT 1 found FROM conversation_members WHERE conversation_id=? AND user_id=?").bind(conversationId, user.id).first();
+    if (!member) return json({ error: "Conversation not found." }, 404);
+    if (method === "GET") {
+      const rows = await env.DB.prepare(`SELECT m.*,u.username,u.avatar_url FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.conversation_id=? ORDER BY m.created_at ASC LIMIT 100`).bind(conversationId).all();
+      return json({ messages: rows.results });
+    }
+    if (method === "POST") {
+      const body = await request.json<{
+        content?: string;
+        mediaUrl?: string;
+        mediaType?: string;
+      }>();
+      if (!body.content?.trim() && !body.mediaUrl) return json({ error: "Message cannot be empty." }, 400);
+      const id = crypto.randomUUID();
+      const content = body.content?.trim().slice(0, 2000) || "";
+      await env.DB.batch([env.DB.prepare("INSERT INTO messages(id,conversation_id,sender_id,content,media_url,media_type) VALUES(?,?,?,?,?,?)").bind(id, conversationId, user.id, content, body.mediaUrl || null, body.mediaType || "text"), env.DB.prepare("UPDATE conversations SET last_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(content || "Media", conversationId)]);
+      return json(
+        {
+          message: {
+            id,
+            conversation_id: conversationId,
+            sender_id: user.id,
+            content,
+            media_url: body.mediaUrl || null,
+            media_type: body.mediaType || "text",
+            created_at: new Date().toISOString(),
+          },
+        },
+        201,
+      );
     }
   }
 
-  const eventRsvp=path.match(/^events\/([^/]+)\/rsvp$/);
-  if(eventRsvp&&method==='POST'){
-    const current=await env.DB.prepare('SELECT 1 found FROM event_rsvps WHERE event_id=? AND user_id=?').bind(eventRsvp[1],user.id).first();
-    if(current)await env.DB.prepare('DELETE FROM event_rsvps WHERE event_id=? AND user_id=?').bind(eventRsvp[1],user.id).run();
-    else await env.DB.prepare('INSERT INTO event_rsvps(event_id,user_id) VALUES(?,?)').bind(eventRsvp[1],user.id).run();
-    const count=await env.DB.prepare('SELECT COUNT(*) count FROM event_rsvps WHERE event_id=?').bind(eventRsvp[1]).first<{count:number}>();
-    await env.DB.prepare('UPDATE events SET attendees=? WHERE id=?').bind(count?.count||0,eventRsvp[1]).run();
-    return json({active:!current,attendees:count?.count||0});
+  const eventRsvp = path.match(/^events\/([^/]+)\/rsvp$/);
+  if (eventRsvp && method === "POST") {
+    const current = await env.DB.prepare("SELECT 1 found FROM event_rsvps WHERE event_id=? AND user_id=?").bind(eventRsvp[1], user.id).first();
+    if (current) await env.DB.prepare("DELETE FROM event_rsvps WHERE event_id=? AND user_id=?").bind(eventRsvp[1], user.id).run();
+    else await env.DB.prepare("INSERT INTO event_rsvps(event_id,user_id) VALUES(?,?)").bind(eventRsvp[1], user.id).run();
+    const count = await env.DB.prepare("SELECT COUNT(*) count FROM event_rsvps WHERE event_id=?").bind(eventRsvp[1]).first<{ count: number }>();
+    await env.DB.prepare("UPDATE events SET attendees=? WHERE id=?")
+      .bind(count?.count || 0, eventRsvp[1])
+      .run();
+    return json({ active: !current, attendees: count?.count || 0 });
   }
-  if(path==='events'&&method==='POST'){
-    const body=await request.json<{title?:string;description?:string;rules?:string;startsAt?:string;endsAt?:string;radiusM?:number;locations?:Array<{label?:string;address?:string}>;allowShowCars?:boolean;allowSponsors?:boolean}>();
-    if(!body.title?.trim()||!body.startsAt||!body.locations?.[0]?.address?.trim())return json({error:'Title, start time, and at least one location are required.'},400);
-    const requested=body.locations.slice(0,5); const located:Array<{label:string;name:string;latitude:number;longitude:number}>=[];
-    for(const item of requested){const point=await geocode(item.address||'');if(!point)return json({error:`Location not found: ${item.address}`},404);located.push({label:item.label?.trim()||`STOP ${located.length+1}`,name:point.name,latitude:point.latitude,longitude:point.longitude});}
-    const first=located[0],id=crypto.randomUUID();
-    const statements=[env.DB.prepare(`INSERT INTO events(id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,body.title.trim().slice(0,100),first.name,first.latitude,first.longitude,Math.max(50,Math.min(2000,Number(body.radiusM)||250)),body.startsAt,body.endsAt||null,body.description?.trim().slice(0,2000)||'',body.rules?.trim().slice(0,1500)||'',body.allowShowCars===false?0:1,body.allowSponsors===false?0:1),env.DB.prepare("INSERT INTO event_registrations(event_id,user_id,role) VALUES(?,?,'host')").bind(id,user.id)];
-    located.forEach((point,index)=>statements.push(env.DB.prepare('INSERT INTO event_locations(id,event_id,label,location_name,latitude,longitude,stop_order) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),id,point.label,point.name,point.latitude,point.longitude,index)));
-    await env.DB.batch(statements); return json({id,locations:located},201);
+  if (path === "events" && method === "POST") {
+    const body = await request.json<{
+      title?: string;
+      description?: string;
+      rules?: string;
+      startsAt?: string;
+      endsAt?: string;
+      radiusM?: number;
+      locations?: Array<{ label?: string; address?: string }>;
+      allowShowCars?: boolean;
+      allowSponsors?: boolean;
+    }>();
+    if (!body.title?.trim() || !body.startsAt || !body.locations?.[0]?.address?.trim()) return json({ error: "Title, start time, and at least one location are required." }, 400);
+    const requested = body.locations.slice(0, 5);
+    const located: Array<{
+      label: string;
+      name: string;
+      latitude: number;
+      longitude: number;
+    }> = [];
+    for (const item of requested) {
+      const point = await geocode(item.address || "");
+      if (!point) return json({ error: `Location not found: ${item.address}` }, 404);
+      located.push({
+        label: item.label?.trim() || `STOP ${located.length + 1}`,
+        name: point.name,
+        latitude: point.latitude,
+        longitude: point.longitude,
+      });
+    }
+    const first = located[0],
+      id = crypto.randomUUID();
+    const statements = [env.DB.prepare(`INSERT INTO events(id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, user.id, body.title.trim().slice(0, 100), first.name, first.latitude, first.longitude, Math.max(50, Math.min(2000, Number(body.radiusM) || 250)), body.startsAt, body.endsAt || null, body.description?.trim().slice(0, 2000) || "", body.rules?.trim().slice(0, 1500) || "", body.allowShowCars === false ? 0 : 1, body.allowSponsors === false ? 0 : 1), env.DB.prepare("INSERT INTO event_registrations(event_id,user_id,role) VALUES(?,?,'host')").bind(id, user.id)];
+    located.forEach((point, index) => statements.push(env.DB.prepare("INSERT INTO event_locations(id,event_id,label,location_name,latitude,longitude,stop_order) VALUES(?,?,?,?,?,?,?)").bind(crypto.randomUUID(), id, point.label, point.name, point.latitude, point.longitude, index)));
+    await env.DB.batch(statements);
+    return json({ id, locations: located }, 201);
   }
-  const eventDetails=path.match(/^events\/([^/]+)$/);
-  if(eventDetails&&method==='GET'){
-    const event=await env.DB.prepare('SELECT e.*,u.username host_name FROM events e JOIN users u ON u.id=e.host_id WHERE e.id=?').bind(eventDetails[1]).first();
-    if(!event)return json({error:'Meet not found.'},404);
-    const [locations,registrations]=await Promise.all([env.DB.prepare('SELECT * FROM event_locations WHERE event_id=? ORDER BY stop_order').bind(eventDetails[1]).all(),env.DB.prepare(`SELECT r.role,r.sponsor_name,r.vehicle_id,u.id user_id,u.username,u.avatar_url,v.year,v.make,v.model,v.trim,v.photo_url FROM event_registrations r JOIN users u ON u.id=r.user_id LEFT JOIN vehicles v ON v.id=r.vehicle_id WHERE r.event_id=? ORDER BY r.created_at`).bind(eventDetails[1]).all()]);
-    return json({event,locations:locations.results,registrations:registrations.results});
+  const eventDetails = path.match(/^events\/([^/]+)$/);
+  if (eventDetails && method === "GET") {
+    const event = await env.DB.prepare("SELECT e.*,u.username host_name FROM events e JOIN users u ON u.id=e.host_id WHERE e.id=?").bind(eventDetails[1]).first();
+    if (!event) return json({ error: "Meet not found." }, 404);
+    const [locations, registrations] = await Promise.all([env.DB.prepare("SELECT * FROM event_locations WHERE event_id=? ORDER BY stop_order").bind(eventDetails[1]).all(), env.DB.prepare(`SELECT r.role,r.sponsor_name,r.vehicle_id,u.id user_id,u.username,u.avatar_url,v.year,v.make,v.model,v.trim,v.photo_url FROM event_registrations r JOIN users u ON u.id=r.user_id LEFT JOIN vehicles v ON v.id=r.vehicle_id WHERE r.event_id=? ORDER BY r.created_at`).bind(eventDetails[1]).all()]);
+    return json({
+      event,
+      locations: locations.results,
+      registrations: registrations.results,
+    });
   }
-  const eventInvite=path.match(/^events\/([^/]+)\/invite$/);
-  if(eventInvite&&method==='POST'){
-    const body=await request.json<{userId?:string}>(); if(!body.userId||body.userId===user.id)return json({error:'Choose another pilot to invite.'},400);
-    const event=await env.DB.prepare('SELECT title FROM events WHERE id=? AND host_id=?').bind(eventInvite[1],user.id).first<{title:string}>();if(!event)return json({error:'Only the meet host can invite pilots.'},403);
-    const invited=await env.DB.prepare('SELECT username FROM users WHERE id=?').bind(body.userId).first<{username:string}>();if(!invited)return json({error:'Pilot not found.'},404);
-    await env.DB.batch([env.DB.prepare(`INSERT INTO event_invites(event_id,user_id,invited_by,status) VALUES(?,?,?,'invited') ON CONFLICT(event_id,user_id) DO UPDATE SET invited_by=excluded.invited_by,status='invited',created_at=CURRENT_TIMESTAMP`).bind(eventInvite[1],body.userId,user.id),env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(),body.userId,'meet_rsvp','MEET INVITATION',`${user.username} invited you to ${event.title}`,JSON.stringify({eventId:eventInvite[1]}))]);
-    return json({invited:true,pilot:invited.username,event:event.title});
+  const eventInvite = path.match(/^events\/([^/]+)\/invite$/);
+  if (eventInvite && method === "POST") {
+    const body = await request.json<{ userId?: string }>();
+    if (!body.userId || body.userId === user.id) return json({ error: "Choose another pilot to invite." }, 400);
+    const event = await env.DB.prepare("SELECT title FROM events WHERE id=? AND host_id=?").bind(eventInvite[1], user.id).first<{ title: string }>();
+    if (!event) return json({ error: "Only the meet host can invite pilots." }, 403);
+    const invited = await env.DB.prepare("SELECT username FROM users WHERE id=?").bind(body.userId).first<{ username: string }>();
+    if (!invited) return json({ error: "Pilot not found." }, 404);
+    await env.DB.batch([env.DB.prepare(`INSERT INTO event_invites(event_id,user_id,invited_by,status) VALUES(?,?,?,'invited') ON CONFLICT(event_id,user_id) DO UPDATE SET invited_by=excluded.invited_by,status='invited',created_at=CURRENT_TIMESTAMP`).bind(eventInvite[1], body.userId, user.id), env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(), body.userId, "meet_rsvp", "MEET INVITATION", `${user.username} invited you to ${event.title}`, JSON.stringify({ eventId: eventInvite[1] }))]);
+    return json({ invited: true, pilot: invited.username, event: event.title });
   }
-  const eventJoin=path.match(/^events\/([^/]+)\/join$/);
-  if(eventJoin&&method==='POST'){
-    const body=await request.json<{role?:string;vehicleId?:string;sponsorName?:string}>(); const role=body.role||'attendee';
-    if(!['attendee','show_car','sponsor'].includes(role))return json({error:'Choose attendee, show car, or sponsor.'},400);
-    const event=await env.DB.prepare('SELECT allow_show_cars,allow_sponsors FROM events WHERE id=?').bind(eventJoin[1]).first<{allow_show_cars:number;allow_sponsors:number}>();
-    if(!event)return json({error:'Meet not found.'},404); if(role==='show_car'&&!event.allow_show_cars)return json({error:'Show car registration is closed.'},400); if(role==='sponsor'&&!event.allow_sponsors)return json({error:'Sponsor registration is closed.'},400);
-    if(role==='show_car'){const vehicle=await env.DB.prepare('SELECT id FROM vehicles WHERE id=? AND user_id=?').bind(body.vehicleId||'',user.id).first();if(!vehicle)return json({error:'Select one of your garage vehicles.'},400);}
-    if(role==='sponsor'&&!body.sponsorName?.trim())return json({error:'Sponsor name is required.'},400);
-    await env.DB.prepare(`INSERT INTO event_registrations(event_id,user_id,vehicle_id,role,sponsor_name) VALUES(?,?,?,?,?) ON CONFLICT(event_id,user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,role=excluded.role,sponsor_name=excluded.sponsor_name`).bind(eventJoin[1],user.id,role==='show_car'?body.vehicleId:null,role,role==='sponsor'?body.sponsorName?.trim().slice(0,100):null).run();
-    const count=await env.DB.prepare('SELECT COUNT(*) count FROM event_registrations WHERE event_id=?').bind(eventJoin[1]).first<{count:number}>(); await env.DB.prepare('UPDATE events SET attendees=? WHERE id=?').bind(count?.count||0,eventJoin[1]).run(); return json({role,attendees:count?.count||0});
+  const eventJoin = path.match(/^events\/([^/]+)\/join$/);
+  if (eventJoin && method === "POST") {
+    const body = await request.json<{
+      role?: string;
+      vehicleId?: string;
+      sponsorName?: string;
+    }>();
+    const role = body.role || "attendee";
+    if (!["attendee", "show_car", "sponsor"].includes(role)) return json({ error: "Choose attendee, show car, or sponsor." }, 400);
+    const event = await env.DB.prepare("SELECT allow_show_cars,allow_sponsors FROM events WHERE id=?").bind(eventJoin[1]).first<{ allow_show_cars: number; allow_sponsors: number }>();
+    if (!event) return json({ error: "Meet not found." }, 404);
+    if (role === "show_car" && !event.allow_show_cars) return json({ error: "Show car registration is closed." }, 400);
+    if (role === "sponsor" && !event.allow_sponsors) return json({ error: "Sponsor registration is closed." }, 400);
+    if (role === "show_car") {
+      const vehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND user_id=?")
+        .bind(body.vehicleId || "", user.id)
+        .first();
+      if (!vehicle) return json({ error: "Select one of your garage vehicles." }, 400);
+    }
+    if (role === "sponsor" && !body.sponsorName?.trim()) return json({ error: "Sponsor name is required." }, 400);
+    await env.DB.prepare(`INSERT INTO event_registrations(event_id,user_id,vehicle_id,role,sponsor_name) VALUES(?,?,?,?,?) ON CONFLICT(event_id,user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,role=excluded.role,sponsor_name=excluded.sponsor_name`)
+      .bind(eventJoin[1], user.id, role === "show_car" ? body.vehicleId : null, role, role === "sponsor" ? body.sponsorName?.trim().slice(0, 100) : null)
+      .run();
+    const count = await env.DB.prepare("SELECT COUNT(*) count FROM event_registrations WHERE event_id=?").bind(eventJoin[1]).first<{ count: number }>();
+    await env.DB.prepare("UPDATE events SET attendees=? WHERE id=?")
+      .bind(count?.count || 0, eventJoin[1])
+      .run();
+    return json({ role, attendees: count?.count || 0 });
   }
 
-  if (path === 'upload' && method === 'POST') {
-    const form=await request.formData();
-    const file=form.get('file');
-    if(!(file instanceof File) || file.size>30*1024*1024) return json({error:'Upload must be a file under 30 MB.'},400);
-    const extension=(file.name.split('.').pop()||'bin').replace(/[^a-z0-9]/gi,'').slice(0,6);
-    const key=`${user.id}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
-    await env.MEDIA.put(key,file.stream(),{httpMetadata:{contentType:file.type||'application/octet-stream'}});
-    return json({url:`/api/media/${encodeURIComponent(key)}`},201);
+  if (path === "upload" && method === "POST") {
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!(file instanceof File) || file.size > 30 * 1024 * 1024) return json({ error: "Upload must be a file under 30 MB." }, 400);
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) return json({ error: "Only image and video uploads are supported." }, 415);
+    const extension = (file.name.split(".").pop() || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 6);
+    const key = `${user.id}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+    await env.MEDIA.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type || "application/octet-stream" },
+    });
+    return json({ url: `/api/media/${encodeURIComponent(key)}` }, 201);
   }
-  if(path==='vehicle-digital-twin'&&method==='POST'){
-    const body=await request.json<{vehicleId?:string;angles?:Array<{angle:string;url:string}>;geminiApiKey?:string}>();const angles=(body.angles||[]).filter(item=>['front','rear','driver','passenger'].includes(item.angle)&&item.url.startsWith('/api/media/'));
-    const vehicle=await env.DB.prepare('SELECT id,year,make,model,trim,color FROM vehicles WHERE id=? AND user_id=?').bind(body.vehicleId||'',user.id).first<Record<string,unknown>>();
-    if(!vehicle||angles.length!==4)return json({error:'Four verified vehicle angles are required.'},400);if(!body.geminiApiKey?.trim())return json({error:'Connect a Gemini API key for this one-time generation request.'},400);
-    const input:Array<Record<string,unknown>>=[{type:'text',text:`Create one accurate photorealistic digital garage render of this exact ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim||''} in ${vehicle.color||'its photographed color'}. Reconcile the four reference angles into the same vehicle. Preserve its actual body kit, wheels, paint, lights, stance, badges, and visible modifications. Three-quarter front view in a dark neutral studio garage, full car visible, no text, no people, no invented parts.`}];let total=0;
-    for(const angle of angles){const key=decodeURIComponent(angle.url.slice('/api/media/'.length));const object=await env.MEDIA.get(key);if(!object)return json({error:`The ${angle.angle} image is unavailable.`},400);total+=object.size;if(total>22*1024*1024)return json({error:'Angle images must total less than 22 MB.'},400);const bytes=new Uint8Array(await object.arrayBuffer());input.push({type:'image',mime_type:object.httpMetadata?.contentType||'image/jpeg',data:bytesToBase64(bytes)});}
+  if (path === "vehicle-digital-twin" && method === "POST") {
+    const body = await request.json<{
+      vehicleId?: string;
+      angles?: Array<{ angle: string; url: string }>;
+      geminiApiKey?: string;
+    }>();
+    const angles = (body.angles || []).filter((item) => ["front", "rear", "driver", "passenger"].includes(item.angle) && item.url.startsWith("/api/media/"));
+    const vehicle = await env.DB.prepare("SELECT id,year,make,model,trim,color FROM vehicles WHERE id=? AND user_id=?")
+      .bind(body.vehicleId || "", user.id)
+      .first<Record<string, unknown>>();
+    if (!vehicle || angles.length !== 4) return json({ error: "Four verified vehicle angles are required." }, 400);
+    if (!body.geminiApiKey?.trim())
+      return json(
+        {
+          error: "Connect a Gemini API key for this one-time generation request.",
+        },
+        400,
+      );
+    const input: Array<Record<string, unknown>> = [
+      {
+        type: "text",
+        text: `Create one accurate photorealistic digital garage render of this exact ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ""} in ${vehicle.color || "its photographed color"}. Reconcile the four reference angles into the same vehicle. Preserve its actual body kit, wheels, paint, lights, stance, badges, and visible modifications. Three-quarter front view in a dark neutral studio garage, full car visible, no text, no people, no invented parts.`,
+      },
+    ];
+    let total = 0;
+    for (const angle of angles) {
+      const key = decodeURIComponent(angle.url.slice("/api/media/".length));
+      const object = await env.MEDIA.get(key);
+      if (!object) return json({ error: `The ${angle.angle} image is unavailable.` }, 400);
+      total += object.size;
+      if (total > 22 * 1024 * 1024) return json({ error: "Angle images must total less than 22 MB." }, 400);
+      const bytes = new Uint8Array(await object.arrayBuffer());
+      input.push({
+        type: "image",
+        mime_type: object.httpMetadata?.contentType || "image/jpeg",
+        data: bytesToBase64(bytes),
+      });
+    }
     await env.DB.prepare("UPDATE vehicles SET digital_twin_status='generating' WHERE id=?").bind(vehicle.id).run();
-    const provider=await fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':body.geminiApiKey.trim()},body:JSON.stringify({model:'gemini-3.1-flash-image',input,response_format:{type:'image',mime_type:'image/png',aspect_ratio:'16:9',image_size:'1K'}})});
-    const generated=await provider.json<unknown>();const image=generatedImageBlock(generated);if(!provider.ok||!image){await env.DB.prepare("UPDATE vehicles SET digital_twin_status='failed' WHERE id=?").bind(vehicle.id).run();return json({error:'Gemini could not generate the digital vehicle. Check API access and try again.'},502);}
-    const bytes=base64ToBytes(image.data),key=`digital-twins/${user.id}/${vehicle.id}-${Date.now()}.png`;await env.MEDIA.put(key,bytes,{httpMetadata:{contentType:image.mimeType}});const url=`/api/media/${encodeURIComponent(key)}`;
-    const statements=angles.map(angle=>env.DB.prepare(`INSERT INTO vehicle_angles(vehicle_id,angle,media_url) VALUES(?,?,?) ON CONFLICT(vehicle_id,angle) DO UPDATE SET media_url=excluded.media_url,created_at=CURRENT_TIMESTAMP`).bind(vehicle.id,angle.angle,angle.url));statements.push(env.DB.prepare("UPDATE vehicles SET digital_twin_url=?,digital_twin_status='ready' WHERE id=?").bind(url,vehicle.id));await env.DB.batch(statements);return json({url,status:'ready'});
+    const provider = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": body.geminiApiKey.trim(),
+      },
+      body: JSON.stringify({
+        model: "gemini-3.1-flash-image",
+        input,
+        response_format: {
+          type: "image",
+          mime_type: "image/png",
+          aspect_ratio: "16:9",
+          image_size: "1K",
+        },
+      }),
+    });
+    const generated = await provider.json<unknown>();
+    const image = generatedImageBlock(generated);
+    if (!provider.ok || !image) {
+      await env.DB.prepare("UPDATE vehicles SET digital_twin_status='failed' WHERE id=?").bind(vehicle.id).run();
+      return json(
+        {
+          error: "Gemini could not generate the digital vehicle. Check API access and try again.",
+        },
+        502,
+      );
+    }
+    const bytes = base64ToBytes(image.data),
+      key = `digital-twins/${user.id}/${vehicle.id}-${Date.now()}.png`;
+    await env.MEDIA.put(key, bytes, {
+      httpMetadata: { contentType: image.mimeType },
+    });
+    const url = `/api/media/${encodeURIComponent(key)}`;
+    const statements = angles.map((angle) => env.DB.prepare(`INSERT INTO vehicle_angles(vehicle_id,angle,media_url) VALUES(?,?,?) ON CONFLICT(vehicle_id,angle) DO UPDATE SET media_url=excluded.media_url,created_at=CURRENT_TIMESTAMP`).bind(vehicle.id, angle.angle, angle.url));
+    statements.push(env.DB.prepare("UPDATE vehicles SET digital_twin_url=?,digital_twin_status='ready' WHERE id=?").bind(url, vehicle.id));
+    await env.DB.batch(statements);
+    return json({ url, status: "ready" });
   }
-  if (path === 'parts-search' && method === 'POST') {
-    const body=await request.json<{vehicle?:Record<string,string|number>;query?:string}>();
-    if(!body.vehicle?.year||!body.vehicle.make||!body.vehicle.model) return json({error:'Select a complete vehicle first.'},400);
-    const query=(body.query||'performance parts').slice(0,80);
-    if(!env.EBAY_CLIENT_ID||!env.EBAY_CLIENT_SECRET)return json({products:[],providers:[{name:'eBay Motors',mode:'credentials_required'},...providerSearches(body.vehicle,query)]});
-    try{return json({products:await ebayPartsSearch(env,body.vehicle,query),providers:[{name:'eBay Motors',mode:'live'},...providerSearches(body.vehicle,query)]});}catch(error){return json({products:[],providers:[{name:'eBay Motors',mode:'connection_error'},...providerSearches(body.vehicle,query)],error:error instanceof Error?error.message:'eBay search failed.'},502);}
+  if (path === "parts-search" && method === "POST") {
+    const body = await request.json<{
+      vehicle?: Record<string, string | number>;
+      query?: string;
+    }>();
+    if (!body.vehicle?.year || !body.vehicle.make || !body.vehicle.model) return json({ error: "Select a complete vehicle first." }, 400);
+    const query = (body.query || "performance parts").slice(0, 80);
+    if (!env.EBAY_CLIENT_ID || !env.EBAY_CLIENT_SECRET)
+      return json({
+        products: [],
+        providers: [{ name: "eBay Motors", mode: "credentials_required" }, ...providerSearches(body.vehicle, query)],
+      });
+    try {
+      return json({
+        products: await ebayPartsSearch(env, body.vehicle, query),
+        providers: [{ name: "eBay Motors", mode: "live" }, ...providerSearches(body.vehicle, query)],
+      });
+    } catch (error) {
+      return json(
+        {
+          products: [],
+          providers: [{ name: "eBay Motors", mode: "connection_error" }, ...providerSearches(body.vehicle, query)],
+          error: error instanceof Error ? error.message : "eBay search failed.",
+        },
+        502,
+      );
+    }
   }
 
-  if(path==='address-suggestions'&&method==='GET'){
-    const params=new URL(request.url).searchParams,query=params.get('q')?.trim()||'',latitudeText=params.get('latitude'),longitudeText=params.get('longitude'),latitude=latitudeText===null?NaN:Number(latitudeText),longitude=longitudeText===null?NaN:Number(longitudeText);
-    if(query.length<3)return json({suggestions:[]});
-    return json({suggestions:await addressSuggestions(query.slice(0,120),Number.isFinite(latitude)&&Number.isFinite(longitude)?{latitude,longitude}:undefined)});
+  if (path === "address-suggestions" && method === "GET") {
+    const params = new URL(request.url).searchParams,
+      query = params.get("q")?.trim() || "",
+      latitudeText = params.get("latitude"),
+      longitudeText = params.get("longitude"),
+      latitude = latitudeText === null ? NaN : Number(latitudeText),
+      longitude = longitudeText === null ? NaN : Number(longitudeText);
+    if (query.length < 3) return json({ suggestions: [] });
+    return json({
+      suggestions: await addressSuggestions(query.slice(0, 120), Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : undefined),
+    });
   }
 
-  if(path==='vehicle-catalog'&&method==='GET'){
-    const params=new URL(request.url).searchParams;
-    return json(await vehicleCatalog(params.get('year'),params.get('make')));
+  if (path === "vehicle-catalog" && method === "GET") {
+    const params = new URL(request.url).searchParams;
+    return json(await vehicleCatalog(params.get("year"), params.get("make")));
   }
 
-  if(path==='navigation'&&method==='GET'){
-    const [places,routes]=await Promise.all([
-      env.DB.prepare('SELECT * FROM saved_places WHERE user_id=? ORDER BY is_favorite DESC,created_at DESC').bind(user.id).all(),
-      env.DB.prepare('SELECT id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,stops_json,created_at FROM saved_routes WHERE user_id=? ORDER BY created_at DESC').bind(user.id).all(),
+  if (path === "navigation" && method === "GET") {
+    const [places, routes] = await Promise.all([env.DB.prepare("SELECT * FROM saved_places WHERE user_id=? ORDER BY is_favorite DESC,created_at DESC").bind(user.id).all(), env.DB.prepare("SELECT id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,stops_json,created_at FROM saved_routes WHERE user_id=? ORDER BY created_at DESC").bind(user.id).all()]);
+    return json({
+      places: places.results,
+      routes: routes.results.map((row: any) => ({
+        ...row,
+        coordinates: JSON.parse(row.coordinates_json || "[]"),
+        stops: JSON.parse(row.stops_json || "[]"),
+      })),
+    });
+  }
+
+  if (path === "drives/summary" && method === "GET") {
+    const sessionId = new URL(request.url).searchParams.get("sessionId")?.slice(0, 80) || "";
+    if (!sessionId) return json({ error: "Drive session is required." }, 400);
+    const [trace, week] = await Promise.all([
+      env.DB.prepare("SELECT latitude,longitude,speed_kph,captured_at FROM drive_trace_points WHERE user_id=? AND session_id=? ORDER BY captured_at").bind(user.id, sessionId).all<{
+        latitude: number;
+        longitude: number;
+        speed_kph: number;
+        captured_at: string;
+      }>(),
+      env.DB.prepare("SELECT MAX(speed_kph) top_speed FROM drive_trace_points WHERE user_id=? AND captured_at>=datetime('now','-7 days')").bind(user.id).first<{ top_speed: number | null }>(),
     ]);
-    return json({places:places.results,routes:routes.results.map((row:any)=>({...row,coordinates:JSON.parse(row.coordinates_json||'[]'),stops:JSON.parse(row.stops_json||'[]')}))});
+    const rows = trace.results;
+    let distanceKm = 0;
+    for (let index = 1; index < rows.length; index += 1) distanceKm += Math.min(0.5, distanceMeters(rows[index - 1].latitude, rows[index - 1].longitude, rows[index].latitude, rows[index].longitude) / 1000);
+    const startedAt = rows[0]?.captured_at || null,
+      endedAt = rows[rows.length - 1]?.captured_at || null,
+      durationSeconds = startedAt && endedAt ? Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1000)) : 0,
+      maxSpeedKph = Math.max(0, ...rows.map((row) => Number(row.speed_kph) || 0));
+    return json({
+      sessionId,
+      startedAt,
+      endedAt,
+      durationSeconds,
+      distanceKm,
+      maxSpeedKph,
+      averageSpeedKph: durationSeconds ? distanceKm / (durationSeconds / 3600) : 0,
+      points: rows.map((row) => ({
+        latitude: Number(row.latitude),
+        longitude: Number(row.longitude),
+      })),
+      weeklyTopSpeedKph: Math.max(Number(week?.top_speed) || 0, maxSpeedKph),
+    });
   }
 
-  if(path==='drives/summary'&&method==='GET'){
-    const sessionId=new URL(request.url).searchParams.get('sessionId')?.slice(0,80)||'';
-    if(!sessionId)return json({error:'Drive session is required.'},400);
-    const [trace,week]=await Promise.all([
-      env.DB.prepare('SELECT latitude,longitude,speed_kph,captured_at FROM drive_trace_points WHERE user_id=? AND session_id=? ORDER BY captured_at').bind(user.id,sessionId).all<{latitude:number;longitude:number;speed_kph:number;captured_at:string}>(),
-      env.DB.prepare("SELECT MAX(speed_kph) top_speed FROM drive_trace_points WHERE user_id=? AND captured_at>=datetime('now','-7 days')").bind(user.id).first<{top_speed:number|null}>(),
-    ]);
-    const rows=trace.results;let distanceKm=0;
-    for(let index=1;index<rows.length;index+=1)distanceKm+=Math.min(.5,distanceMeters(rows[index-1].latitude,rows[index-1].longitude,rows[index].latitude,rows[index].longitude)/1000);
-    const startedAt=rows[0]?.captured_at||null,endedAt=rows[rows.length-1]?.captured_at||null,durationSeconds=startedAt&&endedAt?Math.max(0,Math.round((Date.parse(endedAt)-Date.parse(startedAt))/1000)):0,maxSpeedKph=Math.max(0,...rows.map(row=>Number(row.speed_kph)||0));
-    return json({sessionId,startedAt,endedAt,durationSeconds,distanceKm,maxSpeedKph,averageSpeedKph:durationSeconds?distanceKm/(durationSeconds/3600):0,points:rows.map(row=>({latitude:Number(row.latitude),longitude:Number(row.longitude)})),weeklyTopSpeedKph:Math.max(Number(week?.top_speed)||0,maxSpeedKph)});
+  if (path === "places" && method === "POST") {
+    const body = await request.json<{
+      label?: string;
+      locationName?: string;
+      latitude?: number;
+      longitude?: number;
+      isFavorite?: boolean;
+    }>();
+    if (!body.label?.trim() || !body.locationName?.trim() || !Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) return json({ error: "A label and valid location are required." }, 400);
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO saved_places(id,user_id,label,location_name,latitude,longitude,is_favorite) VALUES(?,?,?,?,?,?,?)")
+      .bind(id, user.id, body.label.trim().slice(0, 60), body.locationName.trim().slice(0, 300), body.latitude, body.longitude, body.isFavorite === false ? 0 : 1)
+      .run();
+    return json({ id }, 201);
+  }
+  const deletePlace = path.match(/^places\/([^/]+)$/);
+  if (deletePlace && method === "DELETE") {
+    await env.DB.prepare("DELETE FROM saved_places WHERE id=? AND user_id=?").bind(deletePlace[1], user.id).run();
+    return json({ deleted: true });
+  }
+  if (deletePlace && method === "PUT") {
+    const body = await request.json<{ label?: string }>();
+    const label = body.label?.trim();
+    if (!label) return json({ error: "A custom nickname is required." }, 400);
+    await env.DB.prepare("UPDATE saved_places SET label=? WHERE id=? AND user_id=?").bind(label.slice(0, 60), deletePlace[1], user.id).run();
+    return json({ updated: true });
   }
 
-  if(path==='places'&&method==='POST'){
-    const body=await request.json<{label?:string;locationName?:string;latitude?:number;longitude?:number;isFavorite?:boolean}>();
-    if(!body.label?.trim()||!body.locationName?.trim()||!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude))return json({error:'A label and valid location are required.'},400);
-    const id=crypto.randomUUID();
-    await env.DB.prepare('INSERT INTO saved_places(id,user_id,label,location_name,latitude,longitude,is_favorite) VALUES(?,?,?,?,?,?,?)').bind(id,user.id,body.label.trim().slice(0,60),body.locationName.trim().slice(0,300),body.latitude,body.longitude,body.isFavorite===false?0:1).run();
-    return json({id},201);
+  if (path === "routes/save" && method === "POST") {
+    const body = await request.json<{
+      name?: string;
+      route?: {
+        destination: string;
+        destinationLatitude: number;
+        destinationLongitude: number;
+        distanceKm: number;
+        durationMinutes: number;
+        coordinates: Array<{ latitude: number; longitude: number }>;
+        stops?: Array<{ name: string; latitude: number; longitude: number }>;
+      };
+    }>();
+    const route = body.route;
+    if (!route?.destination || !Number.isFinite(route.destinationLatitude) || !Number.isFinite(route.destinationLongitude) || !Array.isArray(route.coordinates) || route.coordinates.length < 2) return json({ error: "Create a route before saving it." }, 400);
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO saved_routes(id,user_id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,stops_json) VALUES(?,?,?,?,?,?,?,?,?,?)")
+      .bind(id, user.id, (body.name || route.destination).trim().slice(0, 80), route.destination.slice(0, 300), route.destinationLatitude, route.destinationLongitude, route.distanceKm, route.durationMinutes, JSON.stringify(route.coordinates), JSON.stringify(route.stops || []))
+      .run();
+    return json({ id }, 201);
   }
-  const deletePlace=path.match(/^places\/([^/]+)$/);
-  if(deletePlace&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_places WHERE id=? AND user_id=?').bind(deletePlace[1],user.id).run();return json({deleted:true});}
-  if(deletePlace&&method==='PUT'){const body=await request.json<{label?:string}>();const label=body.label?.trim();if(!label)return json({error:'A custom nickname is required.'},400);await env.DB.prepare('UPDATE saved_places SET label=? WHERE id=? AND user_id=?').bind(label.slice(0,60),deletePlace[1],user.id).run();return json({updated:true});}
-
-  if(path==='routes/save'&&method==='POST'){
-    const body=await request.json<{name?:string;route?:{destination:string;destinationLatitude:number;destinationLongitude:number;distanceKm:number;durationMinutes:number;coordinates:Array<{latitude:number;longitude:number}>;stops?:Array<{name:string;latitude:number;longitude:number}>}}>();
-    const route=body.route;
-    if(!route?.destination||!Number.isFinite(route.destinationLatitude)||!Number.isFinite(route.destinationLongitude)||!Array.isArray(route.coordinates)||route.coordinates.length<2)return json({error:'Create a route before saving it.'},400);
-    const id=crypto.randomUUID();
-    await env.DB.prepare('INSERT INTO saved_routes(id,user_id,name,destination_name,destination_latitude,destination_longitude,distance_km,duration_minutes,coordinates_json,stops_json) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id,user.id,(body.name||route.destination).trim().slice(0,80),route.destination.slice(0,300),route.destinationLatitude,route.destinationLongitude,route.distanceKm,route.durationMinutes,JSON.stringify(route.coordinates),JSON.stringify(route.stops||[])).run();
-    return json({id},201);
+  const deleteRoute = path.match(/^routes\/([^/]+)$/);
+  if (deleteRoute && method === "DELETE") {
+    await env.DB.prepare("DELETE FROM saved_routes WHERE id=? AND user_id=?").bind(deleteRoute[1], user.id).run();
+    return json({ deleted: true });
   }
-  const deleteRoute=path.match(/^routes\/([^/]+)$/);
-  if(deleteRoute&&method==='DELETE'){await env.DB.prepare('DELETE FROM saved_routes WHERE id=? AND user_id=?').bind(deleteRoute[1],user.id).run();return json({deleted:true});}
-  if(deleteRoute&&method==='PUT'){const body=await request.json<{name?:string}>();const name=body.name?.trim();if(!name)return json({error:'A route name is required.'},400);await env.DB.prepare('UPDATE saved_routes SET name=? WHERE id=? AND user_id=?').bind(name.slice(0,80),deleteRoute[1],user.id).run();return json({updated:true});}
-
-  if (path === 'routes' && method === 'POST') {
-    const body=await request.json<{origin?:{latitude:number;longitude:number};destination?:string;target?:{latitude:number;longitude:number};stops?:Array<{name?:string;latitude?:number;longitude?:number}>}>();// Exact coordinates are used for pins and queued route stops.
-    const validCoordinate=(point:{latitude?:number;longitude?:number}|undefined)=>Boolean(point&&Number.isFinite(point.latitude)&&Number.isFinite(point.longitude)&&Math.abs(Number(point.latitude))<=90&&Math.abs(Number(point.longitude))<=180);
-    if(!validCoordinate(body.origin)) return json({error:'A valid current location is required.'},400);
-    const requested=body.stops||[];let stops:Array<{name:string;latitude:number;longitude:number}>=[];
-    if(requested.length){stops=requested.filter(stop=>stop.name?.trim()&&validCoordinate(stop)).map(stop=>({name:String(stop.name).slice(0,300),latitude:Number(stop.latitude),longitude:Number(stop.longitude)}));if(stops.length!==requested.length)return json({error:'Could not resolve this stop. Choose another result.'},400);}
-    else {if(!body.destination?.trim())return json({error:'Add at least one route stop.'},400);const target=validCoordinate(body.target)?{latitude:Number(body.target!.latitude),longitude:Number(body.target!.longitude),name:body.destination.trim()}:await geocode(body.destination,body.origin);if(!target)return json({error:'Destination not found.'},404);stops=[target];}
-    const target=stops[stops.length-1],coordinates:Array<{latitude:number;longitude:number}>=[];let distance=0,duration=0,start=body.origin;
-    const steps:Array<{instruction:string;name:string;distanceM:number;durationS:number;latitude:number;longitude:number;legIndex:number}>=[];
-    for(let index=0;index<stops.length;index+=20){const segmentStops=stops.slice(index,index+20),routePath=[start,...segmentStops].map(point=>`${point.longitude},${point.latitude}`).join(';'),routed=await osrmRoute(routePath),segment=routed.segment;if(!segment)return json({error:routed.status===400?'No drivable route was found for this stop order.':'Route providers are temporarily unavailable. Retry in a moment.'},routed.status===400?400:502);distance+=segment.distance;duration+=segment.duration;const points=segment.geometry.coordinates.map(([longitude,latitude]:number[])=>({latitude,longitude}));coordinates.push(...(coordinates.length?points.slice(1):points));for(const [legOffset,leg] of (segment.legs||[]).entries())for(const step of leg.steps||[]){const maneuver=step.maneuver||{},type=String(maneuver.type||'continue'),modifier=String(maneuver.modifier||'').replace('_',' '),road=step.name||step.ref||'';const verb=type==='turn'?`Turn ${modifier||'ahead'}`:type==='arrive'?'Arrive at destination':type==='roundabout'?`At roundabout, take exit ${maneuver.exit||''}`:type==='merge'?`Merge ${modifier}`:type==='on ramp'?'Take entrance':type==='off ramp'?'Take exit':type==='continue'?'Continue straight':`${type} ${modifier}`;steps.push({instruction:`${verb}${road?` onto ${road}`:''}`.trim(),name:road||'UNNAMED ROAD',distanceM:Number(step.distance)||0,durationS:Number(step.duration)||0,latitude:Number(maneuver.location?.[1]),longitude:Number(maneuver.location?.[0]),legIndex:index+legOffset});}start=segmentStops[segmentStops.length-1];}
-    return json({destination:target,stops,distanceKm:distance/1000,durationMinutes:duration/60,coordinates,steps});
+  if (deleteRoute && method === "PUT") {
+    const body = await request.json<{ name?: string }>();
+    const name = body.name?.trim();
+    if (!name) return json({ error: "A route name is required." }, 400);
+    await env.DB.prepare("UPDATE saved_routes SET name=? WHERE id=? AND user_id=?").bind(name.slice(0, 80), deleteRoute[1], user.id).run();
+    return json({ updated: true });
   }
 
-  if(path==='route-places'&&method==='POST'){
-    const body=await request.json<{category?:string;coordinates?:Array<{latitude:number;longitude:number}>}>();const category=body.category||'fuel',coordinates=(body.coordinates||[]).filter(point=>Number.isFinite(point.latitude)&&Number.isFinite(point.longitude));if(coordinates.length<2)return json({error:'Create a route before searching along it.'},400);
-    const selectors:Record<string,string>={fuel:'["amenity"="fuel"]',food:'["amenity"~"^(restaurant|fast_food|cafe)$"]',parking:'["amenity"="parking"]',service:'["shop"~"^(car_repair|car_parts|tyres)$"]'};if(!selectors[category])return json({error:'Unsupported stop category.'},400);
-    const sampleIndexes=[.2,.5,.8].map(ratio=>Math.min(coordinates.length-1,Math.floor((coordinates.length-1)*ratio)));const clauses=sampleIndexes.map(index=>`nwr${selectors[category]}(around:6000,${coordinates[index].latitude},${coordinates[index].longitude});`).join('');const query=`[out:json][timeout:15];(${clauses});out center 30;`;
-    const response=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':'ApexUGR/1.0 (https://apex-ugr.pages.dev)'},body:`data=${encodeURIComponent(query)}`});if(!response.ok)return json({error:'Along-route search is temporarily unavailable.'},502);
-    const data=await response.json<{elements?:Array<{id:number;lat?:number;lon?:number;center?:{lat:number;lon:number};tags?:Record<string,string>}>}>();const places=(data.elements||[]).map(item=>({id:`osm-${item.id}`,name:item.tags?.name||item.tags?.brand||`${category.toUpperCase()} STOP`,latitude:Number(item.lat??item.center?.lat),longitude:Number(item.lon??item.center?.lon),type:category})).filter(item=>Number.isFinite(item.latitude)&&Number.isFinite(item.longitude));const unique=new Map<string,typeof places[number]>();for(const place of places){const key=`${place.name}-${place.latitude.toFixed(4)}-${place.longitude.toFixed(4)}`;if(!unique.has(key))unique.set(key,place);}return json({places:[...unique.values()].slice(0,20)});
+  if (path === "routes" && method === "POST") {
+    const body = await request.json<{
+      origin?: { latitude: number; longitude: number };
+      destination?: string;
+      target?: { latitude: number; longitude: number };
+      stops?: Array<{ name?: string; latitude?: number; longitude?: number }>;
+    }>(); // Exact coordinates are used for pins and queued route stops.
+    const validCoordinate = (point: { latitude?: number; longitude?: number } | undefined) => Boolean(point && Number.isFinite(point.latitude) && Number.isFinite(point.longitude) && Math.abs(Number(point.latitude)) <= 90 && Math.abs(Number(point.longitude)) <= 180);
+    if (!validCoordinate(body.origin)) return json({ error: "A valid current location is required." }, 400);
+    const requested = body.stops || [];
+    let stops: Array<{ name: string; latitude: number; longitude: number }> = [];
+    if (requested.length) {
+      stops = requested
+        .filter((stop) => stop.name?.trim() && validCoordinate(stop))
+        .map((stop) => ({
+          name: String(stop.name).slice(0, 300),
+          latitude: Number(stop.latitude),
+          longitude: Number(stop.longitude),
+        }));
+      if (stops.length !== requested.length) return json({ error: "Could not resolve this stop. Choose another result." }, 400);
+    } else {
+      if (!body.destination?.trim()) return json({ error: "Add at least one route stop." }, 400);
+      const target = validCoordinate(body.target)
+        ? {
+            latitude: Number(body.target!.latitude),
+            longitude: Number(body.target!.longitude),
+            name: body.destination.trim(),
+          }
+        : await geocode(body.destination, body.origin);
+      if (!target) return json({ error: "Destination not found." }, 404);
+      stops = [target];
+    }
+    const target = stops[stops.length - 1],
+      coordinates: Array<{ latitude: number; longitude: number }> = [];
+    let distance = 0,
+      duration = 0,
+      start = body.origin;
+    const steps: Array<{
+      instruction: string;
+      name: string;
+      distanceM: number;
+      durationS: number;
+      latitude: number;
+      longitude: number;
+      legIndex: number;
+    }> = [];
+    for (let index = 0; index < stops.length; index += 20) {
+      const segmentStops = stops.slice(index, index + 20),
+        routePath = [start, ...segmentStops].map((point) => `${point.longitude},${point.latitude}`).join(";"),
+        routed = await osrmRoute(routePath),
+        segment = routed.segment;
+      if (!segment)
+        return json(
+          {
+            error: routed.status === 400 ? "No drivable route was found for this stop order." : "Route providers are temporarily unavailable. Retry in a moment.",
+          },
+          routed.status === 400 ? 400 : 502,
+        );
+      distance += segment.distance;
+      duration += segment.duration;
+      const points = segment.geometry.coordinates.map(([longitude, latitude]: number[]) => ({ latitude, longitude }));
+      coordinates.push(...(coordinates.length ? points.slice(1) : points));
+      for (const [legOffset, leg] of (segment.legs || []).entries())
+        for (const step of leg.steps || []) {
+          const maneuver = step.maneuver || {},
+            type = String(maneuver.type || "continue"),
+            modifier = String(maneuver.modifier || "").replace("_", " "),
+            road = step.name || step.ref || "";
+          const verb = type === "turn" ? `Turn ${modifier || "ahead"}` : type === "arrive" ? "Arrive at destination" : type === "roundabout" ? `At roundabout, take exit ${maneuver.exit || ""}` : type === "merge" ? `Merge ${modifier}` : type === "on ramp" ? "Take entrance" : type === "off ramp" ? "Take exit" : type === "continue" ? "Continue straight" : `${type} ${modifier}`;
+          steps.push({
+            instruction: `${verb}${road ? ` onto ${road}` : ""}`.trim(),
+            name: road || "UNNAMED ROAD",
+            distanceM: Number(step.distance) || 0,
+            durationS: Number(step.duration) || 0,
+            latitude: Number(maneuver.location?.[1]),
+            longitude: Number(maneuver.location?.[0]),
+            legIndex: index + legOffset,
+          });
+        }
+      start = segmentStops[segmentStops.length - 1];
+    }
+    return json({
+      destination: target,
+      stops,
+      distanceKm: distance / 1000,
+      durationMinutes: duration / 60,
+      coordinates,
+      steps,
+    });
   }
 
+  if (path === "route-places" && method === "POST") {
+    const body = await request.json<{
+      category?: string;
+      coordinates?: Array<{ latitude: number; longitude: number }>;
+    }>();
+    const category = body.category || "fuel",
+      coordinates = (body.coordinates || []).filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude));
+    if (coordinates.length < 2) return json({ error: "Create a route before searching along it." }, 400);
+    const selectors: Record<string, string> = {
+      fuel: '["amenity"="fuel"]',
+      food: '["amenity"~"^(restaurant|fast_food|cafe)$"]',
+      parking: '["amenity"="parking"]',
+      service: '["shop"~"^(car_repair|car_parts|tyres)$"]',
+    };
+    if (!selectors[category]) return json({ error: "Unsupported stop category." }, 400);
+    const sampleIndexes = [0.2, 0.5, 0.8].map((ratio) => Math.min(coordinates.length - 1, Math.floor((coordinates.length - 1) * ratio)));
+    const clauses = sampleIndexes.map((index) => `nwr${selectors[category]}(around:6000,${coordinates[index].latitude},${coordinates[index].longitude});`).join("");
+    const query = `[out:json][timeout:15];(${clauses});out center 30;`;
+    const response = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "ApexUGR/1.0 (https://apex-ugr.pages.dev)",
+      },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!response.ok) return json({ error: "Along-route search is temporarily unavailable." }, 502);
+    const data = await response.json<{
+      elements?: Array<{
+        id: number;
+        lat?: number;
+        lon?: number;
+        center?: { lat: number; lon: number };
+        tags?: Record<string, string>;
+      }>;
+    }>();
+    const places = (data.elements || [])
+      .map((item) => ({
+        id: `osm-${item.id}`,
+        name: item.tags?.name || item.tags?.brand || `${category.toUpperCase()} STOP`,
+        latitude: Number(item.lat ?? item.center?.lat),
+        longitude: Number(item.lon ?? item.center?.lon),
+        type: category,
+      }))
+      .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude));
+    const unique = new Map<string, (typeof places)[number]>();
+    for (const place of places) {
+      const key = `${place.name}-${place.latitude.toFixed(4)}-${place.longitude.toFixed(4)}`;
+      if (!unique.has(key)) unique.set(key, place);
+    }
+    return json({ places: [...unique.values()].slice(0, 20) });
+  }
 
   // ─── BOUNTY SYSTEM API ENDPOINTS ──────────────────────────────────────────
-  if (path === 'bounty/settings' && method === 'GET') {
-    let settings = await env.DB.prepare('SELECT * FROM bounty_user_settings WHERE user_id=?').bind(user.id).first<any>();
+  if (path === "bounty/settings" && method === "GET") {
+    let settings = await env.DB.prepare("SELECT * FROM bounty_user_settings WHERE user_id=?").bind(user.id).first<any>();
     if (!settings) {
       settings = {
         user_id: user.id,
@@ -941,28 +2311,35 @@ async function handle(request: Request, env: Env, path: string) {
         notifications_enabled: 1,
         show_public_photo: 1,
         allow_most_wanted: 1,
-        agreement_version: 'v1.0',
+        agreement_version: "v1.0",
         agreed_at: null,
         cooldown_until: null,
       };
     }
-    return json({ settings: {
-      userId: user.id,
-      bountyModeEnabled: Boolean(settings.bounty_mode_enabled),
-      notificationsEnabled: Boolean(settings.notifications_enabled),
-      showPublicPhoto: Boolean(settings.show_public_photo),
-      allowMostWanted: Boolean(settings.allow_most_wanted),
-      agreementVersion: settings.agreement_version,
-      agreedAt: settings.agreed_at,
-      cooldownUntil: settings.cooldown_until,
-    }});
+    return json({
+      settings: {
+        userId: user.id,
+        bountyModeEnabled: Boolean(settings.bounty_mode_enabled),
+        notificationsEnabled: Boolean(settings.notifications_enabled),
+        showPublicPhoto: Boolean(settings.show_public_photo),
+        allowMostWanted: Boolean(settings.allow_most_wanted),
+        agreementVersion: settings.agreement_version,
+        agreedAt: settings.agreed_at,
+        cooldownUntil: settings.cooldown_until,
+      },
+    });
   }
 
-  if (path === 'bounty/settings' && method === 'PUT') {
+  if (path === "bounty/settings" && method === "PUT") {
     const body = await request.json<any>();
     const activeSession = await env.DB.prepare("SELECT id FROM bounty_sessions WHERE target_user_id=? AND status IN ('active','escalating')").bind(user.id).first();
     if (activeSession && !body.bountyModeEnabled) {
-      return json({ error: 'Cannot disable Bounty Mode while locked in an active Bounty session.' }, 409);
+      return json(
+        {
+          error: "Cannot disable Bounty Mode while locked in an active Bounty session.",
+        },
+        409,
+      );
     }
     const enabled = body.bountyModeEnabled ? 1 : 0;
     const notifs = body.notificationsEnabled !== false ? 1 : 0;
@@ -970,7 +2347,8 @@ async function handle(request: Request, env: Env, path: string) {
     const mostWanted = body.allowMostWanted !== false ? 1 : 0;
     const agreedAt = body.agreed ? new Date().toISOString() : null;
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       INSERT INTO bounty_user_settings(user_id, bounty_mode_enabled, notifications_enabled, show_public_photo, allow_most_wanted, agreement_version, agreed_at, updated_at)
       VALUES(?, ?, ?, ?, ?, 'v1.0', ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id) DO UPDATE SET
@@ -980,29 +2358,35 @@ async function handle(request: Request, env: Env, path: string) {
         allow_most_wanted=excluded.allow_most_wanted,
         agreed_at=COALESCE(excluded.agreed_at, bounty_user_settings.agreed_at),
         updated_at=CURRENT_TIMESTAMP
-    `).bind(user.id, enabled, notifs, photo, mostWanted, agreedAt).run();
+    `,
+    )
+      .bind(user.id, enabled, notifs, photo, mostWanted, agreedAt)
+      .run();
 
     return json({ success: true, bountyModeEnabled: Boolean(enabled) });
   }
 
-  if (path === 'bounty/config' && method === 'GET') {
-    const config = await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>() || {};
-    return json({ config: {
-      bountyEnabled: Boolean(config.bounty_enabled ?? 1),
-      roamingEnabled: false,
-      venueEnabled: Boolean(config.venue_enabled ?? 1),
-      stageDurationSeconds: JSON.parse(config.stage_duration_seconds || '{"1": 600, "2": 600, "3": 600, "4": 600, "5": 900}'),
-      stageRewardGc: JSON.parse(config.stage_reward_gc || '{"1": 300, "2": 500, "3": 850, "4": 1200, "5": 2500}'),
-      stageRewardRep: JSON.parse(config.stage_reward_rep || '{"1": 150, "2": 250, "3": 450, "4": 650, "5": 1000}'),
-      claimRadiusMiles: Number(config.claim_radius_miles || 0.5),
-      lockDurationSeconds: Number(config.lock_duration_seconds || 20),
-      cooldownMinutes: Number(config.cooldown_minutes || 30),
-      broadcastRadiusMiles: JSON.parse(config.broadcast_radius_miles || '{"1": 5.0, "2": 8.0, "3": 12.0, "4": 20.0, "5": 50.0}'),
-    }});
+  if (path === "bounty/config" && method === "GET") {
+    const config = (await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>()) || {};
+    return json({
+      config: {
+        bountyEnabled: Boolean(config.bounty_enabled ?? 1),
+        roamingEnabled: false,
+        venueEnabled: Boolean(config.venue_enabled ?? 1),
+        stageDurationSeconds: JSON.parse(config.stage_duration_seconds || '{"1": 600, "2": 600, "3": 600, "4": 600, "5": 900}'),
+        stageRewardGc: JSON.parse(config.stage_reward_gc || '{"1": 300, "2": 500, "3": 850, "4": 1200, "5": 2500}'),
+        stageRewardRep: JSON.parse(config.stage_reward_rep || '{"1": 150, "2": 250, "3": 450, "4": 650, "5": 1000}'),
+        claimRadiusMiles: Number(config.claim_radius_miles || 0.5),
+        lockDurationSeconds: Number(config.lock_duration_seconds || 20),
+        cooldownMinutes: Number(config.cooldown_minutes || 30),
+        broadcastRadiusMiles: JSON.parse(config.broadcast_radius_miles || '{"1": 5.0, "2": 8.0, "3": 12.0, "4": 20.0, "5": 50.0}'),
+      },
+    });
   }
 
-  if (path === 'bounty/most-wanted' && method === 'GET') {
-    const rows = await env.DB.prepare(`
+  if (path === "bounty/most-wanted" && method === "GET") {
+    const rows = await env.DB.prepare(
+      `
       SELECT s.*, u.username, u.tier as target_rank,
              v.year, v.make, v.model, v.color, v.trim, v.photo_url,
              st.show_public_photo
@@ -1015,32 +2399,36 @@ async function handle(request: Request, env: Env, path: string) {
         AND COALESCE(st.allow_most_wanted, 1) = 1
       ORDER BY s.star_level DESC, s.stage_ends_at ASC
       LIMIT 20
-    `).all<any>();
+    `,
+    ).all<any>();
 
-    return json({ mostWanted: rows.results.map((r: any) => ({
-      id: r.id,
-      mode: r.mode,
-      starLevel: r.star_level,
-      targetUsername: r.username,
-      targetRank: r.target_rank,
-      rewardGc: r.reward_gc,
-      rewardRep: r.reward_rep,
-      stageEndsAt: r.stage_ends_at,
-      remainingSeconds: Math.max(0, Math.ceil((Date.parse(r.stage_ends_at) - Date.now()) / 1000)),
-      vehicle: {
-        year: r.year,
-        make: r.make,
-        model: r.model,
-        color: r.color,
-        trim: r.trim,
-        photoUrl: r.show_public_photo ? r.photo_url : null,
-      }
-    })) });
+    return json({
+      mostWanted: rows.results.map((r: any) => ({
+        id: r.id,
+        mode: r.mode,
+        starLevel: r.star_level,
+        targetUsername: r.username,
+        targetRank: r.target_rank,
+        rewardGc: r.reward_gc,
+        rewardRep: r.reward_rep,
+        stageEndsAt: r.stage_ends_at,
+        remainingSeconds: Math.max(0, Math.ceil((Date.parse(r.stage_ends_at) - Date.now()) / 1000)),
+        vehicle: {
+          year: r.year,
+          make: r.make,
+          model: r.model,
+          color: r.color,
+          trim: r.trim,
+          photoUrl: r.show_public_photo ? r.photo_url : null,
+        },
+      })),
+    });
   }
 
-  if (path === 'bounty/active' && method === 'GET') {
+  if (path === "bounty/active" && method === "GET") {
     // Check if user is the target of an active bounty
-    const asTarget = await env.DB.prepare(`
+    const asTarget = await env.DB.prepare(
+      `
       SELECT s.*, u.username, u.tier as target_rank,
              v.year, v.make, v.model, v.color, v.trim, v.photo_url
       FROM bounty_sessions s
@@ -1048,32 +2436,39 @@ async function handle(request: Request, env: Env, path: string) {
       JOIN vehicles v ON v.id = s.target_vehicle_id
       WHERE s.target_user_id=? AND s.status IN ('active', 'escalating')
       LIMIT 1
-    `).bind(user.id).first<any>();
+    `,
+    )
+      .bind(user.id)
+      .first<any>();
 
     if (asTarget) {
-      return json({ role: 'target', session: {
-        id: asTarget.id,
-        mode: asTarget.mode,
-        starLevel: asTarget.star_level,
-        status: asTarget.status,
-        rewardGc: asTarget.reward_gc,
-        rewardRep: asTarget.reward_rep,
-        stageStartedAt: asTarget.stage_started_at,
-        stageEndsAt: asTarget.stage_ends_at,
-        remainingSeconds: Math.max(0, Math.ceil((Date.parse(asTarget.stage_ends_at) - Date.now()) / 1000)),
-        vehicle: {
-          year: asTarget.year,
-          make: asTarget.make,
-          model: asTarget.model,
-          color: asTarget.color,
-          trim: asTarget.trim,
-          photoUrl: asTarget.photo_url,
-        }
-      }});
+      return json({
+        role: "target",
+        session: {
+          id: asTarget.id,
+          mode: asTarget.mode,
+          starLevel: asTarget.star_level,
+          status: asTarget.status,
+          rewardGc: asTarget.reward_gc,
+          rewardRep: asTarget.reward_rep,
+          stageStartedAt: asTarget.stage_started_at,
+          stageEndsAt: asTarget.stage_ends_at,
+          remainingSeconds: Math.max(0, Math.ceil((Date.parse(asTarget.stage_ends_at) - Date.now()) / 1000)),
+          vehicle: {
+            year: asTarget.year,
+            make: asTarget.make,
+            model: asTarget.model,
+            color: asTarget.color,
+            trim: asTarget.trim,
+            photoUrl: asTarget.photo_url,
+          },
+        },
+      });
     }
 
     // Check if user is hunting an active bounty
-    const asHunter = await env.DB.prepare(`
+    const asHunter = await env.DB.prepare(
+      `
       SELECT s.*, p.last_signal_pct, p.proximity_lock_seconds, p.lock_started_at,
              u.username as target_username, u.tier as target_rank,
              v.year, v.make, v.model, v.color, v.trim, v.photo_url,
@@ -1087,84 +2482,94 @@ async function handle(request: Request, env: Env, path: string) {
       LEFT JOIN driver_locations dl ON dl.user_id = s.target_user_id
       WHERE p.user_id=? AND p.status='hunting' AND s.status IN ('active', 'escalating')
       LIMIT 1
-    `).bind(user.id).first<any>();
+    `,
+    )
+      .bind(user.id)
+      .first<any>();
 
     if (asHunter) {
       // Calculate approx distance & direction from hunter's current location
-      const hunterLoc = await env.DB.prepare('SELECT latitude, longitude FROM driver_locations WHERE user_id=?').bind(user.id).first<any>();
-      let distanceMiles: number|null = null;
-      let direction: string|null = null;
+      const hunterLoc = await env.DB.prepare("SELECT latitude, longitude FROM driver_locations WHERE user_id=?").bind(user.id).first<any>();
+      let distanceMiles: number | null = null;
+      let direction: string | null = null;
       if (hunterLoc && asHunter.target_lat && asHunter.target_lng) {
         const meters = distanceMeters(hunterLoc.latitude, hunterLoc.longitude, asHunter.target_lat, asHunter.target_lng);
         distanceMiles = Math.round((meters / 1609.34) * 10) / 10;
         const dLat = asHunter.target_lat - hunterLoc.latitude;
         const dLng = asHunter.target_lng - hunterLoc.longitude;
         const angle = Math.atan2(dLng, dLat) * (180 / Math.PI);
-        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+        const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
         direction = dirs[Math.floor(((angle + 360 + 22.5) % 360) / 45)];
       }
 
-      return json({ role: 'hunter', session: {
-        id: asHunter.id,
-        mode: asHunter.mode,
-        starLevel: asHunter.star_level,
-        status: asHunter.status,
-        rewardGc: asHunter.reward_gc,
-        rewardRep: asHunter.reward_rep,
-        stageStartedAt: asHunter.stage_started_at,
-        stageEndsAt: asHunter.stage_ends_at,
-        remainingSeconds: Math.max(0, Math.ceil((Date.parse(asHunter.stage_ends_at) - Date.now()) / 1000)),
-        targetUsername: asHunter.target_username,
-        targetRank: asHunter.target_rank,
-        approxDistanceMiles: distanceMiles,
-        approxDirection: direction,
-        signalStrengthPct: Number(asHunter.last_signal_pct)||0,
-        proximityLockSeconds: asHunter.proximity_lock_seconds || 0,
-        vehicle: {
-          year: asHunter.year,
-          make: asHunter.make,
-          model: asHunter.model,
-          color: asHunter.color,
-          trim: asHunter.trim,
-          photoUrl: asHunter.show_public_photo ? asHunter.photo_url : null,
-        }
-      }});
+      return json({
+        role: "hunter",
+        session: {
+          id: asHunter.id,
+          mode: asHunter.mode,
+          starLevel: asHunter.star_level,
+          status: asHunter.status,
+          rewardGc: asHunter.reward_gc,
+          rewardRep: asHunter.reward_rep,
+          stageStartedAt: asHunter.stage_started_at,
+          stageEndsAt: asHunter.stage_ends_at,
+          remainingSeconds: Math.max(0, Math.ceil((Date.parse(asHunter.stage_ends_at) - Date.now()) / 1000)),
+          targetUsername: asHunter.target_username,
+          targetRank: asHunter.target_rank,
+          approxDistanceMiles: distanceMiles,
+          approxDirection: direction,
+          signalStrengthPct: Number(asHunter.last_signal_pct) || 0,
+          proximityLockSeconds: asHunter.proximity_lock_seconds || 0,
+          vehicle: {
+            year: asHunter.year,
+            make: asHunter.make,
+            model: asHunter.model,
+            color: asHunter.color,
+            trim: asHunter.trim,
+            photoUrl: asHunter.show_public_photo ? asHunter.photo_url : null,
+          },
+        },
+      });
     }
 
     return json({ role: null, session: null });
   }
 
-  if (path === 'bounty/trigger' && method === 'POST') {
+  if (path === "bounty/trigger" && method === "POST") {
     const body = await request.json<any>();
-    if (body.mode !== 'venue' || !String(body.venueName || '').trim()) {
-      return json({ error: 'Bounty sessions require an authorized venue.' }, 400);
+    if (body.mode !== "venue" || !String(body.venueName || "").trim()) {
+      return json({ error: "Bounty sessions require an authorized venue." }, 400);
     }
-    const mode = 'venue';
-    const requestedStarLevel=Math.max(1,Math.min(5,Number(body.starLevel)||1));
-    const starLevel=user.isDeveloper?requestedStarLevel:1;
+    const mode = "venue";
+    const requestedStarLevel = Math.max(1, Math.min(5, Number(body.starLevel) || 1));
+    const starLevel = user.isDeveloper ? requestedStarLevel : 1;
 
-    const eligibility = await env.DB.prepare(`SELECT s.bounty_mode_enabled,s.agreed_at,s.cooldown_until,l.drive_mode,l.expires_at
-      FROM bounty_user_settings s LEFT JOIN driver_locations l ON l.user_id=s.user_id WHERE s.user_id=?`).bind(user.id).first<any>();
-    if(!eligibility?.bounty_mode_enabled||!eligibility.agreed_at)return json({error:'Enable Bounty Mode and accept the safety agreement first.'},403);
-    if(!eligibility.drive_mode||Date.parse(eligibility.expires_at||'')<=Date.now())return json({error:'Active Driver Mode is required for a Bounty session.'},409);
-    if(eligibility.cooldown_until&&Date.parse(eligibility.cooldown_until)>Date.now())return json({error:'Bounty cooldown is still active.'},409);
+    const eligibility = await env.DB.prepare(
+      `SELECT s.bounty_mode_enabled,s.agreed_at,s.cooldown_until,l.drive_mode,l.expires_at
+      FROM bounty_user_settings s LEFT JOIN driver_locations l ON l.user_id=s.user_id WHERE s.user_id=?`,
+    )
+      .bind(user.id)
+      .first<any>();
+    if (!eligibility?.bounty_mode_enabled || !eligibility.agreed_at) return json({ error: "Enable Bounty Mode and accept the safety agreement first." }, 403);
+    if (!eligibility.drive_mode || Date.parse(eligibility.expires_at || "") <= Date.now()) return json({ error: "Active Driver Mode is required for a Bounty session." }, 409);
+    if (eligibility.cooldown_until && Date.parse(eligibility.cooldown_until) > Date.now()) return json({ error: "Bounty cooldown is still active." }, 409);
 
     // Get active vehicle
-    let vehicle = await env.DB.prepare('SELECT * FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1').bind(user.id).first<any>();
+    let vehicle = await env.DB.prepare("SELECT * FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1").bind(user.id).first<any>();
     if (!vehicle) {
-      const privateVehicleId=`privacy-${user.id}`;
-      await env.DB.prepare(`INSERT OR IGNORE INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,is_active) VALUES(?,?,'PRIVATE SIGNAL',1900,'VEHICLE','UNKNOWN','PRIVATE','UNKNOWN','UNKNOWN',0,'UNKNOWN',0)`).bind(privateVehicleId,user.id).run();
-      vehicle=await env.DB.prepare('SELECT * FROM vehicles WHERE id=?').bind(privateVehicleId).first<any>();
+      const privateVehicleId = `privacy-${user.id}`;
+      await env.DB.prepare(`INSERT OR IGNORE INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,is_active) VALUES(?,?,'PRIVATE SIGNAL',1900,'VEHICLE','UNKNOWN','PRIVATE','UNKNOWN','UNKNOWN',0,'UNKNOWN',0)`).bind(privateVehicleId, user.id).run();
+      vehicle = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(privateVehicleId).first<any>();
     }
 
     // Check existing session
     const active = await env.DB.prepare("SELECT id FROM bounty_sessions WHERE target_user_id=? AND status IN ('active','escalating')").bind(user.id).first();
     if (active) {
-      return json({ error: 'You are already in an active Bounty session.' }, 409);
+      return json({ error: "You are already in an active Bounty session." }, 409);
     }
 
-    const config = await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>() || {};
-    if(!Boolean(config.bounty_enabled??1)||!Boolean(config.venue_enabled??1))return json({error:'Venue Bounty sessions are currently disabled.'},503);
+    const config = (await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>()) || {};
+    if (!Boolean(config.bounty_enabled ?? 1) || !Boolean(config.venue_enabled ?? 1)) return json({ error: "Venue Bounty sessions are currently disabled." }, 503);
     const durations = JSON.parse(config.stage_duration_seconds || '{"1": 600, "2": 600, "3": 600, "4": 600, "5": 900}');
     const rewardsGc = JSON.parse(config.stage_reward_gc || '{"1": 300, "2": 500, "3": 850, "4": 1200, "5": 2500}');
     const rewardsRep = JSON.parse(config.stage_reward_rep || '{"1": 150, "2": 250, "3": 450, "4": 650, "5": 1000}');
@@ -1178,92 +2583,125 @@ async function handle(request: Request, env: Env, path: string) {
     const endsAt = new Date(now.getTime() + durationSec * 1000).toISOString();
 
     await env.DB.batch([
-      env.DB.prepare(`
+      env.DB.prepare(
+        `
         INSERT INTO bounty_sessions(id, mode, venue_name, target_user_id, target_vehicle_id, star_level, status, starts_at, stage_started_at, stage_ends_at, reward_gc, reward_rep)
         VALUES(?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
-      `).bind(id, mode, body.venueName || null, user.id, vehicle.id, starLevel, now.toISOString(), now.toISOString(), endsAt, rewardGc, rewardRep),
-      env.DB.prepare(`
+      `,
+      ).bind(id, mode, body.venueName || null, user.id, vehicle.id, starLevel, now.toISOString(), now.toISOString(), endsAt, rewardGc, rewardRep),
+      env.DB.prepare(
+        `
         INSERT INTO bounty_user_stats(user_id, times_selected) VALUES(?, 1)
         ON CONFLICT(user_id) DO UPDATE SET times_selected = times_selected + 1, updated_at = CURRENT_TIMESTAMP
-      `).bind(user.id),
-      env.DB.prepare(`
+      `,
+      ).bind(user.id),
+      env.DB.prepare(
+        `
         INSERT INTO notifications(id, user_id, type, title, body, data_json)
         VALUES(?, ?, 'bounty_activated', 'BOUNTY ACTIVATED', ?, ?)
-      `).bind(crypto.randomUUID(), user.id, `YOU ARE THE TARGET // SURVIVE FOR ${Math.ceil(durationSec / 60)} MINS`, JSON.stringify({ sessionId: id, starLevel, vehicle: `${vehicle.color} ${vehicle.year} ${vehicle.make} ${vehicle.model}` })),
+      `,
+      ).bind(
+        crypto.randomUUID(),
+        user.id,
+        `YOU ARE THE TARGET // SURVIVE FOR ${Math.ceil(durationSec / 60)} MINS`,
+        JSON.stringify({
+          sessionId: id,
+          starLevel,
+          vehicle: `${vehicle.color} ${vehicle.year} ${vehicle.make} ${vehicle.model}`,
+        }),
+      ),
     ]);
 
-    return json({
-      id,
-      mode,
-      starLevel,
-      rewardGc,
-      rewardRep,
-      startsAt: now.toISOString(),
-      stageEndsAt: endsAt,
-      vehicle: {
-        year: vehicle.year,
-        make: vehicle.make,
-        model: vehicle.model,
-        color: vehicle.color,
-        trim: vehicle.trim,
-        photoUrl: vehicle.photo_url,
-      }
-    }, 201);
+    return json(
+      {
+        id,
+        mode,
+        starLevel,
+        rewardGc,
+        rewardRep,
+        startsAt: now.toISOString(),
+        stageEndsAt: endsAt,
+        vehicle: {
+          year: vehicle.year,
+          make: vehicle.make,
+          model: vehicle.model,
+          color: vehicle.color,
+          trim: vehicle.trim,
+          photoUrl: vehicle.photo_url,
+        },
+      },
+      201,
+    );
   }
 
   const bountyJoin = path.match(/^bounty\/sessions\/([^/]+)\/join$/);
-  if (bountyJoin && method === 'POST') {
+  if (bountyJoin && method === "POST") {
     const sessionId = bountyJoin[1];
     const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=? AND status IN ('active','escalating')").bind(sessionId).first<any>();
-    if (!session) return json({ error: 'Bounty session is no longer active.' }, 404);
-    if (session.target_user_id === user.id) return json({ error: 'You cannot hunt yourself.' }, 400);
+    if (!session) return json({ error: "Bounty session is no longer active." }, 404);
+    if (session.target_user_id === user.id) return json({ error: "You cannot hunt yourself." }, 400);
 
-    const eligibility=await env.DB.prepare(`SELECT s.bounty_mode_enabled,s.agreed_at,l.drive_mode,l.expires_at FROM bounty_user_settings s LEFT JOIN driver_locations l ON l.user_id=s.user_id WHERE s.user_id=?`).bind(user.id).first<any>();
-    if(!eligibility?.bounty_mode_enabled||!eligibility.agreed_at)return json({error:'Enable Bounty Mode and accept the safety agreement before joining.'},403);
-    if(!eligibility.drive_mode||Date.parse(eligibility.expires_at||'')<=Date.now())return json({error:'Active Driver Mode is required to hunt a Bounty.'},409);
-    const vehicle = await env.DB.prepare('SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1').bind(user.id).first<any>();
+    const eligibility = await env.DB.prepare(`SELECT s.bounty_mode_enabled,s.agreed_at,l.drive_mode,l.expires_at FROM bounty_user_settings s LEFT JOIN driver_locations l ON l.user_id=s.user_id WHERE s.user_id=?`).bind(user.id).first<any>();
+    if (!eligibility?.bounty_mode_enabled || !eligibility.agreed_at)
+      return json(
+        {
+          error: "Enable Bounty Mode and accept the safety agreement before joining.",
+        },
+        403,
+      );
+    if (!eligibility.drive_mode || Date.parse(eligibility.expires_at || "") <= Date.now()) return json({ error: "Active Driver Mode is required to hunt a Bounty." }, 409);
+    const vehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1").bind(user.id).first<any>();
 
     await env.DB.batch([
-      env.DB.prepare(`
+      env.DB.prepare(
+        `
         INSERT INTO bounty_participants(session_id, user_id, active_vehicle_id, status)
         VALUES(?, ?, ?, 'hunting')
         ON CONFLICT(session_id, user_id) DO UPDATE SET status='hunting', left_at=NULL
-      `).bind(sessionId, user.id, vehicle?.id || null),
-      env.DB.prepare(`
+      `,
+      ).bind(sessionId, user.id, vehicle?.id || null),
+      env.DB.prepare(
+        `
         INSERT INTO bounty_user_stats(user_id, hunts_joined) VALUES(?, 1)
         ON CONFLICT(user_id) DO UPDATE SET hunts_joined = hunts_joined + 1, updated_at = CURRENT_TIMESTAMP
-      `).bind(user.id)
+      `,
+      ).bind(user.id),
     ]);
 
-    return json({ success: true, sessionId, status: 'hunting' });
+    return json({ success: true, sessionId, status: "hunting" });
   }
 
   const bountyLeave = path.match(/^bounty\/sessions\/([^/]+)\/leave$/);
-  if (bountyLeave && method === 'POST') {
+  if (bountyLeave && method === "POST") {
     const sessionId = bountyLeave[1];
     await env.DB.prepare("UPDATE bounty_participants SET status='left', left_at=CURRENT_TIMESTAMP WHERE session_id=? AND user_id=?").bind(sessionId, user.id).run();
-    return json({ success: true, sessionId, status: 'left' });
+    return json({ success: true, sessionId, status: "left" });
   }
 
   const bountySignal = path.match(/^bounty\/sessions\/([^/]+)\/signal$/);
-  if (bountySignal && method === 'POST') {
+  if (bountySignal && method === "POST") {
     const sessionId = bountySignal[1];
     const body = await request.json<any>();
     const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=? AND status IN ('active','escalating')").bind(sessionId).first<any>();
-    if (!session) return json({ error: 'Session no longer active.' }, 404);
+    if (!session) return json({ error: "Session no longer active." }, 404);
 
     const participant = await env.DB.prepare("SELECT * FROM bounty_participants WHERE session_id=? AND user_id=? AND status='hunting'").bind(sessionId, user.id).first<any>();
-    if(!participant)return json({error:'Join this Bounty before tracking its signal.'},403);
-    const hunterLoc = await env.DB.prepare('SELECT latitude, longitude FROM driver_locations WHERE user_id=? AND drive_mode=1 AND expires_at>?').bind(user.id,new Date().toISOString()).first<any>();
-    const targetLoc = await env.DB.prepare('SELECT latitude, longitude FROM driver_locations WHERE user_id=? AND drive_mode=1 AND expires_at>?').bind(session.target_user_id,new Date().toISOString()).first<any>();
-    if((!hunterLoc||!targetLoc)&&!user.isDeveloper)return json({error:'Both participating drivers need an active location signal.'},409);
-    const config=await env.DB.prepare('SELECT claim_radius_miles,lock_duration_seconds FROM bounty_config WHERE id="default"').first<any>();
-    let distMiles=user.isDeveloper&&Number.isFinite(Number(body.simulatedDistanceMiles))?Number(body.simulatedDistanceMiles):distanceMeters(hunterLoc.latitude,hunterLoc.longitude,targetLoc.latitude,targetLoc.longitude)/1609.34;
-    distMiles=Math.round(distMiles*10)/10;
-    const dLat=(targetLoc?.latitude||0)-(hunterLoc?.latitude||0),dLng=(targetLoc?.longitude||0)-(hunterLoc?.longitude||0),angle=Math.atan2(dLng,dLat)*(180/Math.PI),dirs=['N','NE','E','SE','S','SW','W','NW'];
-    const direction=dirs[Math.floor(((angle+360+22.5)%360)/45)],signalPct=Math.max(10,Math.min(100,Math.round(100-Math.min(1,distMiles/5)*85)));
-    const claimRadius=Number(config?.claim_radius_miles||0.5),lockDuration=Math.max(5,Number(config?.lock_duration_seconds||20));
-    const inRange=distMiles<=claimRadius||(user.isDeveloper&&body.forceInRange===true);
+    if (!participant) return json({ error: "Join this Bounty before tracking its signal." }, 403);
+    const hunterLoc = await env.DB.prepare("SELECT latitude, longitude FROM driver_locations WHERE user_id=? AND drive_mode=1 AND expires_at>?").bind(user.id, new Date().toISOString()).first<any>();
+    const targetLoc = await env.DB.prepare("SELECT latitude, longitude FROM driver_locations WHERE user_id=? AND drive_mode=1 AND expires_at>?").bind(session.target_user_id, new Date().toISOString()).first<any>();
+    if ((!hunterLoc || !targetLoc) && !user.isDeveloper) return json({ error: "Both participating drivers need an active location signal." }, 409);
+    const config = await env.DB.prepare('SELECT claim_radius_miles,lock_duration_seconds FROM bounty_config WHERE id="default"').first<any>();
+    let distMiles = user.isDeveloper && Number.isFinite(Number(body.simulatedDistanceMiles)) ? Number(body.simulatedDistanceMiles) : distanceMeters(hunterLoc.latitude, hunterLoc.longitude, targetLoc.latitude, targetLoc.longitude) / 1609.34;
+    distMiles = Math.round(distMiles * 10) / 10;
+    const dLat = (targetLoc?.latitude || 0) - (hunterLoc?.latitude || 0),
+      dLng = (targetLoc?.longitude || 0) - (hunterLoc?.longitude || 0),
+      angle = Math.atan2(dLng, dLat) * (180 / Math.PI),
+      dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    const direction = dirs[Math.floor(((angle + 360 + 22.5) % 360) / 45)],
+      signalPct = Math.max(10, Math.min(100, Math.round(100 - Math.min(1, distMiles / 5) * 85)));
+    const claimRadius = Number(config?.claim_radius_miles || 0.5),
+      lockDuration = Math.max(5, Number(config?.lock_duration_seconds || 20));
+    const inRange = distMiles <= claimRadius || (user.isDeveloper && body.forceInRange === true);
     let lockSec = participant?.proximity_lock_seconds || 0;
     let lockStartedAt = participant?.lock_started_at;
 
@@ -1276,11 +2714,15 @@ async function handle(request: Request, env: Env, path: string) {
       lockStartedAt = null;
     }
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       UPDATE bounty_participants
       SET last_signal_pct=?, proximity_lock_seconds=?, lock_started_at=?
       WHERE session_id=? AND user_id=?
-    `).bind(signalPct, lockSec, lockStartedAt, sessionId, user.id).run();
+    `,
+    )
+      .bind(signalPct, lockSec, lockStartedAt, sessionId, user.id)
+      .run();
 
     return json({
       sessionId,
@@ -1294,15 +2736,16 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   const bountyClaim = path.match(/^bounty\/sessions\/([^/]+)\/claim$/);
-  if (bountyClaim && method === 'POST') {
+  if (bountyClaim && method === "POST") {
     const sessionId = bountyClaim[1];
-    const session = await env.DB.prepare('SELECT * FROM bounty_sessions WHERE id=?').bind(sessionId).first<any>();
-    if (!session) return json({ error: 'Bounty session was not found.' }, 404);
-    if(!['active','escalating'].includes(session.status))return json({error:'Bounty was already claimed or closed.'},409);
-    if (session.target_user_id === user.id) return json({ error: 'Target user cannot claim their own bounty.' }, 400);
-    const config=await env.DB.prepare('SELECT lock_duration_seconds,cooldown_minutes FROM bounty_config WHERE id="default"').first<any>(),requiredLock=Math.max(5,Number(config?.lock_duration_seconds||20));
-    const participant=await env.DB.prepare("SELECT proximity_lock_seconds FROM bounty_participants WHERE session_id=? AND user_id=? AND status='hunting'").bind(sessionId,user.id).first<{proximity_lock_seconds:number}>();
-    if(!participant||Number(participant.proximity_lock_seconds)<requiredLock)return json({error:'Target proximity has not been server verified.'},409);
+    const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=?").bind(sessionId).first<any>();
+    if (!session) return json({ error: "Bounty session was not found." }, 404);
+    if (!["active", "escalating"].includes(session.status)) return json({ error: "Bounty was already claimed or closed." }, 409);
+    if (session.target_user_id === user.id) return json({ error: "Target user cannot claim their own bounty." }, 400);
+    const config = await env.DB.prepare('SELECT lock_duration_seconds,cooldown_minutes FROM bounty_config WHERE id="default"').first<any>(),
+      requiredLock = Math.max(5, Number(config?.lock_duration_seconds || 20));
+    const participant = await env.DB.prepare("SELECT proximity_lock_seconds FROM bounty_participants WHERE session_id=? AND user_id=? AND status='hunting'").bind(sessionId, user.id).first<{ proximity_lock_seconds: number }>();
+    if (!participant || Number(participant.proximity_lock_seconds) < requiredLock) return json({ error: "Target proximity has not been server verified." }, 409);
 
     const now = new Date().toISOString();
     const rewardGc = Number(session.reward_gc || 300);
@@ -1311,18 +2754,19 @@ async function handle(request: Request, env: Env, path: string) {
     // Atomically close session as claimed
     const updateSession = await env.DB.prepare("UPDATE bounty_sessions SET status='claimed', claimed_by_user_id=?, claimed_at=?, completed_at=? WHERE id=? AND status IN ('active','escalating')").bind(user.id, now, now, sessionId).run();
     if (!updateSession.meta.changes) {
-      return json({ error: 'Bounty was already claimed or closed.' }, 409);
+      return json({ error: "Bounty was already claimed or closed." }, 409);
     }
 
     // Award GC to Hunter via Ghost Ledger
-    await grantGhostCredits(user.id, rewardGc, 'BOUNTY CLAIM', sessionId, env);
+    await grantGhostCredits(user.id, rewardGc, "BOUNTY CLAIM", sessionId, env);
 
     // Award REP & update Hunter stats
     await env.DB.batch([
-      env.DB.prepare('UPDATE users SET points = points + ? WHERE id=?').bind(rewardRep, user.id),
-      env.DB.prepare("UPDATE bounty_participants SET status='claimed' WHERE session_id=? AND user_id=?").bind(sessionId,user.id),
-      env.DB.prepare("UPDATE bounty_user_settings SET cooldown_until=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(`+${Math.max(1,Number(config?.cooldown_minutes||30))} minutes`,session.target_user_id),
-      env.DB.prepare(`
+      env.DB.prepare("UPDATE users SET points = points + ? WHERE id=?").bind(rewardRep, user.id),
+      env.DB.prepare("UPDATE bounty_participants SET status='claimed' WHERE session_id=? AND user_id=?").bind(sessionId, user.id),
+      env.DB.prepare("UPDATE bounty_user_settings SET cooldown_until=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(`+${Math.max(1, Number(config?.cooldown_minutes || 30))} minutes`, session.target_user_id),
+      env.DB.prepare(
+        `
         INSERT INTO bounty_user_stats(user_id, successful_claims, highest_star_claimed, current_hunter_streak, best_hunter_streak, five_star_claims, hunter_gc_earned, hunter_rep_earned)
         VALUES(?, 1, ?, 1, 1, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
@@ -1334,17 +2778,32 @@ async function handle(request: Request, env: Env, path: string) {
           hunter_gc_earned = hunter_gc_earned + excluded.hunter_gc_earned,
           hunter_rep_earned = hunter_rep_earned + excluded.hunter_rep_earned,
           updated_at = CURRENT_TIMESTAMP
-      `).bind(user.id, session.star_level, session.star_level === 5 ? 1 : 0, rewardGc, rewardRep),
+      `,
+      ).bind(user.id, session.star_level, session.star_level === 5 ? 1 : 0, rewardGc, rewardRep),
       env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id, badge_id) VALUES(?, 'bounty-hunter')").bind(user.id),
       ...(session.star_level === 5 ? [env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id, badge_id) VALUES(?, 'five-star-hunter')").bind(user.id)] : []),
-      env.DB.prepare(`
+      env.DB.prepare(
+        `
         INSERT INTO notifications(id, user_id, type, title, body, data_json)
         VALUES(?, ?, 'bounty_claimed', 'BOUNTY CLAIMED!', ?, ?)
-      `).bind(crypto.randomUUID(), user.id, `+${rewardGc} GC // +${rewardRep} REP`, JSON.stringify({ sessionId, rewardGc, rewardRep, stars: session.star_level })),
-      env.DB.prepare(`
+      `,
+      ).bind(
+        crypto.randomUUID(),
+        user.id,
+        `+${rewardGc} GC // +${rewardRep} REP`,
+        JSON.stringify({
+          sessionId,
+          rewardGc,
+          rewardRep,
+          stars: session.star_level,
+        }),
+      ),
+      env.DB.prepare(
+        `
         INSERT INTO notifications(id, user_id, type, title, body, data_json)
         VALUES(?, ?, 'bounty_claimed', 'BOUNTY CLAIMED BY HUNTER', ?, ?)
-      `).bind(crypto.randomUUID(), session.target_user_id, `A hunter claimed your ${session.star_level}-Star Bounty.`, JSON.stringify({ sessionId, hunterId: user.id })),
+      `,
+      ).bind(crypto.randomUUID(), session.target_user_id, `A hunter claimed your ${session.star_level}-Star Bounty.`, JSON.stringify({ sessionId, hunterId: user.id })),
     ]);
 
     return json({
@@ -1352,19 +2811,25 @@ async function handle(request: Request, env: Env, path: string) {
       rewardGc,
       rewardRep,
       starLevel: session.star_level,
-      badgeEarned: session.star_level === 5 ? 'FIVE-STAR HUNTER' : 'BOUNTY HUNTER',
+      badgeEarned: session.star_level === 5 ? "FIVE-STAR HUNTER" : "BOUNTY HUNTER",
     });
   }
 
   const bountyProgress = path.match(/^bounty\/sessions\/([^/]+)\/progress$/);
-  if (bountyProgress && method === 'POST') {
+  if (bountyProgress && method === "POST") {
     const sessionId = bountyProgress[1];
-    const session = await env.DB.prepare('SELECT * FROM bounty_sessions WHERE id=?').bind(sessionId).first<any>();
-    if (!session) return json({ error: 'Bounty session was not found.' }, 404);
-    if(!['active','escalating'].includes(session.status))return json({error:'Bounty session is already complete.'},409);
+    const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=?").bind(sessionId).first<any>();
+    if (!session) return json({ error: "Bounty session was not found." }, 404);
+    if (!["active", "escalating"].includes(session.status)) return json({ error: "Bounty session is already complete." }, 409);
 
     const isTarget = session.target_user_id === user.id;
-    if(!isTarget)return json({error:'Only the active Bounty target can advance the survival timer.'},403);
+    if (!isTarget)
+      return json(
+        {
+          error: "Only the active Bounty target can advance the survival timer.",
+        },
+        403,
+      );
     const now = new Date();
     const stageEnded = now.getTime() >= Date.parse(session.stage_ends_at);
 
@@ -1380,7 +2845,7 @@ async function handle(request: Request, env: Env, path: string) {
     if (session.star_level < 5) {
       // Escalate to next star level
       const nextStar = session.star_level + 1;
-      const config = await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>() || {};
+      const config = (await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').bind().first<any>()) || {};
       const durations = JSON.parse(config.stage_duration_seconds || '{"1": 600, "2": 600, "3": 600, "4": 600, "5": 900}');
       const rewardsGc = JSON.parse(config.stage_reward_gc || '{"1": 300, "2": 500, "3": 850, "4": 1200, "5": 2500}');
       const rewardsRep = JSON.parse(config.stage_reward_rep || '{"1": 150, "2": 250, "3": 450, "4": 650, "5": 1000}');
@@ -1391,20 +2856,24 @@ async function handle(request: Request, env: Env, path: string) {
       const endsAt = new Date(now.getTime() + durationSec * 1000).toISOString();
 
       await env.DB.batch([
-        env.DB.prepare(`
+        env.DB.prepare(
+          `
           UPDATE bounty_sessions
           SET star_level=?, status='escalating', stage_started_at=?, stage_ends_at=?, reward_gc=?, reward_rep=?,
               escalation_history = json_insert(escalation_history, '$[#]', json_object('star_level', ?, 'reached_at', ?, 'reward_gc', ?, 'reward_rep', ?))
           WHERE id=?
-        `).bind(nextStar, now.toISOString(), endsAt, rewardGc, rewardRep, nextStar, now.toISOString(), rewardGc, rewardRep, sessionId),
-        env.DB.prepare(`
+        `,
+        ).bind(nextStar, now.toISOString(), endsAt, rewardGc, rewardRep, nextStar, now.toISOString(), rewardGc, rewardRep, sessionId),
+        env.DB.prepare(
+          `
           INSERT INTO notifications(id, user_id, type, title, body, data_json)
           VALUES(?, ?, 'bounty_escalated', 'BOUNTY ESCALATED!', ?, ?)
-        `).bind(crypto.randomUUID(), session.target_user_id, `YOU REACHED ★${nextStar}! SURVIVE FOR NEXT STAGE REWARD.`, JSON.stringify({ sessionId, starLevel: nextStar })),
+        `,
+        ).bind(crypto.randomUUID(), session.target_user_id, `YOU REACHED ★${nextStar}! SURVIVE FOR NEXT STAGE REWARD.`, JSON.stringify({ sessionId, starLevel: nextStar })),
       ]);
 
       return json({
-        status: 'escalated',
+        status: "escalated",
         starLevel: nextStar,
         rewardGc,
         rewardRep,
@@ -1416,20 +2885,21 @@ async function handle(request: Request, env: Env, path: string) {
     // 5-Star Survived! Escape!
     const rewardGc = Number(session.reward_gc || 2500);
     const rewardRep = Number(session.reward_rep || 1000);
-    const config=await env.DB.prepare('SELECT cooldown_minutes FROM bounty_config WHERE id="default"').first<any>();
+    const config = await env.DB.prepare('SELECT cooldown_minutes FROM bounty_config WHERE id="default"').first<any>();
 
     const updateSession = await env.DB.prepare("UPDATE bounty_sessions SET status='escaped', escaped_at=?, completed_at=? WHERE id=? AND status IN ('active','escalating')").bind(now.toISOString(), now.toISOString(), sessionId).run();
     if (!updateSession.meta.changes) {
-      return json({ error: 'Session already completed.' }, 409);
+      return json({ error: "Session already completed." }, 409);
     }
 
     // Award Ghost Credits to Survivor
-    await grantGhostCredits(session.target_user_id, rewardGc, 'BOUNTY ESCAPE', sessionId, env);
+    await grantGhostCredits(session.target_user_id, rewardGc, "BOUNTY ESCAPE", sessionId, env);
 
     await env.DB.batch([
-      env.DB.prepare('UPDATE users SET points = points + ? WHERE id=?').bind(rewardRep, session.target_user_id),
-      env.DB.prepare("UPDATE bounty_user_settings SET cooldown_until=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(`+${Math.max(1,Number(config?.cooldown_minutes||30))} minutes`,session.target_user_id),
-      env.DB.prepare(`
+      env.DB.prepare("UPDATE users SET points = points + ? WHERE id=?").bind(rewardRep, session.target_user_id),
+      env.DB.prepare("UPDATE bounty_user_settings SET cooldown_until=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(`+${Math.max(1, Number(config?.cooldown_minutes || 30))} minutes`, session.target_user_id),
+      env.DB.prepare(
+        `
         INSERT INTO bounty_user_stats(user_id, escapes, highest_star_survived, five_star_survivals, current_survival_streak, best_survival_streak, survivor_gc_earned, survivor_rep_earned)
         VALUES(?, 1, 5, 1, 1, 1, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
@@ -1441,13 +2911,16 @@ async function handle(request: Request, env: Env, path: string) {
           survivor_gc_earned = survivor_gc_earned + excluded.survivor_gc_earned,
           survivor_rep_earned = survivor_rep_earned + excluded.survivor_rep_earned,
           updated_at = CURRENT_TIMESTAMP
-      `).bind(session.target_user_id, rewardGc, rewardRep),
+      `,
+      ).bind(session.target_user_id, rewardGc, rewardRep),
       env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id, badge_id) VALUES(?, 'survivor')").bind(session.target_user_id),
       env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id, badge_id) VALUES(?, 'five-star-survivor')").bind(session.target_user_id),
-      env.DB.prepare(`
+      env.DB.prepare(
+        `
         INSERT INTO notifications(id, user_id, type, title, body, data_json)
         VALUES(?, ?, 'bounty_escaped', '★★★★★ SURVIVED!', ?, ?)
-      `).bind(crypto.randomUUID(), session.target_user_id, `FIVE-STAR SURVIVOR! +${rewardGc} GC // +${rewardRep} REP`, JSON.stringify({ sessionId, rewardGc, rewardRep })),
+      `,
+      ).bind(crypto.randomUUID(), session.target_user_id, `FIVE-STAR SURVIVOR! +${rewardGc} GC // +${rewardRep} REP`, JSON.stringify({ sessionId, rewardGc, rewardRep })),
     ]);
 
     return json({
@@ -1455,12 +2928,13 @@ async function handle(request: Request, env: Env, path: string) {
       starLevel: 5,
       rewardGc,
       rewardRep,
-      badgeEarned: 'FIVE-STAR SURVIVOR',
+      badgeEarned: "FIVE-STAR SURVIVOR",
     });
   }
 
-  if (path === 'bounty/history' && method === 'GET') {
-    const rows = await env.DB.prepare(`
+  if (path === "bounty/history" && method === "GET") {
+    const rows = await env.DB.prepare(
+      `
       SELECT s.*, v.year, v.make, v.model, v.color, v.trim
       FROM bounty_sessions s
       JOIN vehicles v ON v.id = s.target_vehicle_id
@@ -1468,28 +2942,37 @@ async function handle(request: Request, env: Env, path: string) {
       WHERE (s.target_user_id=? OR p.user_id=?) AND s.status IN ('claimed', 'escaped', 'expired', 'cancelled')
       ORDER BY s.completed_at DESC
       LIMIT 50
-    `).bind(user.id, user.id).all<any>();
+    `,
+    )
+      .bind(user.id, user.id)
+      .all<any>();
 
-    return json({ history: rows.results.map((r: any) => ({
-      id: r.id,
-      date: r.completed_at || r.starts_at,
-      role: r.target_user_id === user.id ? 'bounty' : 'hunter',
-      vehicle: `${(r.color || 'BLACK').toUpperCase()} ${r.year} ${r.make.toUpperCase()} ${r.model.toUpperCase()}`,
-      stars: r.star_level,
-      outcome: r.status,
-      rewardGc: r.reward_gc,
-      rewardRep: r.reward_rep,
-    })) });
+    return json({
+      history: rows.results.map((r: any) => ({
+        id: r.id,
+        date: r.completed_at || r.starts_at,
+        role: r.target_user_id === user.id ? "bounty" : "hunter",
+        vehicle: `${(r.color || "BLACK").toUpperCase()} ${r.year} ${r.make.toUpperCase()} ${r.model.toUpperCase()}`,
+        stars: r.star_level,
+        outcome: r.status,
+        rewardGc: r.reward_gc,
+        rewardRep: r.reward_rep,
+      })),
+    });
   }
 
-  if (path === 'bounty/stats' && method === 'GET') {
-    const stats = await env.DB.prepare('SELECT * FROM bounty_user_stats WHERE user_id=?').bind(user.id).first<any>() || {};
-    const badges = await env.DB.prepare(`
+  if (path === "bounty/stats" && method === "GET") {
+    const stats = (await env.DB.prepare("SELECT * FROM bounty_user_stats WHERE user_id=?").bind(user.id).first<any>()) || {};
+    const badges = await env.DB.prepare(
+      `
       SELECT b.*, CASE WHEN ub.user_id IS NULL THEN 0 ELSE 1 END earned, ub.earned_at
       FROM badges b
       LEFT JOIN user_badges ub ON ub.badge_id = b.id AND ub.user_id = ?
       WHERE b.category = 'bounty' OR b.id IN ('survivor', 'survivor-2', 'survivor-3', 'five-star-survivor', 'bounty-hunter', 'bounty-hunter-2', 'bounty-hunter-3', 'elite-bounty-hunter', 'five-star-hunter')
-    `).bind(user.id).all<any>();
+    `,
+    )
+      .bind(user.id)
+      .all<any>();
 
     return json({
       stats: {
@@ -1514,72 +2997,84 @@ async function handle(request: Request, env: Env, path: string) {
     });
   }
 
-  if (path === 'bounty/dev-override' && method === 'POST') {
-    if(!user.isDeveloper)return json({error:'Developer authority required.'},403);
+  if (path === "bounty/dev-override" && method === "POST") {
+    if (!user.isDeveloper) return json({ error: "Developer authority required." }, 403);
     const body = await request.json<any>();
     const action = body.action; // 'force_trigger', 'set_star', 'shorten_timer', 'force_claim', 'force_escape'
 
-    if (action === 'force_trigger') {
-      const vehicle = await env.DB.prepare('SELECT * FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1').bind(user.id).first<any>();
-      if (!vehicle) return json({ error: 'No active vehicle.' }, 400);
+    if (action === "force_trigger") {
+      const vehicle = await env.DB.prepare("SELECT * FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1").bind(user.id).first<any>();
+      if (!vehicle) return json({ error: "No active vehicle." }, 400);
 
       const starLevel = Math.max(1, Math.min(5, Number(body.starLevel) || 1));
       const id = crypto.randomUUID();
       const now = new Date();
       const endsAt = new Date(now.getTime() + 60 * 1000).toISOString(); // 1 min timer for quick testing
 
-      await env.DB.prepare(`
+      await env.DB.prepare(
+        `
         INSERT INTO bounty_sessions(id, mode, venue_name, target_user_id, target_vehicle_id, star_level, status, starts_at, stage_started_at, stage_ends_at, reward_gc, reward_rep)
         VALUES(?, 'venue', 'DEVELOPER TEST VENUE', ?, ?, ?, 'active', ?, ?, ?, 500, 250)
-      `).bind(id, user.id, vehicle.id, starLevel, now.toISOString(), now.toISOString(), endsAt).run();
+      `,
+      )
+        .bind(id, user.id, vehicle.id, starLevel, now.toISOString(), now.toISOString(), endsAt)
+        .run();
 
-      return json({ success: true, sessionId: id, starLevel, stageEndsAt: endsAt });
+      return json({
+        success: true,
+        sessionId: id,
+        starLevel,
+        stageEndsAt: endsAt,
+      });
     }
 
-    if (action === 'shorten_timer') {
+    if (action === "shorten_timer") {
       const sessionId = body.sessionId;
       const endsAt = new Date(Date.now() + 5 * 1000).toISOString(); // 5 seconds remaining
       await env.DB.prepare("UPDATE bounty_sessions SET stage_ends_at=? WHERE id=? AND status IN ('active','escalating')").bind(endsAt, sessionId).run();
       return json({ success: true, stageEndsAt: endsAt });
     }
 
-    if (action === 'force_claim') {
+    if (action === "force_claim") {
       const sessionId = body.sessionId;
       const now = new Date().toISOString();
       await env.DB.prepare("UPDATE bounty_sessions SET status='claimed', claimed_by_user_id=?, claimed_at=?, completed_at=? WHERE id=?").bind(user.id, now, now, sessionId).run();
-      await grantGhostCredits(user.id, 1000, 'BOUNTY CLAIM DEV', sessionId, env);
+      await grantGhostCredits(user.id, 1000, "BOUNTY CLAIM DEV", sessionId, env);
       return json({ success: true, claimed: true });
     }
 
-    if (action === 'force_escape') {
+    if (action === "force_escape") {
       const sessionId = body.sessionId;
       const now = new Date().toISOString();
       await env.DB.prepare("UPDATE bounty_sessions SET status='escaped', escaped_at=?, completed_at=? WHERE id=?").bind(now, now, sessionId).run();
-      await grantGhostCredits(user.id, 1500, 'BOUNTY ESCAPE DEV', sessionId, env);
+      await grantGhostCredits(user.id, 1500, "BOUNTY ESCAPE DEV", sessionId, env);
       return json({ success: true, escaped: true });
     }
 
-    return json({ error: 'Unknown dev action.' }, 400);
+    return json({ error: "Unknown dev action." }, 400);
   }
-
 
   // =========================================================================
   // CAR OF THE WEEK ENDPOINTS
   // =========================================================================
-  if (path === 'cotw/active' && method === 'GET') {
+  if (path === "cotw/active" && method === "GET") {
     const now = new Date();
     const year = now.getUTCFullYear();
     const oneJan = new Date(Date.UTC(year, 0, 1));
-    const weekNum = Math.ceil((((now.getTime() - oneJan.getTime()) / 86400000) + oneJan.getUTCDay() + 1) / 7);
-    const weekIdentifier = `${year}-W${String(weekNum).padStart(2, '0')}`;
+    const weekNum = Math.ceil(((now.getTime() - oneJan.getTime()) / 86400000 + oneJan.getUTCDay() + 1) / 7);
+    const weekIdentifier = `${year}-W${String(weekNum).padStart(2, "0")}`;
 
     const [submissions, myVotes, mySubmissions] = await Promise.all([
-      env.DB.prepare(`SELECT s.*, u.username, u.avatar_url, v.photo_url vehicle_photo
+      env.DB.prepare(
+        `SELECT s.*, u.username, u.avatar_url, v.photo_url vehicle_photo
         FROM car_of_the_week_submissions s
         JOIN users u ON u.id = s.user_id
         JOIN vehicles v ON v.id = s.vehicle_id
         WHERE s.week_identifier = ?
-        ORDER BY s.votes_count DESC`).bind(weekIdentifier).all(),
+        ORDER BY s.votes_count DESC`,
+      )
+        .bind(weekIdentifier)
+        .all(),
       env.DB.prepare(`SELECT category, submission_id FROM car_of_the_week_votes WHERE week_identifier = ? AND voter_user_id = ?`).bind(weekIdentifier, user.id).all(),
       env.DB.prepare(`SELECT * FROM car_of_the_week_submissions WHERE week_identifier = ? AND user_id = ?`).bind(weekIdentifier, user.id).all(),
     ]);
@@ -1588,28 +3083,33 @@ async function handle(request: Request, env: Env, path: string) {
       weekIdentifier,
       submissions: submissions.results.map((s: any) => ({
         ...s,
-        media_urls: JSON.parse(s.media_urls_json || '[]')
+        media_urls: JSON.parse(s.media_urls_json || "[]"),
       })),
       myVotes: myVotes.results,
-      mySubmissions: mySubmissions.results
+      mySubmissions: mySubmissions.results,
     });
   }
 
-  if (path === 'cotw/submit' && method === 'POST') {
+  if (path === "cotw/submit" && method === "POST") {
     const body = await request.json<any>();
-    if (!body.category || !body.vehicleId || !body.yearMakeModel) {
-      return json({ error: 'Category, vehicle, and details required.' }, 400);
+    const categories = ["BEST_APPEARANCE", "BEST_BUILD", "BEST_SOUND"];
+    if (!categories.includes(body.category) || !body.vehicleId || !body.yearMakeModel) {
+      return json({ error: "Category, vehicle, and details required." }, 400);
     }
+    const ownedVehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND user_id=?").bind(body.vehicleId, user.id).first();
+    if (!ownedVehicle) return json({ error: "Choose a vehicle from your own garage." }, 403);
+    if (body.category === "BEST_SOUND" && !Array.isArray(body.mediaUrls)) return json({ error: "Best Sound requires uploaded video or audio proof." }, 400);
     const now = new Date();
     const year = now.getUTCFullYear();
     const oneJan = new Date(Date.UTC(year, 0, 1));
-    const weekNum = Math.ceil((((now.getTime() - oneJan.getTime()) / 86400000) + oneJan.getUTCDay() + 1) / 7);
-    const weekIdentifier = `${year}-W${String(weekNum).padStart(2, '0')}`;
+    const weekNum = Math.ceil(((now.getTime() - oneJan.getTime()) / 86400000 + oneJan.getUTCDay() + 1) / 7);
+    const weekIdentifier = `${year}-W${String(weekNum).padStart(2, "0")}`;
 
     const id = crypto.randomUUID();
     const mediaUrlsJson = JSON.stringify(body.mediaUrls || []);
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       INSERT INTO car_of_the_week_submissions (id, week_identifier, category, user_id, vehicle_id, year_make_model, media_urls_json, description, build_info)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(week_identifier, category, user_id) DO UPDATE SET
@@ -1618,30 +3118,38 @@ async function handle(request: Request, env: Env, path: string) {
         media_urls_json = excluded.media_urls_json,
         description = excluded.description,
         build_info = excluded.build_info
-    `).bind(id, weekIdentifier, body.category, user.id, body.vehicleId, body.yearMakeModel, mediaUrlsJson, body.description || '', body.buildInfo || '').run();
+    `,
+    )
+      .bind(id, weekIdentifier, body.category, user.id, body.vehicleId, body.yearMakeModel, mediaUrlsJson, body.description || "", body.buildInfo || "")
+      .run();
 
     return json({ success: true, id });
   }
 
-  if (path === 'cotw/vote' && method === 'POST') {
+  if (path === "cotw/vote" && method === "POST") {
     const body = await request.json<any>();
     if (!body.submissionId || !body.category || !body.weekIdentifier) {
-      return json({ error: 'Submission ID, category, and week identifier required.' }, 400);
+      return json({ error: "Submission ID, category, and week identifier required." }, 400);
     }
 
+    const now = new Date(),
+      year = now.getUTCFullYear(),
+      oneJan = new Date(Date.UTC(year, 0, 1));
+    const weekNum = Math.ceil(((now.getTime() - oneJan.getTime()) / 86400000 + oneJan.getUTCDay() + 1) / 7),
+      activeWeek = `${year}-W${String(weekNum).padStart(2, "0")}`;
+    const submission = await env.DB.prepare("SELECT id,week_identifier,category FROM car_of_the_week_submissions WHERE id=?").bind(body.submissionId).first<any>();
+    if (!submission || submission.week_identifier !== activeWeek || body.weekIdentifier !== activeWeek || submission.category !== body.category) return json({ error: "This COTW entry is not eligible for the active category." }, 409);
     try {
-      await env.DB.batch([
-        env.DB.prepare(`INSERT INTO car_of_the_week_votes (submission_id, week_identifier, category, voter_user_id) VALUES (?, ?, ?, ?)`)          .bind(body.submissionId, body.weekIdentifier, body.category, user.id),
-        env.DB.prepare(`UPDATE car_of_the_week_submissions SET votes_count = votes_count + 1 WHERE id = ?`)          .bind(body.submissionId)
-      ]);
+      await env.DB.batch([env.DB.prepare(`INSERT INTO car_of_the_week_votes (submission_id, week_identifier, category, voter_user_id) VALUES (?, ?, ?, ?)`).bind(body.submissionId, body.weekIdentifier, body.category, user.id), env.DB.prepare(`UPDATE car_of_the_week_submissions SET votes_count = votes_count + 1 WHERE id = ?`).bind(body.submissionId)]);
       return json({ success: true });
     } catch (e) {
-      return json({ error: 'You have already voted in this category for this week.' }, 400);
+      return json({ error: "You have already voted in this category for this week." }, 409);
     }
   }
 
-  if (path === 'cotw/archive' && method === 'GET') {
-    const rows = await env.DB.prepare(`
+  if (path === "cotw/archive" && method === "GET") {
+    const rows = await env.DB.prepare(
+      `
       SELECT w.*, u.username, v.year, v.make, v.model, s.media_urls_json
       FROM car_of_the_week_winners w
       JOIN users u ON u.id = w.user_id
@@ -1649,67 +3157,91 @@ async function handle(request: Request, env: Env, path: string) {
       LEFT JOIN car_of_the_week_submissions s ON s.id = w.submission_id
       ORDER BY w.created_at DESC
       LIMIT 50
-    `).all();
-    return json({ winners: rows.results.map((r: any) => ({ ...r, media_urls: JSON.parse(r.media_urls_json || '[]') })) });
+    `,
+    ).all();
+    return json({
+      winners: rows.results.map((r: any) => ({
+        ...r,
+        media_urls: JSON.parse(r.media_urls_json || "[]"),
+      })),
+    });
   }
 
   // =========================================================================
   // APEX SEASONS ENDPOINTS
   // =========================================================================
-  if (path === 'seasons/active' && method === 'GET') {
+  if (path === "seasons/active" && method === "GET") {
     const season = await env.DB.prepare(`SELECT * FROM apex_seasons WHERE is_active = 1 ORDER BY season_number DESC LIMIT 1`).first<any>();
-    if (!season) return json({ error: 'No active season.' }, 404);
+    if (!season) return json({ error: "No active season." }, 404);
 
     let progress = await env.DB.prepare(`SELECT * FROM season_user_progress WHERE user_id = ? AND season_id = ?`).bind(user.id, season.id).first<any>();
     if (!progress) {
       await env.DB.prepare(`INSERT INTO season_user_progress (user_id, season_id, xp, level) VALUES (?, ?, 0, 1)`).bind(user.id, season.id).run();
-      progress = { user_id: user.id, season_id: season.id, xp: 0, level: 1, claimed_levels_json: '[]', has_premium_track: 0 };
+      progress = {
+        user_id: user.id,
+        season_id: season.id,
+        xp: 0,
+        level: 1,
+        claimed_levels_json: "[]",
+        has_premium_track: 0,
+      };
     }
 
-    const challenges = await env.DB.prepare(`
+    const challenges = await env.DB.prepare(
+      `
       SELECT c.*, COALESCE(p.current_count, 0) current_count, COALESCE(p.is_completed, 0) is_completed
       FROM season_challenges c
       LEFT JOIN season_challenge_progress p ON p.challenge_id = c.id AND p.user_id = ?
       WHERE c.season_id = ?
-    `).bind(user.id, season.id).all();
+    `,
+    )
+      .bind(user.id, season.id)
+      .all();
 
     return json({
-      season: { ...season, rewards: JSON.parse(season.rewards_json || '[]') },
-      progress: { ...progress, claimed_levels: JSON.parse(progress.claimed_levels_json || '[]') },
-      challenges: challenges.results
+      season: { ...season, rewards: JSON.parse(season.rewards_json || "[]") },
+      progress: {
+        ...progress,
+        claimed_levels: JSON.parse(progress.claimed_levels_json || "[]"),
+      },
+      challenges: challenges.results,
     });
   }
 
-  if (path === 'seasons/add-xp' && method === 'POST') {
+  if (path === "seasons/add-xp" && method === "POST") {
     const body = await request.json<any>();
     const amount = Math.max(1, Math.min(5000, Number(body.amount) || 50));
     const season = await env.DB.prepare(`SELECT id FROM apex_seasons WHERE is_active = 1 LIMIT 1`).first<any>();
-    if (!season) return json({ error: 'No active season.' }, 404);
+    if (!season) return json({ error: "No active season." }, 404);
 
-    const prog = await env.DB.prepare(`SELECT * FROM season_user_progress WHERE user_id = ? AND season_id = ?`).bind(user.id, season.id).first<any>() || { xp: 0, level: 1 };
+    const prog = (await env.DB.prepare(`SELECT * FROM season_user_progress WHERE user_id = ? AND season_id = ?`).bind(user.id, season.id).first<any>()) || { xp: 0, level: 1 };
     const newXp = (prog.xp || 0) + amount;
     const newLevel = Math.floor(newXp / 1000) + 1;
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       INSERT INTO season_user_progress (user_id, season_id, xp, level, updated_at)
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id, season_id) DO UPDATE SET xp = excluded.xp, level = excluded.level, updated_at = CURRENT_TIMESTAMP
-    `).bind(user.id, season.id, newXp, newLevel).run();
+    `,
+    )
+      .bind(user.id, season.id, newXp, newLevel)
+      .run();
 
     return json({ success: true, xp: newXp, level: newLevel, xpAdded: amount });
   }
 
-  if (path === 'seasons/claim' && method === 'POST') {
+  if (path === "seasons/claim" && method === "POST") {
     const body = await request.json<any>();
     const levelToClaim = Number(body.level);
     const season = await env.DB.prepare(`SELECT * FROM apex_seasons WHERE is_active = 1 LIMIT 1`).first<any>();
-    if (!season) return json({ error: 'No active season.' }, 404);
+    if (!season) return json({ error: "No active season." }, 404);
 
     const prog = await env.DB.prepare(`SELECT * FROM season_user_progress WHERE user_id = ? AND season_id = ?`).bind(user.id, season.id).first<any>();
-    if (!prog || prog.level < levelToClaim) return json({ error: 'Level not unlocked.' }, 400);
+    if (!prog || prog.level < levelToClaim) return json({ error: "Level not unlocked." }, 400);
 
-    const claimed: number[] = JSON.parse(prog.claimed_levels_json || '[]');
-    if (claimed.includes(levelToClaim)) return json({ error: 'Level reward already claimed.' }, 400);
+    const claimed: number[] = JSON.parse(prog.claimed_levels_json || "[]");
+    if (claimed.includes(levelToClaim)) return json({ error: "Level reward already claimed." }, 400);
 
     claimed.push(levelToClaim);
     await env.DB.prepare(`UPDATE season_user_progress SET claimed_levels_json = ? WHERE user_id = ? AND season_id = ?`).bind(JSON.stringify(claimed), user.id, season.id).run();
@@ -1720,8 +3252,8 @@ async function handle(request: Request, env: Env, path: string) {
   // =========================================================================
   // DAILY GHOST CHEST ENDPOINTS
   // =========================================================================
-  if (path === 'daily-chest/status' && method === 'GET') {
-    const today = new Date().toISOString().split('T')[0];
+  if (path === "daily-chest/status" && method === "GET") {
+    const today = new Date().toISOString().split("T")[0];
     const chest = await env.DB.prepare(`SELECT * FROM daily_ghost_chests WHERE user_id = ?`).bind(user.id).first<any>();
 
     const available = !chest || chest.last_claimed_date !== today;
@@ -1731,16 +3263,17 @@ async function handle(request: Request, env: Env, path: string) {
       available,
       today,
       lastClaimedDate: chest?.last_claimed_date || null,
-      streakCount: streak
+      streakCount: streak,
     });
   }
 
-  if (path === 'daily-chest/claim' && method === 'POST') {
-    const today = new Date().toISOString().split('T')[0];
+  if (path === "daily-chest/claim" && method === "POST") {
+    const today = new Date().toISOString().split("T")[0];
     const chest = await env.DB.prepare(`SELECT * FROM daily_ghost_chests WHERE user_id = ?`).bind(user.id).first<any>();
+    const existingClaim = await env.DB.prepare(`SELECT id,rarity,reward_value FROM daily_ghost_claims WHERE user_id=? AND claim_date=?`).bind(user.id, today).first<any>();
 
-    if (chest && chest.last_claimed_date === today) {
-      return json({ error: 'Daily Ghost Chest already claimed today.' }, 400);
+    if (existingClaim || (chest && chest.last_claimed_date === today)) {
+      return json({ error: "Daily Ghost Chest already claimed today." }, 400);
     }
 
     let streak = 1;
@@ -1763,48 +3296,40 @@ async function handle(request: Request, env: Env, path: string) {
     // Roll rarity
     const dailyHash = await sha256Hex(`${user.id}:${today}:daily-ghost-chest`);
     const rand = Number.parseInt(dailyHash.slice(0, 8), 16) / 0xffffffff;
-    let rarity = 'COMMON';
+    let rarity = "COMMON";
     let gcReward = 100;
     let xpReward = 150;
 
     if (streak % 7 === 0 || rand > 0.99) {
-      rarity = 'CLASSIFIED';
+      rarity = "CLASSIFIED";
       gcReward = 2000;
       xpReward = 2500;
     } else if (rand > 0.93) {
-      rarity = 'LEGENDARY';
+      rarity = "LEGENDARY";
       gcReward = 1000;
       xpReward = 1200;
-    } else if (rand > 0.80) {
-      rarity = 'EPIC';
+    } else if (rand > 0.8) {
+      rarity = "EPIC";
       gcReward = 500;
       xpReward = 600;
-    } else if (rand > 0.50) {
-      rarity = 'RARE';
+    } else if (rand > 0.5) {
+      rarity = "RARE";
       gcReward = 250;
       xpReward = 300;
     }
 
     const claimId = crypto.randomUUID();
 
-    await env.DB.batch([
-      env.DB.prepare(`
-        INSERT INTO daily_ghost_chests (user_id, last_claimed_date, streak_count, grace_available, updated_at)
-        VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
-        ON CONFLICT(user_id) DO UPDATE SET last_claimed_date = excluded.last_claimed_date, streak_count = excluded.streak_count, updated_at = CURRENT_TIMESTAMP
-      `).bind(user.id, today, streak),
-      env.DB.prepare(`
-        INSERT INTO daily_ghost_claims (id, user_id, claim_date, streak_day, rarity, reward_type, reward_value)
-        VALUES (?, ?, ?, ?, ?, 'gc', ?)
-      `).bind(claimId, user.id, today, streak, rarity, gcReward)
-    ]);
+    const reserved = await env.DB.prepare(`INSERT OR IGNORE INTO daily_ghost_claims (id,user_id,claim_date,streak_day,rarity,reward_type,reward_value) VALUES (?,?,?,?,?,'gc',?)`).bind(claimId, user.id, today, streak, rarity, gcReward).run();
+    if (!reserved.meta.changes) return json({ error: "Daily Ghost Chest already claimed today." }, 409);
+    await env.DB.prepare(`INSERT INTO daily_ghost_chests (user_id,last_claimed_date,streak_count,grace_available,updated_at) VALUES (?,?,?,1,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET last_claimed_date=excluded.last_claimed_date,streak_count=excluded.streak_count,updated_at=CURRENT_TIMESTAMP`).bind(user.id, today, streak).run();
 
     await grantGhostCredits(user.id, gcReward, `DAILY GHOST CHEST (${rarity})`, claimId, env);
     let itemReward = null;
-    if (['EPIC','LEGENDARY','CLASSIFIED'].includes(rarity) || streak % 3 === 0) {
-      const candidates = await env.DB.prepare(`SELECT id FROM ghost_shop_items WHERE is_active=1 AND rarity=? AND id NOT IN(SELECT item_id FROM ghost_inventory WHERE user_id=?) ORDER BY id`).bind(rarity, user.id).all<{id:string}>();
+    if (["EPIC", "LEGENDARY", "CLASSIFIED"].includes(rarity) || streak % 3 === 0) {
+      const candidates = await env.DB.prepare(`SELECT id FROM ghost_shop_items WHERE is_active=1 AND rarity=? AND id NOT IN(SELECT item_id FROM ghost_inventory WHERE user_id=?) ORDER BY id`).bind(rarity, user.id).all<{ id: string }>();
       const selected = candidates.results[Number.parseInt(dailyHash.slice(8, 16), 16) % Math.max(1, candidates.results.length)];
-      if (selected) itemReward = await grantCosmeticDrop(env, user.id, selected.id, 'daily_chest', claimId);
+      if (selected) itemReward = await grantCosmeticDrop(env, user.id, selected.id, "daily_chest", claimId);
     }
 
     return json({
@@ -1815,64 +3340,73 @@ async function handle(request: Request, env: Env, path: string) {
         streakDay: streak,
         gcReward,
         xpReward,
-        itemReward
-      }
+        itemReward,
+      },
     });
   }
-
 
   // =========================================================================
   // MEETS EXPANSION ENDPOINTS
   // =========================================================================
-  if (path === 'meets' && method === 'GET') {
-    const rows = await env.DB.prepare(`
+  if (path === "meets" && method === "GET") {
+    const rows = await env.DB.prepare(
+      `
       SELECT e.*, u.username host_name,
         (SELECT COUNT(*) FROM event_registrations r WHERE r.event_id = e.id) going_count
       FROM events e
       JOIN users u ON u.id = e.host_id
       ORDER BY e.starts_at ASC
       LIMIT 100
-    `).all();
+    `,
+    ).all();
 
     return json({ meets: rows.results });
   }
 
   const meetAttendeesMatch = path.match(/^meets\/([^/]+)\/attendees$/);
-  if (meetAttendeesMatch && method === 'GET') {
+  if (meetAttendeesMatch && method === "GET") {
     const meetId = meetAttendeesMatch[1];
-    const attendees = await env.DB.prepare(`
+    const attendees = await env.DB.prepare(
+      `
       SELECT r.user_id, r.role, r.created_at, u.username, u.avatar_url, u.tier,
         v.id vehicle_id, v.year, v.make, v.model, v.trim, v.color, v.photo_url
       FROM event_registrations r
       JOIN users u ON u.id = r.user_id
       LEFT JOIN vehicles v ON v.user_id = u.id AND v.is_active = 1
       WHERE r.event_id = ?
-    `).bind(meetId).all();
+    `,
+    )
+      .bind(meetId)
+      .all();
 
     return json({ attendees: attendees.results });
   }
 
   const meetCheckinMatch = path.match(/^meets\/([^/]+)\/checkin$/);
-  if (meetCheckinMatch && method === 'POST') {
+  if (meetCheckinMatch && method === "POST") {
     const meetId = meetCheckinMatch[1];
     const body = await request.json<any>();
     const lat = Number(body.latitude);
     const lng = Number(body.longitude);
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return json({ error: 'Valid GPS latitude and longitude required for check-in.' }, 400);
+      return json({ error: "Valid GPS latitude and longitude required for check-in." }, 400);
     }
 
     const event = await env.DB.prepare(`SELECT * FROM events WHERE id = ?`).bind(meetId).first<any>();
-    if (!event) return json({ error: 'Meet not found.' }, 404);
+    if (!event) return json({ error: "Meet not found." }, 404);
 
     const activeVehicle = await env.DB.prepare(`SELECT id FROM vehicles WHERE user_id = ? AND is_active = 1 LIMIT 1`).bind(user.id).first<any>();
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       INSERT INTO meet_checkins (event_id, user_id, vehicle_id, checked_in_at, latitude, longitude)
       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
       ON CONFLICT(event_id, user_id) DO UPDATE SET checked_in_at = CURRENT_TIMESTAMP, latitude = excluded.latitude, longitude = excluded.longitude
-    `).bind(meetId, user.id, activeVehicle?.id || null, lat, lng).run();
+    `,
+    )
+      .bind(meetId, user.id, activeVehicle?.id || null, lat, lng)
+      .run();
 
     // Award +100 REP for checking in
     await env.DB.prepare(`UPDATE users SET points = points + 100 WHERE id = ?`).bind(user.id).run();
@@ -1886,38 +3420,38 @@ async function handle(request: Request, env: Env, path: string) {
   const vehicleWishlistMatch = path.match(/^vehicles\/([^/]+)\/wishlist$/);
   if (vehicleWishlistMatch) {
     const vehicleId = vehicleWishlistMatch[1];
-    const ownedVehicle = await env.DB.prepare('SELECT id FROM vehicles WHERE id = ? AND user_id = ?').bind(vehicleId, user.id).first<any>();
-    if (!ownedVehicle) return json({ error: 'Vehicle was not found in your garage.' }, 404);
+    const ownedVehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE id = ? AND user_id = ?").bind(vehicleId, user.id).first<any>();
+    if (!ownedVehicle) return json({ error: "Vehicle was not found in your garage." }, 404);
 
-    if (method === 'GET') {
+    if (method === "GET") {
       const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? AND user_id = ? ORDER BY created_at DESC`).bind(vehicleId, user.id).all();
       return json({ wishlist: rows.results });
     }
 
-    if (method === 'POST') {
+    if (method === "POST") {
       const body = await request.json<any>();
-      if (!body.part) return json({ error: 'Part name is required.' }, 400);
+      if (!body.part) return json({ error: "Part name is required." }, 400);
 
       const id = body.id || crypto.randomUUID();
-      await env.DB.prepare(`
+      await env.DB.prepare(
+        `
         INSERT INTO mod_wishlist (id, vehicle_id, user_id, part, brand, category, price, url, priority, notes, purchased, installed)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           part = excluded.part, brand = excluded.brand, category = excluded.category,
           price = excluded.price, url = excluded.url, priority = excluded.priority,
           notes = excluded.notes, purchased = excluded.purchased, installed = excluded.installed
-      `).bind(
-        id, vehicleId, user.id, body.part, body.brand || '', body.category || 'Other',
-        Number(body.price) || 0, body.url || '', body.priority || 'MEDIUM',
-        body.notes || '', body.purchased ? 1 : 0, body.installed ? 1 : 0
-      ).run();
+      `,
+      )
+        .bind(id, vehicleId, user.id, body.part, body.brand || "", body.category || "Other", Number(body.price) || 0, body.url || "", body.priority || "MEDIUM", body.notes || "", body.purchased ? 1 : 0, body.installed ? 1 : 0)
+        .run();
 
       return json({ success: true, id });
     }
   }
 
   const vehicleWishlistDeleteMatch = path.match(/^vehicles\/([^/]+)\/wishlist\/([^/]+)$/);
-  if (vehicleWishlistDeleteMatch && method === 'DELETE') {
+  if (vehicleWishlistDeleteMatch && method === "DELETE") {
     const [, vehicleId, itemId] = vehicleWishlistDeleteMatch;
     await env.DB.prepare(`DELETE FROM mod_wishlist WHERE id = ? AND vehicle_id = ? AND user_id = ?`).bind(itemId, vehicleId, user.id).run();
     return json({ success: true });
@@ -1927,7 +3461,7 @@ async function handle(request: Request, env: Env, path: string) {
   if (vehicleBuildPlansMatch) {
     const vehicleId = vehicleBuildPlansMatch[1];
 
-    if (method === 'GET') {
+    if (method === "GET") {
       const plans = await env.DB.prepare(`SELECT * FROM build_plans WHERE vehicle_id = ? ORDER BY created_at DESC`).bind(vehicleId).all();
       const planList = [];
       for (const plan of plans.results as any[]) {
@@ -1937,24 +3471,32 @@ async function handle(request: Request, env: Env, path: string) {
       return json({ plans: planList });
     }
 
-    if (method === 'POST') {
+    if (method === "POST") {
       const body = await request.json<any>();
       const planId = body.id || crypto.randomUUID();
 
-      await env.DB.prepare(`
+      await env.DB.prepare(
+        `
         INSERT INTO build_plans (id, vehicle_id, user_id, plan_name, is_public, notes)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET plan_name = excluded.plan_name, is_public = excluded.is_public, notes = excluded.notes
-      `).bind(planId, vehicleId, user.id, body.planName || 'CUSTOM', body.isPublic === false ? 0 : 1, body.notes || '').run();
+      `,
+      )
+        .bind(planId, vehicleId, user.id, body.planName || "CUSTOM", body.isPublic === false ? 0 : 1, body.notes || "")
+        .run();
 
       if (Array.isArray(body.parts)) {
         await env.DB.prepare(`DELETE FROM build_plan_parts WHERE plan_id = ?`).bind(planId).run();
         for (const p of body.parts) {
           const partId = crypto.randomUUID();
-          await env.DB.prepare(`
+          await env.DB.prepare(
+            `
             INSERT INTO build_plan_parts (id, plan_id, part_name, brand, category, cost, purchased, installed)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          `).bind(partId, planId, p.partName, p.brand || '', p.category || 'Other', Number(p.cost) || 0, p.purchased ? 1 : 0, p.installed ? 1 : 0).run();
+          `,
+          )
+            .bind(partId, planId, p.partName, p.brand || "", p.category || "Other", Number(p.cost) || 0, p.purchased ? 1 : 0, p.installed ? 1 : 0)
+            .run();
         }
       }
 
@@ -1965,40 +3507,45 @@ async function handle(request: Request, env: Env, path: string) {
   // =========================================================================
   // PERFORMANCE & TIMING ENDPOINTS
   // =========================================================================
-  if (path === 'performance/records' && method === 'GET') {
-    const rows = await env.DB.prepare(`
+  if (path === "performance/records" && method === "GET") {
+    const rows = await env.DB.prepare(
+      `
       SELECT p.*, v.year, v.make, v.model, v.color
       FROM personal_performance_records p
       JOIN vehicles v ON v.id = p.vehicle_id
       WHERE p.user_id = ?
       ORDER BY p.created_at DESC
-    `).bind(user.id).all();
+    `,
+    )
+      .bind(user.id)
+      .all();
 
     return json({ records: rows.results });
   }
 
-  if (path === 'performance/records' && method === 'POST') {
+  if (path === "performance/records" && method === "POST") {
     const body = await request.json<any>();
     if (!body.vehicleId || !body.runType || !body.resultSeconds) {
-      return json({ error: 'Vehicle, run type, and result seconds required.' }, 400);
+      return json({ error: "Vehicle, run type, and result seconds required." }, 400);
     }
 
     const id = crypto.randomUUID();
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       INSERT INTO personal_performance_records
         (id, user_id, vehicle_id, run_type, result_seconds, gps_confidence_pct, evidence_url, verification_status, event_context, unit)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      id, user.id, body.vehicleId, body.runType, Number(body.resultSeconds),
-      Number(body.gpsConfidencePct) || 100, body.evidenceUrl || null,
-      body.verificationStatus || 'private', body.eventContext || null, body.unit || 'MPH'
-    ).run();
+    `,
+    )
+      .bind(id, user.id, body.vehicleId, body.runType, Number(body.resultSeconds), Number(body.gpsConfidencePct) || 100, body.evidenceUrl || null, body.verificationStatus || "private", body.eventContext || null, body.unit || "MPH")
+      .run();
 
     return json({ success: true, id });
   }
 
-  if (path === 'performance/leaderboards' && method === 'GET') {
-    const rows = await env.DB.prepare(`
+  if (path === "performance/leaderboards" && method === "GET") {
+    const rows = await env.DB.prepare(
+      `
       SELECT p.*, u.username, u.avatar_url, v.year, v.make, v.model
       FROM personal_performance_records p
       JOIN users u ON u.id = p.user_id
@@ -2006,53 +3553,52 @@ async function handle(request: Request, env: Env, path: string) {
       WHERE p.verification_status = 'verified'
       ORDER BY p.result_seconds ASC
       LIMIT 100
-    `).all();
+    `,
+    ).all();
 
     return json({ leaderboard: rows.results });
   }
 
-
   // =========================================================================
   // HEAD-TO-HEAD & RIVALS ENDPOINTS
   // =========================================================================
-  if (path === 'head-to-head/create' && method === 'POST') {
+  if (path === "head-to-head/create" && method === "POST") {
     const body = await request.json<any>();
     if (!body.driverBId || !body.winnerId) {
-      return json({ error: 'Opponent driver and winner choice required.' }, 400);
+      return json({ error: "Opponent driver and winner choice required." }, 400);
     }
 
     const id = crypto.randomUUID();
     const loserId = body.winnerId === user.id ? body.driverBId : user.id;
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       INSERT INTO head_to_head_races
         (id, driver_a_id, driver_b_id, vehicle_a_id, vehicle_b_id, event_context, distance_format, winner_id, loser_id, time_a_seconds, time_b_seconds, proof_url, status, driver_a_confirmed, driver_b_confirmed)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, 0)
-    `).bind(
-      id, user.id, body.driverBId, body.vehicleAId || null, body.vehicleBId || null,
-      body.eventContext || 'Track Session', body.distanceFormat || '1/4 Mile',
-      body.winnerId, loserId, Number(body.timeASeconds) || null, Number(body.timeBSeconds) || null,
-      body.proofUrl || null
-    ).run();
+    `,
+    )
+      .bind(id, user.id, body.driverBId, body.vehicleAId || null, body.vehicleBId || null, body.eventContext || "Track Session", body.distanceFormat || "1/4 Mile", body.winnerId, loserId, Number(body.timeASeconds) || null, Number(body.timeBSeconds) || null, body.proofUrl || null)
+      .run();
 
     return json({ success: true, id });
   }
 
-  if (path === 'head-to-head/confirm' && method === 'POST') {
+  if (path === "head-to-head/confirm" && method === "POST") {
     const body = await request.json<any>();
     const race = await env.DB.prepare(`SELECT * FROM head_to_head_races WHERE id = ?`).bind(body.raceId).first<any>();
-    if (!race) return json({ error: 'Race session not found.' }, 404);
+    if (!race) return json({ error: "Race session not found." }, 404);
 
-    if (body.action === 'dispute') {
+    if (body.action === "dispute") {
       await env.DB.prepare(`UPDATE head_to_head_races SET status = 'disputed' WHERE id = ?`).bind(body.raceId).run();
-      return json({ success: true, status: 'disputed' });
+      return json({ success: true, status: "disputed" });
     }
 
     const isDriverA = race.driver_a_id === user.id;
     const isDriverB = race.driver_b_id === user.id;
-    if (!isDriverA && !isDriverB) return json({ error: 'Unauthorized.' }, 403);
+    if (!isDriverA && !isDriverB) return json({ error: "Unauthorized." }, 403);
 
-    const updateCol = isDriverA ? 'driver_a_confirmed = 1' : 'driver_b_confirmed = 1';
+    const updateCol = isDriverA ? "driver_a_confirmed = 1" : "driver_b_confirmed = 1";
     await env.DB.prepare(`UPDATE head_to_head_races SET ${updateCol} WHERE id = ?`).bind(body.raceId).run();
 
     const updated = await env.DB.prepare(`SELECT * FROM head_to_head_races WHERE id = ?`).bind(body.raceId).first<any>();
@@ -2064,48 +3610,64 @@ async function handle(request: Request, env: Env, path: string) {
       await env.DB.prepare(`UPDATE users SET losses = losses + 1 WHERE id = ?`).bind(updated.loser_id).run();
 
       // Update rivalry record
-      await env.DB.prepare(`
+      await env.DB.prepare(
+        `
         INSERT INTO driver_rivalries (id, user_id, rival_user_id, wins, losses, last_race_at)
         VALUES (?, ?, ?, 1, 0, CURRENT_TIMESTAMP)
         ON CONFLICT(user_id, rival_user_id) DO UPDATE SET wins = wins + 1, last_race_at = CURRENT_TIMESTAMP
-      `).bind(crypto.randomUUID(), updated.winner_id, updated.loser_id).run();
+      `,
+      )
+        .bind(crypto.randomUUID(), updated.winner_id, updated.loser_id)
+        .run();
 
-      await env.DB.prepare(`
+      await env.DB.prepare(
+        `
         INSERT INTO driver_rivalries (id, user_id, rival_user_id, wins, losses, last_race_at)
         VALUES (?, ?, ?, 0, 1, CURRENT_TIMESTAMP)
         ON CONFLICT(user_id, rival_user_id) DO UPDATE SET losses = losses + 1, last_race_at = CURRENT_TIMESTAMP
-      `).bind(crypto.randomUUID(), updated.loser_id, updated.winner_id).run();
+      `,
+      )
+        .bind(crypto.randomUUID(), updated.loser_id, updated.winner_id)
+        .run();
 
-      return json({ success: true, status: 'confirmed' });
+      return json({ success: true, status: "confirmed" });
     }
 
-    return json({ success: true, status: 'pending' });
+    return json({ success: true, status: "pending" });
   }
 
-  if (path === 'rivals' && method === 'GET') {
-    const rows = await env.DB.prepare(`
+  if (path === "rivals" && method === "GET") {
+    const rows = await env.DB.prepare(
+      `
       SELECT r.*, u.username, u.avatar_url, u.tier, u.wins user_wins, u.losses user_losses
       FROM driver_rivalries r
       JOIN users u ON u.id = r.rival_user_id
       WHERE r.user_id = ?
       ORDER BY r.last_race_at DESC
-    `).bind(user.id).all();
+    `,
+    )
+      .bind(user.id)
+      .all();
 
     return json({ rivals: rows.results });
   }
 
   const rivalDetailMatch = path.match(/^rivals\/([^/]+)$/);
-  if (rivalDetailMatch && method === 'GET') {
+  if (rivalDetailMatch && method === "GET") {
     const rivalId = rivalDetailMatch[1];
     const rivalUser = await env.DB.prepare(`SELECT id, username, avatar_url, tier, wins, losses, points FROM users WHERE id = ?`).bind(rivalId).first<any>();
-    if (!rivalUser) return json({ error: 'Rival user not found.' }, 404);
+    if (!rivalUser) return json({ error: "Rival user not found." }, 404);
 
     const rivalry = await env.DB.prepare(`SELECT * FROM driver_rivalries WHERE user_id = ? AND rival_user_id = ?`).bind(user.id, rivalId).first<any>();
-    const headToHeadRaces = await env.DB.prepare(`
+    const headToHeadRaces = await env.DB.prepare(
+      `
       SELECT * FROM head_to_head_races
       WHERE (driver_a_id = ? AND driver_b_id = ?) OR (driver_a_id = ? AND driver_b_id = ?)
       ORDER BY created_at DESC LIMIT 20
-    `).bind(user.id, rivalId, rivalId, user.id).all();
+    `,
+    )
+      .bind(user.id, rivalId, rivalId, user.id)
+      .all();
 
     const myVehicle = await env.DB.prepare(`SELECT year, make, model, color FROM vehicles WHERE user_id = ? AND is_active = 1 LIMIT 1`).bind(user.id).first<any>();
     const rivalVehicle = await env.DB.prepare(`SELECT year, make, model, color FROM vehicles WHERE user_id = ? AND is_active = 1 LIMIT 1`).bind(rivalId).first<any>();
@@ -2115,82 +3677,67 @@ async function handle(request: Request, env: Env, path: string) {
       rivalry: rivalry || { wins: 0, losses: 0 },
       races: headToHeadRaces.results,
       myVehicle,
-      rivalVehicle
+      rivalVehicle,
     });
   }
 
   // =========================================================================
   // YEARLY RECAP ENDPOINT
   // =========================================================================
-  if (path === 'recap/2026' && method === 'GET') {
-    const [vehicles, meets, cotwSubmissions, perfRecords, h2hRaces, discoveries, driveSessions, ghostEarned, bountyStats, convoyStats, seasonProgress, cotwWins, mods, badgeRows] = await Promise.all([
-      env.DB.prepare(`SELECT COUNT(*) c FROM vehicles WHERE user_id = ?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(*) c FROM event_registrations WHERE user_id = ?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(*) c FROM car_of_the_week_submissions WHERE user_id = ?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(*) c FROM personal_performance_records WHERE user_id = ?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(*) c FROM head_to_head_races WHERE (driver_a_id = ? OR driver_b_id = ?) AND status = 'confirmed'`).bind(user.id, user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(*) c FROM map_discoveries WHERE user_id=?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(DISTINCT session_id) c FROM drive_trace_points WHERE user_id=?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COALESCE(SUM(amount),0) total FROM ghost_credit_transactions WHERE user_id=? AND amount>0`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT * FROM bounty_user_stats WHERE user_id=?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(*) c FROM cruise_members WHERE user_id=?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COALESCE(MAX(level),0) level FROM season_user_progress WHERE user_id=?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(*) c FROM car_of_the_week_winners WHERE user_id=?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT COUNT(*) c FROM mod_wishlist WHERE user_id=?`).bind(user.id).first<any>(),
-      env.DB.prepare(`SELECT b.name FROM user_badges ub JOIN badges b ON b.id=ub.badge_id WHERE ub.user_id=? ORDER BY ub.earned_at DESC LIMIT 8`).bind(user.id).all<{name:string}>()
-    ]);
+  if (path === "recap/2026" && method === "GET") {
+    const [vehicles, meets, cotwSubmissions, perfRecords, h2hRaces, discoveries, driveSessions, ghostEarned, bountyStats, convoyStats, seasonProgress, cotwWins, mods, badgeRows] = await Promise.all([env.DB.prepare(`SELECT COUNT(*) c FROM vehicles WHERE user_id = ?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COUNT(*) c FROM event_registrations WHERE user_id = ?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COUNT(*) c FROM car_of_the_week_submissions WHERE user_id = ?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COUNT(*) c FROM personal_performance_records WHERE user_id = ?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COUNT(*) c FROM head_to_head_races WHERE (driver_a_id = ? OR driver_b_id = ?) AND status = 'confirmed'`).bind(user.id, user.id).first<any>(), env.DB.prepare(`SELECT COUNT(*) c FROM map_discoveries WHERE user_id=?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COUNT(DISTINCT session_id) c FROM drive_trace_points WHERE user_id=?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COALESCE(SUM(amount),0) total FROM ghost_credit_transactions WHERE user_id=? AND amount>0`).bind(user.id).first<any>(), env.DB.prepare(`SELECT * FROM bounty_user_stats WHERE user_id=?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COUNT(*) c FROM cruise_members WHERE user_id=?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COALESCE(MAX(level),0) level FROM season_user_progress WHERE user_id=?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COUNT(*) c FROM car_of_the_week_winners WHERE user_id=?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT COUNT(*) c FROM mod_wishlist WHERE user_id=?`).bind(user.id).first<any>(), env.DB.prepare(`SELECT b.name FROM user_badges ub JOIN badges b ON b.id=ub.badge_id WHERE ub.user_id=? ORDER BY ub.earned_at DESC LIMIT 8`).bind(user.id).all<{ name: string }>()]);
 
     const primaryVehicle = await env.DB.prepare(`SELECT year, make, model, color, photo_url FROM vehicles WHERE user_id = ? ORDER BY is_active DESC LIMIT 1`).bind(user.id).first<any>();
 
-    const awards=badgeRows.results.map(row=>row.name);
-    const races=Number(user.wins||0)+Number(user.losses||0)||Number(h2hRaces?.c||0);
+    const awards = badgeRows.results.map((row) => row.name);
+    const races = Number(user.wins || 0) + Number(user.losses || 0) || Number(h2hRaces?.c || 0);
 
     return json({
       year: 2026,
       metrics: {
         milesDriven: 0,
-        roadsDiscovered: Number(discoveries?.c||0),
+        roadsDiscovered: Number(discoveries?.c || 0),
         districtsExplored: 0,
-        driverModeSessions: Number(driveSessions?.c||0),
+        driverModeSessions: Number(driveSessions?.c || 0),
         mostDrivenVehicle: primaryVehicle ? `${primaryVehicle.year} ${primaryVehicle.make} ${primaryVehicle.model}` : null,
-        ghostCreditsEarned: Number(ghostEarned?.total||0),
+        ghostCreditsEarned: Number(ghostEarned?.total || 0),
         ghostCachesClaimed: 0,
-        bountiesSurvived: Number(bountyStats?.escapes||0),
-        bountiesClaimed: Number(bountyStats?.successful_claims||0),
+        bountiesSurvived: Number(bountyStats?.escapes || 0),
+        bountiesClaimed: Number(bountyStats?.successful_claims || 0),
         convoyMiles: 0,
-        convoysJoined: Number(convoyStats?.c||0),
-        meetsAttended: Number(meets?.c||0),
+        convoysJoined: Number(convoyStats?.c || 0),
+        meetsAttended: Number(meets?.c || 0),
         meetsOrganized: 0,
         races,
-        wins: Number(user.wins||0),
-        losses: Number(user.losses||0),
-        winRatePct: Math.round((Number(user.wins||0)/Math.max(1,races))*100),
-        personalRecordsSet: Number(perfRecords?.c||0),
-        repEarned: Number(user.points||0),
-        seasonLevel: Number(seasonProgress?.level||0),
-        cotwNominations: Number(cotwSubmissions?.c||0),
-        cotwWins: Number(cotwWins?.c||0),
-        modsAdded: Number(mods?.c||0)
+        wins: Number(user.wins || 0),
+        losses: Number(user.losses || 0),
+        winRatePct: Math.round((Number(user.wins || 0) / Math.max(1, races)) * 100),
+        personalRecordsSet: Number(perfRecords?.c || 0),
+        repEarned: Number(user.points || 0),
+        seasonLevel: Number(seasonProgress?.level || 0),
+        cotwNominations: Number(cotwSubmissions?.c || 0),
+        cotwWins: Number(cotwWins?.c || 0),
+        modsAdded: Number(mods?.c || 0),
       },
       awards,
-      primaryVehicle
+      primaryVehicle,
     });
   }
 
   // =========================================================================
   // APEX USER SETTINGS ENDPOINTS
   // =========================================================================
-  if (path === 'settings' && method === 'GET') {
+  if (path === "settings" && method === "GET") {
     let settings = await env.DB.prepare(`SELECT * FROM apex_user_settings WHERE user_id = ?`).bind(user.id).first<any>();
     if (!settings) {
       await env.DB.prepare(`INSERT INTO apex_user_settings (user_id) VALUES (?)`).bind(user.id).run();
       settings = {
         user_id: user.id,
-        unit_preference: 'MPH',
+        unit_preference: "MPH",
         meet_notif_radius_miles: 25,
         meet_notifs_enabled: 1,
         convoy_radio_enabled: 1,
-        voice_permissions: 'granted',
+        voice_permissions: "granted",
         season_notifs_enabled: 1,
         public_performance_visibility: 1,
         public_race_records: 1,
@@ -2208,14 +3755,14 @@ async function handle(request: Request, env: Env, path: string) {
         vehicle_visibility: 1,
         meet_attendance_visibility: 1,
         location_visibility: 1,
-        map_style_preference: 'street'
+        map_style_preference: "street",
       };
     }
 
     // Ensure apex_id exists for user
     let userRow = await env.DB.prepare(`SELECT apex_id FROM users WHERE id = ?`).bind(user.id).first<any>();
     if (!userRow?.apex_id) {
-      const generatedApexId = `AK-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
+      const generatedApexId = `AK-${user.id.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
       await env.DB.prepare(`UPDATE users SET apex_id = ? WHERE id = ?`).bind(generatedApexId, user.id).run();
       userRow = { apex_id: generatedApexId };
     }
@@ -2223,10 +3770,11 @@ async function handle(request: Request, env: Env, path: string) {
     return json({ settings, apexId: userRow.apex_id });
   }
 
-  if (path === 'settings' && method === 'PUT') {
+  if (path === "settings" && method === "PUT") {
     const body = await request.json<any>();
-    const enabled=(value:unknown)=>value===false||value===0?0:1;
-    await env.DB.prepare(`
+    const enabled = (value: unknown) => (value === false || value === 0 ? 0 : 1);
+    await env.DB.prepare(
+      `
       INSERT INTO apex_user_settings
         (user_id, unit_preference, meet_notif_radius_miles, meet_notifs_enabled, convoy_radio_enabled, season_notifs_enabled, public_performance_visibility, public_race_records, apex_id_visibility, cotw_notifs_enabled, mod_sync_enabled, mod_price_alerts_enabled, navigation_audio_enabled, driver_mode_autostart, ghost_frequency_enabled, bounty_notifs_enabled, ghost_notifs_enabled, social_notifs_enabled, profile_visibility, vehicle_visibility, meet_attendance_visibility, location_visibility, map_style_preference, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -2254,134 +3802,143 @@ async function handle(request: Request, env: Env, path: string) {
         location_visibility = excluded.location_visibility,
         map_style_preference = excluded.map_style_preference,
         updated_at = CURRENT_TIMESTAMP
-    `).bind(
-      user.id, body.unit_preference || 'MPH', Number(body.meet_notif_radius_miles) || 25,
-      enabled(body.meet_notifs_enabled),enabled(body.convoy_radio_enabled),
-      enabled(body.season_notifs_enabled),enabled(body.public_performance_visibility),
-      enabled(body.public_race_records),enabled(body.apex_id_visibility),enabled(body.cotw_notifs_enabled),
-      enabled(body.mod_sync_enabled),enabled(body.mod_price_alerts_enabled),enabled(body.navigation_audio_enabled),
-      enabled(body.driver_mode_autostart),enabled(body.ghost_frequency_enabled),enabled(body.bounty_notifs_enabled),
-      enabled(body.ghost_notifs_enabled),enabled(body.social_notifs_enabled),enabled(body.profile_visibility),
-      enabled(body.vehicle_visibility),enabled(body.meet_attendance_visibility),enabled(body.location_visibility),
-      body.map_style_preference === 'satellite' ? 'satellite' : 'street'
-    ).run();
+    `,
+    )
+      .bind(user.id, body.unit_preference || "MPH", Number(body.meet_notif_radius_miles) || 25, enabled(body.meet_notifs_enabled), enabled(body.convoy_radio_enabled), enabled(body.season_notifs_enabled), enabled(body.public_performance_visibility), enabled(body.public_race_records), enabled(body.apex_id_visibility), enabled(body.cotw_notifs_enabled), enabled(body.mod_sync_enabled), enabled(body.mod_price_alerts_enabled), enabled(body.navigation_audio_enabled), enabled(body.driver_mode_autostart), enabled(body.ghost_frequency_enabled), enabled(body.bounty_notifs_enabled), enabled(body.ghost_notifs_enabled), enabled(body.social_notifs_enabled), enabled(body.profile_visibility), enabled(body.vehicle_visibility), enabled(body.meet_attendance_visibility), enabled(body.location_visibility), body.map_style_preference === "satellite" ? "satellite" : "street")
+      .run();
 
     return json({ success: true });
   }
 
-
   // =========================================================================
   // EBAY MARKETPLACE ACCOUNT DELETION COMPLIANCE ENDPOINT
   // =========================================================================
-  if (path === 'ebay/account-deletion') {
-    if (method === 'GET') {
+  if (path === "ebay/account-deletion") {
+    if (method === "GET") {
       const url = new URL(request.url);
-      const challengeCode = url.searchParams.get('challenge_code');
+      const challengeCode = url.searchParams.get("challenge_code");
       if (!challengeCode) {
-        return json({ error: 'Missing challenge_code query parameter.' }, 400);
+        return json({ error: "Missing challenge_code query parameter." }, 400);
       }
 
-      const verificationToken = env.EBAY_DELETION_VERIFICATION_TOKEN || 'apex_ebay_verification_token_2026';
-      const endpoint = env.EBAY_DELETION_ENDPOINT || 'https://apex-ugr.pages.dev/api/ebay/account-deletion';
+      const verificationToken = env.EBAY_DELETION_VERIFICATION_TOKEN || "apex_ebay_verification_token_2026";
+      const endpoint = env.EBAY_DELETION_ENDPOINT || "https://apex-ugr.pages.dev/api/ebay/account-deletion";
 
       const unhashed = challengeCode + verificationToken + endpoint;
       const encoder = new TextEncoder();
       const data = encoder.encode(unhashed);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const challengeResponse = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      const challengeResponse = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 
       return new Response(JSON.stringify({ challengeResponse }), {
         status: 200,
         headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
       });
     }
 
-    if (method === 'POST') {
+    if (method === "POST") {
       try {
         const body = await request.json<any>();
         const notificationId = body.notificationId || body.metadata?.notificationId || crypto.randomUUID();
         // Log deletion receipt idempotently
-        return json({ status: 'SUCCESS', notificationId, processedAt: new Date().toISOString() }, 200);
+        return json(
+          {
+            status: "SUCCESS",
+            notificationId,
+            processedAt: new Date().toISOString(),
+          },
+          200,
+        );
       } catch (e) {
-        return json({ status: 'ACKNOWLEDGED' }, 200);
+        return json({ status: "ACKNOWLEDGED" }, 200);
       }
     }
   }
 
-
   // =========================================================================
   // MAP DISCOVERY PERSISTENCE & NAVIGATION ENDPOINTS
   // =========================================================================
-  if (path === 'map/discoveries' && method === 'GET') {
+  if (path === "map/discoveries" && method === "GET") {
     const rows = await env.DB.prepare(`SELECT * FROM map_discoveries WHERE user_id = ? ORDER BY discovered_at DESC LIMIT 500`).bind(user.id).all();
     return json({ discoveries: rows.results });
   }
 
-  if (path === 'map/discover' && method === 'POST') {
+  if (path === "map/discover" && method === "POST") {
     const body = await request.json<any>();
     const lat = Number(body.latitude);
     const lng = Number(body.longitude);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return json({ error: 'Valid latitude and longitude required.' }, 400);
+      return json({ error: "Valid latitude and longitude required." }, 400);
     }
 
     const id = crypto.randomUUID();
     const cellKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       INSERT INTO map_discoveries (id, user_id, cell_key, latitude, longitude, district_name, discovered_at)
       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id, cell_key) DO UPDATE SET discovered_at = CURRENT_TIMESTAMP
-    `).bind(id, user.id, cellKey, lat, lng, body.district || 'Uncharted Territory').run();
+    `,
+    )
+      .bind(id, user.id, cellKey, lat, lng, body.district || "Uncharted Territory")
+      .run();
 
     return json({ success: true, cellKey });
   }
 
-  if (path === 'routes/navigate' && method === 'POST') {
+  if (path === "routes/navigate" && method === "POST") {
     const body = await request.json<any>();
     const { startLat, startLng, destLat, destLng } = body;
 
     if (!Number.isFinite(Number(startLat)) || !Number.isFinite(Number(destLat))) {
-      return json({ error: 'Valid start and destination coordinates required.' }, 400);
+      return json({ error: "Valid start and destination coordinates required." }, 400);
     }
 
     try {
       const routed = await osrmRoute(`${startLng},${startLat};${destLng},${destLat}`);
       if (!routed.segment) {
-        if (routed.status === 400) return json({ error: 'No route found between coordinates.' }, 400);
-        throw new Error('Routing providers unavailable');
+        if (routed.status === 400) return json({ error: "No route found between coordinates." }, 400);
+        throw new Error("Routing providers unavailable");
       }
 
       const route = routed.segment;
       if (!route.geometry?.coordinates?.length) {
-        return json({ error: 'No route found between coordinates.' }, 400);
+        return json({ error: "No route found between coordinates." }, 400);
       }
       const steps = route.legs?.[0]?.steps || [];
 
       return json({
         distanceMiles: Number((route.distance / 1609.34).toFixed(2)),
         durationMinutes: Math.ceil(route.duration / 60),
-        coordinates: route.geometry.coordinates.map((c: number[]) => ({ latitude: c[1], longitude: c[0] })),
+        coordinates: route.geometry.coordinates.map((c: number[]) => ({
+          latitude: c[1],
+          longitude: c[0],
+        })),
         steps: steps.map((s: any) => ({
-          instruction: s.maneuver?.type ? `${s.maneuver.type.toUpperCase()} onto ${s.name || 'Road'}` : 'Continue',
+          instruction: s.maneuver?.type ? `${s.maneuver.type.toUpperCase()} onto ${s.name || "Road"}` : "Continue",
           distanceMiles: Number((s.distance / 1609.34).toFixed(2)),
-          street: s.name || 'Main Corridor'
-        }))
+          street: s.name || "Main Corridor",
+        })),
       });
     } catch {
-      return json({ error: 'Routing service is temporarily unavailable. Retry in a moment.' }, 502);
+      return json(
+        {
+          error: "Routing service is temporarily unavailable. Retry in a moment.",
+        },
+        502,
+      );
     }
   }
-
 
   // =========================================================================
   // GHOST SHOP & VAULT ENDPOINTS
   // =========================================================================
-  if (path === 'ghost-shop/catalog' && method === 'GET') {
+  if (path === "ghost-shop/catalog" && method === "GET") {
     const items = await env.DB.prepare(`SELECT * FROM ghost_shop_items ORDER BY price_gc ASC`).all();
     const inventory = await env.DB.prepare(`SELECT item_id FROM ghost_inventory WHERE user_id = ?`).bind(user.id).all();
     const equipped = await env.DB.prepare(`SELECT * FROM ghost_equipped_items WHERE user_id = ?`).bind(user.id).all();
@@ -2390,61 +3947,71 @@ async function handle(request: Request, env: Env, path: string) {
       items: items.results,
       ownedItemIds: inventory.results.map((i: any) => i.item_id),
       equipped: equipped.results,
-      gcBalance: user.credits || 1000
+      gcBalance: user.credits || 1000,
     });
   }
 
-  if (path === 'ghost-shop/buy' && method === 'POST') {
+  if (path === "ghost-shop/buy" && method === "POST") {
     const body = await request.json<any>();
     const itemId = body.itemId;
 
     const item = await env.DB.prepare(`SELECT * FROM ghost_shop_items WHERE id = ?`).bind(itemId).first<any>();
-    if (!item) return json({ error: 'Shop item not found.' }, 404);
+    if (!item) return json({ error: "Shop item not found." }, 404);
 
     const owned = await env.DB.prepare(`SELECT 1 FROM ghost_inventory WHERE user_id = ? AND item_id = ?`).bind(user.id, itemId).first<any>();
-    if (owned) return json({ error: 'You already own this item.' }, 400);
+    if (owned) return json({ error: "You already own this item." }, 400);
 
     const price = item.price_gc || 0;
     if ((user.credits || 0) < price) {
-      return json({ error: 'Insufficient Ghost Credits balance.' }, 400);
+      return json({ error: "Insufficient Ghost Credits balance." }, 400);
     }
 
     const txId = crypto.randomUUID();
 
-    await env.DB.batch([
-      env.DB.prepare(`UPDATE users SET credits = credits - ? WHERE id = ?`).bind(price, user.id),
-      env.DB.prepare(`INSERT INTO ghost_inventory (user_id, item_id, acquired_source) VALUES (?, ?, 'shop_purchase')`).bind(user.id, itemId),
-      env.DB.prepare(`INSERT INTO ghost_credit_transactions (id, user_id, amount_gc, transaction_type, reference_id) VALUES (?, ?, ?, 'SHOP_BUY', ?)`).bind(txId, user.id, -price, itemId)
-    ]);
+    await env.DB.batch([env.DB.prepare(`UPDATE users SET credits = credits - ? WHERE id = ?`).bind(price, user.id), env.DB.prepare(`INSERT INTO ghost_inventory (user_id, item_id, acquired_source) VALUES (?, ?, 'shop_purchase')`).bind(user.id, itemId), env.DB.prepare(`INSERT INTO ghost_credit_transactions (id, user_id, amount_gc, transaction_type, reference_id) VALUES (?, ?, ?, 'SHOP_BUY', ?)`).bind(txId, user.id, -price, itemId)]);
 
     const updatedUser = await env.DB.prepare(`SELECT credits FROM users WHERE id = ?`).bind(user.id).first<any>();
 
     return json({
       success: true,
       itemId,
-      newGcBalance: updatedUser?.credits || 0
+      newGcBalance: updatedUser?.credits || 0,
     });
   }
 
-  if (path === 'ghost-shop/equip' && method === 'POST') {
+  if (path === "ghost-shop/equip" && method === "POST") {
     const body = await request.json<any>();
     const { itemId, category } = body;
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       INSERT INTO ghost_equipped_items (user_id, category, item_id, equipped_at)
       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id, category) DO UPDATE SET item_id = excluded.item_id, equipped_at = CURRENT_TIMESTAMP
-    `).bind(user.id, category || 'card', itemId).run();
+    `,
+    )
+      .bind(user.id, category || "card", itemId)
+      .run();
 
     return json({ success: true, itemId, category });
   }
 
-  return json({ error: 'Not found.' }, 404);
+  return json({ error: "Not found." }, 404);
 }
 
-export const onRequest: PagesFunction<Env> = async context => {
-  const raw=context.params.path;
-  const path=Array.isArray(raw)?raw.join('/'):String(raw||'');
-  try { return await handle(context.request,context.env,path); }
-  catch(error) { console.error(JSON.stringify({event:'api_error',path,message:error instanceof Error?error.message:'unknown'})); return json({error:'Request failed.'},500); }
+export const onRequest: PagesFunction<Env> = async (context) => {
+  const raw = context.params.path;
+  const path = Array.isArray(raw) ? raw.join("/") : String(raw || "");
+  try {
+    return await handle(context.request, context.env, path);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "api_error",
+        path,
+        message: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+    return json({ error: "Request failed." }, 500);
+  }
 };
