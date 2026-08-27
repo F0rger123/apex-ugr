@@ -1,6 +1,6 @@
 {
   "name": "apex-ugr",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -8,7 +8,8 @@
     "web": "expo start --web",
     "build": "npx expo export --platform web",
     "type-check": "tsc --noEmit",
-    "test:phase2": "node scripts/phase2Regression.mjs"
+    "test:phase2": "node scripts/phase2Regression.mjs",
+    "test:phase3": "node scripts/phase3Regression.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
@@ -22,6 +23,7 @@
     "expo": "~51.0.28",
     "expo-av": "~14.0.6",
     "expo-blur": "~13.0.3",
+    "expo-camera": "~15.0.16",
     "expo-device": "~6.0.2",
     "expo-haptics": "~13.0.1",
     "expo-image-picker": "~15.1.0",

@@ -33,6 +33,7 @@ import { useNotificationStore } from '../stores/notificationStore';
 import { useMessageStore } from '../stores/messageStore';
 import { cloudflareApi, hasCloudflareBackend } from '../config/cloudflareApi';
 import {playEngineSound,playInterfaceSound,setInterfaceAudioEnabled} from '../utils/soundSynthesizer';
+import {Phase3HudEvents,Phase3LeadersScreen,Phase3MeetsScreen,Phase3ProfileScreen,Phase3RaceScreen} from './phase3/Phase3Screens';
 import {
   Activity,
   BadgeCheck,
@@ -101,8 +102,8 @@ const surface = 'rgba(4, 8, 5, 0.86)';
 const border = 'rgba(255, 255, 255, 0.16)';
 const { width: screenWidth } = Dimensions.get('window');
 const ANDROID_DOWNLOAD_URL='https://apex-ugr.pages.dev/api/download/android';
-const APP_VERSION='1.4.0';
-const ANDROID_VERSION_CODE=14;
+const APP_VERSION='1.5.0';
+const ANDROID_VERSION_CODE=15;
 const SCRAMBLE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%&';
 const useNativeAnimations=Platform.OS!=='web';
 
@@ -118,13 +119,13 @@ if (Platform.OS !== 'web') {
   NativePolyline = maps.Polyline;
 }
 
-type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'parts' | 'meets' | 'messages' | 'leaderboard' | 'access' | 'settings' | 'bounty' | 'world' | 'season' | 'crews' | 'achievements';
+type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'parts' | 'meets' | 'messages' | 'leaderboard' | 'profile' | 'access' | 'settings' | 'bounty' | 'world' | 'season' | 'crews' | 'achievements';
 type IconType = any;
 
 const tabPaths:Record<TabKey,string>={
   command:'/app/command',radar:'/app/map',feed:'/app/feed',garage:'/app/garage',more:'/app/more',
   race:'/app/competition/races',vault:'/app/rewards/vault',shop:'/app/shop',parts:'/app/garage/parts',meets:'/app/events/meets',
-  messages:'/app/social/messages',leaderboard:'/app/competition/leaderboards',access:'/app/settings/access',settings:'/app/settings',bounty:'/app/map/bounty',world:'/app/map/world',season:'/app/season',crews:'/app/social/crews',achievements:'/app/profile/achievements',
+  messages:'/app/social/messages',leaderboard:'/app/competition/leaderboards',profile:'/app/profile',access:'/app/settings/access',settings:'/app/settings',bounty:'/app/map/bounty',world:'/app/map/world',season:'/app/season',crews:'/app/social/crews',achievements:'/app/profile/achievements',
 };
 const pathTabs=Object.entries(tabPaths).reduce<Record<string,TabKey>>((routes,[tab,path])=>({...routes,[path]:tab as TabKey}),{});
 pathTabs['/app/radar']='radar';
@@ -201,7 +202,7 @@ function ApexLogo(){
 }
 
 function EmptyVehicleIdentity(){
-  return <View style={styles.emptyBuildIdentity}><View style={styles.emptyBuildOrbitOuter}/><View style={styles.emptyBuildOrbitInner}/><View style={styles.emptyBuildCrosshairH}/><View style={styles.emptyBuildCrosshairV}/><ApexLogo/><View style={styles.emptyBuildSignal}><View style={styles.liveDot}/><Text style={styles.emptyBuildSignalText}>GARAGE SLOT 01 · UNBOUND</Text></View></View>;
+  return <View style={styles.emptyBuildIdentity}><View style={styles.emptyBuildOrbitOuter}/><View style={styles.emptyBuildOrbitInner}/><View style={styles.emptyBuildCrosshairH}/><View style={styles.emptyBuildCrosshairV}/><ApexLogo/></View>;
 }
 
 function GlitchBrand({subtitle}:{subtitle:string}){
@@ -353,7 +354,8 @@ function usePhase2State(intervalMs=7000){
 
 function countdownLabel(target?:string|null){
   const normalized=target&&/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(target)?`${target.replace(' ','T')}Z`:target;
-  const seconds=Math.max(0,Math.ceil((Date.parse(normalized||'')-Date.now())/1000));
+  const parsed=Date.parse(normalized||'');if(!Number.isFinite(parsed))return'--:--:--';
+  const seconds=Math.max(0,Math.ceil((parsed-Date.now())/1000));
   return`${String(Math.floor(seconds/3600)).padStart(2,'0')}:${String(Math.floor(seconds%3600/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
 }
 
@@ -407,7 +409,7 @@ function CommandScreen({ onTab, onProfile }: { onTab: (tab: TabKey) => void; onP
 
       <Pressable onPress={()=>onTab('bounty')} style={[styles.ghostProtocol,Boolean(bountyWorld)&&styles.bountySignalCard]}><Crosshair size={21} color={bountyWorld?accent:paper}/><View style={styles.commandCopy}><Text style={styles.commandTitle}>{bountyWorld?'BOUNTY SIGNAL ACTIVE':'NEXT BOUNTY SIGNAL'}</Text><Text style={styles.commandMeta}>{bountyWorld?`${'★'.repeat(bountyWorld.starLevel)} · ${bountyWorld.rewardGc} GC · ${bountyWorld.role?.toUpperCase()||bountyWorld.offer?.toUpperCase()||'NETWORK EVENT'}`:`SERVER WINDOW // ${countdownLabel(phase2.data?.bounty?.nextAt)}`}</Text></View><Text style={styles.sectionAction}>{bountyWorld?countdownLabel(bountyWorld.endsAt):'OPEN'}</Text></Pressable>
 
-      <Pressable onPress={()=>void (chestError?loadChest():claimChest())} disabled={claimingChest||(!chestError&&chest!==null&&!chest.available)} style={[styles.ghostProtocol,Boolean(chest&&!chest.available)&&styles.worldClaimed]}><Gift size={21} color={chest?.available?accent:chestError?'#FF625F':muted}/><View style={styles.commandCopy}><Text style={styles.commandTitle}>DAILY GHOST CHEST</Text><Text style={styles.commandMeta}>{chestError?'SIGNAL LOST · TAP TO RETRY':chest===null?'DECRYPTING DAILY SIGNAL':chest.available?'SIGNAL READY · TAP TO DECRYPT':`CLAIMED TODAY · ${chest.streakCount} DAY STREAK`}</Text></View><Text style={styles.sectionAction}>{claimingChest?'OPENING':chestError?'RETRY':chest?.available?'OPEN':chest?'SECURED':'SYNC'}</Text></Pressable>
+      <Phase3HudEvents/>
 
       <SectionTitle label="PILOT STATUS" action={profile ? 'LIVE RECORD' : 'OFFLINE'} />
       <GlassPanel glow>
@@ -811,7 +813,11 @@ function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
   const [comment, setComment] = useState('');
   const [activeIndex,setActiveIndex]=useState(0);
   const [videoMuted,setVideoMuted]=useState(true);
+  const [feedMode,setFeedMode]=useState('FOR_YOU');
+  const [postCategory,setPostCategory]=useState('BUILDS');
+  const feedModes=['FOR_YOU','CREWS','BUILDS','MEETS','PERFORMANCE','GHOST'];
   const feedPageHeight=Math.max(540,Dimensions.get('window').height-132);
+  useEffect(()=>{if(userId)void loadFeed(feedMode);},[feedMode,userId]);
 
   const pickMedia = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: .88, allowsEditing: false });
@@ -822,7 +828,7 @@ function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
   };
   const publish = async () => {
     if (!draftUri) return;
-    if (await createPost(draftUri, caption, draftType)) {
+    if (await createPost(draftUri, caption, draftType, postCategory)) {
       setComposerOpen(false); setDraftUri(null); setCaption('');
     }
   };
@@ -832,15 +838,16 @@ function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
         <View><Text style={styles.eyebrow}>ENCRYPTED SOCIAL</Text><Text style={styles.feedTitle}>THE CURRENT</Text></View>
         <View style={styles.feedHeaderActions}><GlassButton label="CREWS" icon={Users} compact onPress={()=>onTab('crews')}/><GlassButton label="COMMS" icon={MessagesSquare} compact onPress={()=>onTab('messages')}/><GlassButton label="POST" icon={Plus} compact onPress={() => setComposerOpen(value => !value)} active /></View>
       </View>
-      {composerOpen ? <View style={styles.feedComposerOverlay}><GlassPanel style={styles.composerPanel} glow><Pressable onPress={pickMedia} style={styles.mediaPicker}>{draftUri ? <Image source={{ uri: draftUri }} style={styles.composerPreview} /> : <><Plus size={24} color={accent} /><Text style={styles.composerHint}>SELECT PHOTO OR VIDEO</Text></>}</Pressable><TextInput value={caption} onChangeText={setCaption} placeholder="Caption your run, build, or meet" placeholderTextColor={muted} style={styles.composerInput} multiline maxLength={1200} /><View style={styles.composerActions}><GlassButton label="CANCEL" icon={X} compact onPress={() => setComposerOpen(false)} /><GlassButton label={loading ? 'UPLOADING' : 'PUBLISH'} icon={Send} compact onPress={publish} active /></View></GlassPanel></View> : null}
+      <ScrollView horizontal style={styles.feedModeScroll} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedModeRail}>{feedModes.map(mode=><Pressable key={mode} onPress={()=>setFeedMode(mode)} style={[styles.feedModeChip,feedMode===mode&&styles.feedModeChipActive]}><Text style={[styles.feedModeText,feedMode===mode&&styles.feedModeTextActive]}>{mode.replace('_',' ')}</Text></Pressable>)}</ScrollView>
+      {composerOpen ? <View style={styles.feedComposerOverlay}><GlassPanel style={styles.composerPanel} glow><Pressable onPress={pickMedia} style={styles.mediaPicker}>{draftUri ? <Image source={{ uri: draftUri }} style={styles.composerPreview} /> : <><Plus size={24} color={accent} /><Text style={styles.composerHint}>SELECT PHOTO OR VIDEO</Text></>}</Pressable><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedModeRail}>{['BUILDS','MEETS','PERFORMANCE','GHOST'].map(mode=><Pressable key={mode} onPress={()=>setPostCategory(mode)} style={[styles.feedModeChip,postCategory===mode&&styles.feedModeChipActive]}><Text style={[styles.feedModeText,postCategory===mode&&styles.feedModeTextActive]}>{mode}</Text></Pressable>)}</ScrollView><TextInput value={caption} onChangeText={setCaption} placeholder="Caption your run, build, or meet" placeholderTextColor={muted} style={styles.composerInput} multiline maxLength={1200} /><View style={styles.composerActions}><GlassButton label="CANCEL" icon={X} compact onPress={() => setComposerOpen(false)} /><GlassButton label={loading ? 'UPLOADING' : 'PUBLISH'} icon={Send} compact onPress={publish} active /></View></GlassPanel></View> : null}
       {!userId ? <GlassPanel style={styles.emptyState}><LockKeyhole size={28} color={accent} /><Text style={styles.emptyTitle}>LIVE FEED REQUIRES SIGN-IN</Text></GlassPanel> : null}
-      {error ? <Pressable onPress={loadFeed} style={styles.inlineError}><Text style={styles.networkError}>{error}</Text><Text style={styles.sectionAction}>RETRY</Text></Pressable> : null}
+      {error ? <Pressable onPress={()=>void loadFeed(feedMode)} style={styles.inlineError}><Text style={styles.networkError}>{error}</Text><Text style={styles.sectionAction}>RETRY</Text></Pressable> : null}
       {userId&&posts.length?<ScrollView showsVerticalScrollIndicator={false} pagingEnabled snapToInterval={feedPageHeight} decelerationRate="fast" onMomentumScrollEnd={event=>setActiveIndex(Math.round(event.nativeEvent.contentOffset.y/feedPageHeight))}>{posts.map((post,index)=><View key={post.id} style={[styles.feedPage,{height:feedPageHeight}]}>
         <View style={styles.feedMedia}>{post.videoUrl?<FeedVideo uri={post.videoUrl} active={activeIndex===index} muted={videoMuted}/>:<Image source={{uri:post.mediaUrl}} style={StyleSheet.absoluteFill} resizeMode="cover"/>}<LinearGradient pointerEvents="none" colors={['rgba(0,0,0,.05)','rgba(0,0,0,.08)','rgba(0,0,0,.88)']} style={StyleSheet.absoluteFill}/></View>
-        <View style={styles.feedCreator}>{post.avatarUrl?<Image source={{uri:post.avatarUrl}} style={styles.postAvatar}/>:<View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0,1)}</Text></View>}<View style={styles.commandCopy}><Text style={styles.postAlias}>@{post.alias}</Text><Text style={styles.postMeta}>{new Date(post.createdAt).toLocaleString()}</Text></View>{post.userId!==userId?<Pressable onPress={()=>{playInterfaceSound();void toggleFollow(post.userId);}} style={[styles.followButton,post.following&&styles.followButtonActive]}><Text style={styles.followText}>{post.following?'FOLLOWING':'FOLLOW'}</Text></Pressable>:null}</View>
+        <View style={styles.feedCreator}>{post.avatarUrl?<Image source={{uri:post.avatarUrl}} style={styles.postAvatar}/>:<View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0,1)}</Text></View>}<View style={styles.commandCopy}><Text style={styles.postAlias}>@{post.alias}</Text><Text style={styles.postMeta}>{new Date(post.createdAt).toLocaleString()}</Text></View>{post.userId!==userId?<Pressable accessibilityRole="button" accessibilityLabel={post.following?'Unfollow driver':'Follow driver'} onPress={()=>{playInterfaceSound();void toggleFollow(post.userId);}} style={[styles.followButton,post.following&&styles.followButtonActive]}><Text style={styles.followText}>{post.following?'FOLLOWING':'FOLLOW'}</Text></Pressable>:null}</View>
         <Text style={styles.feedCaption}>{post.caption||'Untitled transmission'}</Text>
-        <View style={styles.feedActionRail}><Pressable onPress={()=>{playInterfaceSound();void toggleLike(post.id);}} style={styles.feedAction}><Heart size={25} color={post.liked?accent:paper} fill={post.liked?accent:'transparent'}/><Text style={styles.feedActionCount}>{post.likes}</Text></Pressable><Pressable onPress={()=>{playInterfaceSound();setCommenting(commenting===post.id?null:post.id);}} style={styles.feedAction}><MessageCircle size={25} color={paper}/><Text style={styles.feedActionCount}>{post.comments}</Text></Pressable><Pressable onPress={()=>{playInterfaceSound();void toggleSave(post.id);}} style={styles.feedAction}><Bookmark size={24} color={post.saved?accent:paper} fill={post.saved?accent:'transparent'}/></Pressable><Pressable onPress={()=>{playInterfaceSound('toggle');setRadarTarget(post.userId);onTab('radar');}} style={styles.feedAction}><MapPin size={24} color={paper}/><Text style={styles.feedActionLabel}>MAP</Text></Pressable>{post.videoUrl?<Pressable onPress={()=>{playInterfaceSound('toggle');setVideoMuted(value=>!value);}} style={styles.feedAction}>{videoMuted?<VolumeX size={23} color={paper}/>:<Volume2 size={23} color={accent}/>}</Pressable>:null}</View>
-        {commenting===post.id?<View style={styles.feedCommentComposer}><TextInput value={comment} onChangeText={setComment} placeholder="Add a comment" placeholderTextColor={muted} style={styles.commentInput} maxLength={500}/><Pressable onPress={async()=>{if(await addComment(post.id,comment)){setComment('');setCommenting(null);}}}><Send size={19} color={accent}/></Pressable></View>:null}
+        <View style={styles.feedActionRail}><Pressable accessibilityRole="button" accessibilityLabel={post.liked?'Unlike post':'Like post'} onPress={()=>{playInterfaceSound();void toggleLike(post.id);}} style={styles.feedAction}><Heart size={25} color={post.liked?accent:paper} fill={post.liked?accent:'transparent'}/><Text style={styles.feedActionCount}>{post.likes}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Comment on post" onPress={()=>{playInterfaceSound();setCommenting(commenting===post.id?null:post.id);}} style={styles.feedAction}><MessageCircle size={25} color={paper}/><Text style={styles.feedActionCount}>{post.comments}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={post.saved?'Remove saved post':'Save post'} onPress={()=>{playInterfaceSound();void toggleSave(post.id);}} style={styles.feedAction}><Bookmark size={24} color={post.saved?accent:paper} fill={post.saved?accent:'transparent'}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Show driver on map" onPress={()=>{playInterfaceSound('toggle');setRadarTarget(post.userId);onTab('radar');}} style={styles.feedAction}><MapPin size={24} color={paper}/><Text style={styles.feedActionLabel}>MAP</Text></Pressable>{post.videoUrl?<Pressable accessibilityRole="button" accessibilityLabel={videoMuted?'Unmute video':'Mute video'} onPress={()=>{playInterfaceSound('toggle');setVideoMuted(value=>!value);}} style={styles.feedAction}>{videoMuted?<VolumeX size={23} color={paper}/>:<Volume2 size={23} color={accent}/>}</Pressable>:null}</View>
+        {commenting===post.id?<View style={styles.feedCommentComposer}><TextInput value={comment} onChangeText={setComment} placeholder="Add a comment" placeholderTextColor={muted} style={styles.commentInput} maxLength={500}/><Pressable accessibilityRole="button" accessibilityLabel="Send comment" onPress={async()=>{if(await addComment(post.id,comment)){setComment('');setCommenting(null);}}}><Send size={19} color={accent}/></Pressable></View>:null}
       </View>)}</ScrollView>:null}
       {userId&&!loading&&!posts.length?<GlassPanel style={styles.emptyState}><Radio size={28} color={accent}/><Text style={styles.emptyTitle}>NO TRANSMISSIONS YET</Text><Text style={styles.emptyCopy}>Post the first photo or video to this network.</Text></GlassPanel>:null}
     </View>
@@ -1381,9 +1388,9 @@ function RaceScreen() {
 function VaultScreen() {
   const profile = useContentStore(state => state.profile);
   const balance = profile?.credits || 0;
-  const [ghost,setGhost]=useState<any|null>(null);const [shop,setShop]=useState<any[]>([]);const [rank,setRank]=useState<any|null>(null);const [refreshesAt,setRefreshesAt]=useState<string|null>(null);const [now,setNow]=useState(Date.now());const [category,setCategory]=useState('all');const [loading,setLoading]=useState(true);const [status,setStatus]=useState('');
+  const [ghost,setGhost]=useState<any|null>(null);const [shop,setShop]=useState<any[]>([]);const [rank,setRank]=useState<any|null>(null);const [keyState,setKeyState]=useState<any>({wallet:{balance:0},unlocks:[]});const [refreshesAt,setRefreshesAt]=useState<string|null>(null);const [now,setNow]=useState(Date.now());const [category,setCategory]=useState('all');const [loading,setLoading]=useState(true);const [status,setStatus]=useState('');
   const phase2=usePhase2State(12000);const [tradeRecipient,setTradeRecipient]=useState('');const [tradeInstance,setTradeInstance]=useState('');
-  const load=async()=>{setLoading(true);try{const [profileData,shopData,rankData]=await Promise.all([cloudflareApi.request<any>('/api/ghost/profile'),cloudflareApi.request<any>('/api/ghost/shop'),cloudflareApi.request<any>('/api/rank')]);setGhost(profileData);setShop(shopData.items||[]);setRank(rankData);setRefreshesAt(shopData.refreshesAt||null);setStatus('');}catch(error){setStatus(error instanceof Error?error.message:'Ghost network unavailable.');}finally{setLoading(false);}};
+  const load=async()=>{setLoading(true);try{const [profileData,shopData,rankData,keys]=await Promise.all([cloudflareApi.request<any>('/api/ghost/profile'),cloudflareApi.request<any>('/api/ghost/shop'),cloudflareApi.request<any>('/api/rank'),cloudflareApi.request<any>('/api/v3/ghost-keys')]);setGhost(profileData);setShop(shopData.items||[]);setRank(rankData);setKeyState(keys);setRefreshesAt(shopData.refreshesAt||null);setStatus('');}catch(error){setStatus(error instanceof Error?error.message:'Ghost network unavailable.');}finally{setLoading(false);}};
   useEffect(()=>{void load();},[]);
   useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[]);
   const purchase=async(id:string)=>{try{await cloudflareApi.request(`/api/ghost/shop/${id}/purchase`,{method:'POST'});playInterfaceSound('unlock');await load();}catch(error){setStatus(error instanceof Error?error.message:'Purchase failed.');playInterfaceSound('error');}};
@@ -1392,9 +1399,11 @@ function VaultScreen() {
   const createTrade=async()=>{if(!tradeRecipient.trim()||!tradeInstance)return;try{await cloudflareApi.request('/api/trades',{method:'POST',body:JSON.stringify({recipient:tradeRecipient,instanceIds:[tradeInstance],message:'Encrypted Apex cosmetic transfer'})});setTradeRecipient('');setTradeInstance('');setStatus('TRADE OFFER ENCRYPTED');await phase2.reload();}catch(error){setStatus(error instanceof Error?error.message:'Trade could not be created.');}};
   const tradeAction=async(id:string,action:'accept'|'decline'|'cancel')=>{try{await cloudflareApi.request(`/api/trades/${id}/${action}`,{method:'POST'});setStatus(`TRADE ${action.toUpperCase()}`);await phase2.reload();await load();}catch(error){setStatus(error instanceof Error?error.message:'Trade update failed.');}};
   const copyReferral=async()=>{const link=`${Platform.OS==='web'&&typeof window!=='undefined'?window.location.origin:''}${phase2.data?.referrals?.link||''}`;if(Platform.OS==='web'&&navigator.clipboard)await navigator.clipboard.writeText(link);Alert.alert('Referral channel',`${link}\n\nCopied to clipboard.`);};
+  const unlockBlackMarket=async()=>{try{const result=await cloudflareApi.request<any>('/api/v3/ghost-keys/unlock',{method:'POST',body:JSON.stringify({unlockType:'black_market',unlockId:'vault'})});setStatus(result.replayed?'BLACK MARKET ACCESS RESTORED':'GHOST KEY CONSUMED // BLACK MARKET DECRYPTED');playInterfaceSound('unlock');await Promise.all([load(),phase2.reload()]);}catch(error){setStatus(error instanceof Error?error.message:'Black Market decryption failed.');playInterfaceSound('error');}};
   const categories=[['all','ALL'],['frame','FRAMES'],['card','DRIVER CARDS'],['banner','BANNERS'],['badge','BADGES'],['garage','GARAGE'],['map','MAP'],['showcase','SHOWCASE'],['black_market','BLACK MARKET']];
   const equippedByCategory=Object.fromEntries((ghost?.equipped||[]).map((entry:any)=>[entry.category,entry.item_id]));
-  const visibleShop=shop.filter(item=>category==='all'||(category==='black_market'?(item.drop_source==='black_market'||item.rarity==='CLASSIFIED'):item.category===category));
+  const blackMarketUnlocked=(keyState.unlocks||[]).some((entry:any)=>entry.unlock_type==='black_market'&&entry.unlock_id==='vault');
+  const visibleShop=shop.filter(item=>category==='all'||(category==='black_market'?(blackMarketUnlocked&&(item.drop_source==='black_market'||item.rarity==='CLASSIFIED')):item.category===category));
   const secondsRemaining=refreshesAt?Math.max(0,Math.ceil((Date.parse(refreshesAt)-now)/1000)):0;
   const refreshLabel=`${String(Math.floor(secondsRemaining/3600)).padStart(2,'0')}:${String(Math.floor(secondsRemaining%3600/60)).padStart(2,'0')}:${String(secondsRemaining%60).padStart(2,'0')}`;
   return (
@@ -1415,6 +1424,7 @@ function VaultScreen() {
       <GlassPanel style={styles.loadoutPreview} glow><View style={styles.loadoutFrame}><Text style={styles.loadoutPilot}>{profile?.alias?.toUpperCase()||'UNKNOWN PILOT'}</Text><Text style={styles.loadoutRank}>{rank?.rank||profile?.tier||'ROOKIE'}</Text><Text style={styles.loadoutVehicle}>{Object.values(equippedByCategory).length ? Object.values(equippedByCategory).join(' // ') : 'STANDARD SIGNAL'}</Text></View><View style={styles.loadoutSlots}>{Object.entries(equippedByCategory).map(([slot,itemId])=><Pressable key={slot} onPress={()=>void unequip(slot)} style={styles.loadoutSlot}><Text style={styles.loadoutSlotText}>{slot.toUpperCase()}</Text><X size={12} color={muted}/></Pressable>)}{!Object.keys(equippedByCategory).length?<Text style={styles.commandMeta}>OWN A COSMETIC TO CUSTOMIZE YOUR DRIVER CARD.</Text>:null}</View></GlassPanel>
       <SectionTitle label="GHOST SHOP" action={`REFRESHES // ${refreshLabel}`} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shopCategoryRail}>{categories.map(([value,label])=><Pressable key={value} onPress={()=>setCategory(value)} style={[styles.shopCategoryChip,category===value&&styles.shopCategoryChipActive]}><Text style={[styles.shopCategoryText,category===value&&styles.shopCategoryTextActive]}>{label}</Text></Pressable>)}</ScrollView>
+      {category==='black_market'&&!blackMarketUnlocked?<GlassPanel glow><View style={styles.healthRow}><LockKeyhole size={27} color={accent}/><View style={styles.commandCopy}><Text style={styles.commandTitle}>BLACK MARKET // ENCRYPTED</Text><Text style={styles.commandMeta}>Spend one gameplay-earned Ghost Key to permanently decrypt this pilot's classified cosmetic channel.</Text></View></View><GlassButton label={`USE GHOST KEY // ${keyState.wallet?.balance||0} AVAILABLE`} icon={LockKeyhole} onPress={()=>void unlockBlackMarket()} active={Number(keyState.wallet?.balance||0)>0}/></GlassPanel>:null}
       {visibleShop.map(item=>{const equipped=equippedByCategory[item.category]===item.id;const locked=!item.owned&&((item.requirement_type==='streak'&&Number(ghost?.profile?.current_streak||0)<Number(item.requirement_value))||(item.requirement_type==='rank'&&Number(rank?.rep||0)<Number(item.requirement_value)));const previewIcon=item.category==='frame'?UserRound:item.category==='card'?BadgeCheck:item.category==='banner'?Layers3:item.category==='map'||item.category==='route_line'?Map:item.category==='garage'||item.category==='safe_house'?CarFront:item.category==='showcase'?Sparkles:Medal;const Preview=previewIcon;return <GlassPanel key={item.id} style={[styles.ghostShopCard,locked&&styles.ghostShopLocked]} glow={['LEGENDARY','GHOST','CLASSIFIED'].includes(item.rarity)}><View style={[styles.ghostShopPreview,{borderColor:rarityColor(item.rarity)}]}><Preview size={30} color={equipped?'#2CFF83':rarityColor(item.rarity)}/><Text style={styles.ghostShopPreviewLabel}>{item.category.toUpperCase()}</Text></View><View style={styles.ghostShopContent}><View style={styles.worldCardTop}><View style={styles.commandCopy}><Text style={styles.commandTitle}>{String(item.name).toUpperCase()}</Text><Text style={styles.commandMeta}>{item.description}</Text><Text style={[styles.rarityLabel,{color:rarityColor(item.rarity)}]}>{item.rarity} · {item.tradeable?'TRADEABLE':'SOULBOUND'}{item.supply_limit?` · ${item.quantity_minted}/${item.supply_limit}`:''}</Text><Text style={styles.commandMeta}>{item.requirement_type?`${item.requirement_type.toUpperCase()} ${item.requirement_value}`:'OPEN ACCESS'}</Text></View><Text style={styles.contractReward}>{item.price_gc} GC</Text></View><View style={styles.ghostShopAction}>{equipped?<GlassButton label="UNEQUIP" icon={X} onPress={()=>void unequip(item.category)} grow/>:item.owned?<GlassButton label="EQUIP" icon={Check} onPress={()=>void equip(item.id)} active grow/>:<GlassButton label={locked?'ACCESS DENIED':'DECRYPT + BUY'} icon={locked?LockKeyhole:ShoppingBag} onPress={()=>void purchase(item.id)} active={!locked} grow/>}</View></View></GlassPanel>;})}
       {!loading&&!visibleShop.length?<GlassPanel style={styles.emptyState}><Radio size={26} color={accent}/><Text style={styles.emptyTitle}>NO SIGNALS IN THIS CHANNEL</Text><Text style={styles.emptyCopy}>The next secure shop rotation may reveal new inventory.</Text></GlassPanel>:null}
       <SectionTitle label="COSMETIC TRADING" action={`${phase2.data?.trading?.trades?.filter((trade:any)=>trade.status==='pending').length||0} PENDING`}/><GlassPanel><TextInput value={tradeRecipient} onChangeText={setTradeRecipient} placeholder="Recipient username or email" placeholderTextColor={muted} style={styles.authInput}/><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shopCategoryRail}>{(phase2.data?.trading?.instances||[]).filter((instance:any)=>instance.tradeable).map((instance:any)=><Pressable key={instance.id} onPress={()=>setTradeInstance(instance.id)} style={[styles.tradeInstance,tradeInstance===instance.id&&styles.frequencyChipActive]}><Text style={styles.commandTitle}>{instance.name}</Text><Text style={styles.commandMeta}>{instance.rarity}{instance.serial_number?` · #${String(instance.serial_number).padStart(4,'0')}${instance.supply_limit?`/${String(instance.supply_limit).padStart(4,'0')}`:''}`:''}</Text></Pressable>)}</ScrollView><GlassButton label="CREATE TRADE OFFER" icon={Send} onPress={()=>void createTrade()} active={Boolean(tradeRecipient&&tradeInstance)}/></GlassPanel>{(phase2.data?.trading?.trades||[]).slice(0,8).map((trade:any)=><GlassPanel key={trade.id}><View style={styles.healthRow}><View style={styles.commandCopy}><Text style={styles.commandTitle}>{trade.item_names||'ENCRYPTED COSMETIC'}</Text><Text style={styles.commandMeta}>{trade.sender_username} → {trade.recipient_username} · {trade.status.toUpperCase()}</Text></View>{trade.status==='pending'&&trade.recipient_user_id===useContentStore.getState().userId?<View style={styles.sheetActions}><GlassButton label="ACCEPT" icon={Check} onPress={()=>void tradeAction(trade.id,'accept')} compact active/><GlassButton label="DECLINE" icon={X} onPress={()=>void tradeAction(trade.id,'decline')} compact/></View>:trade.status==='pending'?<GlassButton label="CANCEL" icon={X} onPress={()=>void tradeAction(trade.id,'cancel')} compact/>:null}</View></GlassPanel>)}
@@ -1543,12 +1553,17 @@ export function ApexDesignPreview() {
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode,setAuthMode]=useState<'signin'|'signup'>('signin');
   const [inviteCode,setInviteCode]=useState<string|null>(null);
+  const [selectedProfileId,setSelectedProfileId]=useState<string|null>(null);
   const [booted,setBooted]=useState(false);
+  const [reduceMotion,setReduceMotion]=useState(false);
   const unreadCount = useNotificationStore(state => state.unreadCount);
   const userId = useContentStore(state => state.userId);
   const entrance = useRef(new Animated.Value(1)).current;
+  const primaryNavRef=useRef<ScrollView>(null);
   const handlingHistory=useRef(false);
   const pendingDeepLink=useRef(initialRoute.started);
+
+  useEffect(()=>{AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);const subscription=AccessibilityInfo.addEventListener('reduceMotionChanged',setReduceMotion);return()=>subscription.remove();},[]);
 
   useEffect(() => {
     const initialize = async () => {
@@ -1576,6 +1591,7 @@ export function ApexDesignPreview() {
   }, []);
 
   useEffect(()=>{if(!booted)return;if(!userId){setGameStarted(false);return;}const deepLink=routeState();if(deepLink.started){pendingDeepLink.current=false;setTab(deepLink.tab);setGameStarted(true);}},[userId,booted]);
+  useEffect(()=>{const activeKey=['profile','vault','access','settings','world','season','achievements','more'].includes(tab)?'command':tab==='bounty'?'radar':['messages','crews'].includes(tab)?'feed':tab;const index=tabs.findIndex(item=>item.key===activeKey);if(index<0)return;const timer=setTimeout(()=>{if(index>=4)primaryNavRef.current?.scrollToEnd({animated:!reduceMotion});else primaryNavRef.current?.scrollTo({x:0,animated:!reduceMotion});},260);return()=>clearTimeout(timer);},[tab,reduceMotion]);
 
   useEffect(()=>{
     if(Platform.OS!=='web'||!booted)return;
@@ -1603,11 +1619,12 @@ export function ApexDesignPreview() {
     if (tab === 'feed') return <FeedScreen onTab={setTab} />;
     if (tab === 'garage') return <GarageScreen onTab={setTab} />;
     if (tab === 'more') return <MoreScreen onTab={setTab} />;
-    if (tab === 'race') return <RaceScreen />;
+    if (tab === 'race') return <Phase3RaceScreen contracts={<RaceScreen/>}/>;
     if (tab === 'vault') return <VaultScreen />;
     if (tab === 'shop') return <VaultScreen />;
     if (tab === 'parts') return <ShopScreen />;
-    if (tab === 'leaderboard') return <LeaderboardScreen />;
+    if (tab === 'leaderboard') return <Phase3LeadersScreen onProfile={id=>{setSelectedProfileId(id);setTab('profile');}}/>;
+    if (tab === 'profile') return <Phase3ProfileScreen driverId={selectedProfileId} onClose={selectedProfileId?()=>{setSelectedProfileId(null);setTab('leaderboard');}:undefined}/>;
     if (tab === 'access') return <DeveloperAccessScreen />;
     if (tab === 'settings') return <SettingsScreen />;
     if (tab === 'bounty') return <BountyScreen onTab={setTab}/>;
@@ -1615,9 +1632,10 @@ export function ApexDesignPreview() {
     if (tab === 'season') return <SeasonHubScreen onTab={setTab}/>;
     if (tab === 'crews') return <CrewNetworkScreen onTab={setTab}/>;
     if (tab === 'achievements') return <AchievementsScreen/>;
-    if (tab === 'meets' || tab === 'messages') return <UtilityScreen kind={tab} />;
-    return <CommandScreen onTab={setTab} onProfile={()=>{setAuthMode('signin');setAuthOpen(true);}} />;
-  }, [tab]);
+    if (tab === 'meets') return <Phase3MeetsScreen network={<MeetScreen/>}/>;
+    if (tab === 'messages') return <UtilityScreen kind={tab} />;
+    return <CommandScreen onTab={setTab} onProfile={()=>{setSelectedProfileId(null);setTab('profile');}} />;
+  }, [tab,selectedProfileId]);
 
   if(!booted)return <SafeAreaView style={styles.app}><AtmosphereBackdrop/><View style={styles.bootScreen}><View style={styles.bootLock}><LockKeyhole size={74} color={paper} strokeWidth={1.1}/></View><ApexLogo/><Text style={styles.bootLabel}>ESTABLISHING PRIVATE CHANNEL</Text></View></SafeAreaView>;
   if(!userId)return <SafeAreaView style={styles.app}>{inviteCode?<AtmosphereBackdrop/>:<AccessPortal onUnlock={code=>{setInviteCode(code);setAuthMode('signup');setAuthOpen(true);}}/>}{authOpen?<AuthPanel key={`${authMode}-${inviteCode||'owner'}`} onClose={()=>{setAuthOpen(false);setInviteCode(null);}} onOpen={setTab} initialMode={authMode} inviteCode={inviteCode}/>:null}</SafeAreaView>;
@@ -1632,7 +1650,7 @@ export function ApexDesignPreview() {
           {screenWidth<360?<Text style={styles.compactHeaderBrand}>APEX</Text>:<GlitchBrand subtitle="UNDERGROUND RACING NETWORK"/>}
         </View>
         <View style={styles.headerRight}>
-          <Pressable accessibilityLabel="Encrypted account" onPress={() => {playInterfaceSound();setAuthMode('signin');setAuthOpen(true);}} style={screenWidth<360?styles.signalCompact:styles.signal}><View style={styles.liveDot} />{screenWidth>=360?<Text style={styles.signalText}>ENCRYPTED</Text>:null}</Pressable>
+          <Pressable accessibilityLabel="Open driver profile" onPress={() => {playInterfaceSound();setSelectedProfileId(null);setTab('profile');}} style={screenWidth<360?styles.signalCompact:styles.signal}><View style={styles.liveDot} />{screenWidth>=360?<Text style={styles.signalText}>PROFILE</Text>:null}</Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Open leaderboard" onPress={() => {playInterfaceSound();setTab('leaderboard');}} style={styles.iconButton}><Trophy size={17} color={paper} /></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Open notifications" onPress={() => {playInterfaceSound();setNotificationsOpen(true);}} style={styles.iconButton}><Bell size={18} color={paper} />{unreadCount > 0 ? <View style={styles.headerUnread} /> : null}</Pressable>
         </View>
@@ -1645,10 +1663,10 @@ export function ApexDesignPreview() {
       <View pointerEvents="box-none" style={styles.tabBarPositioner}>
         <View style={styles.tabBarShell}>
           <BlurView intensity={42} tint="dark" style={styles.tabBar}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.primaryNavRail}>
+            <ScrollView ref={primaryNavRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.primaryNavRail}>
             {tabs.map(item => {
               const Icon = item.icon;
-              const activeTab = tab === item.key || (item.key === 'command' && ['vault', 'access', 'settings', 'world', 'season', 'achievements', 'more'].includes(tab)) || (item.key === 'radar' && ['bounty'].includes(tab)) || (item.key === 'feed' && ['messages','crews'].includes(tab));
+              const activeTab = tab === item.key || (item.key === 'command' && ['profile','vault', 'access', 'settings', 'world', 'season', 'achievements', 'more'].includes(tab)) || (item.key === 'radar' && ['bounty'].includes(tab)) || (item.key === 'feed' && ['messages','crews'].includes(tab));
               return (
                 <Pressable key={item.key} onPress={() => {playInterfaceSound();setTab(item.key);}} style={styles.tabItem}>
                   <View style={[styles.tabIcon, activeTab && styles.tabIconActive]}><Icon size={19} color={activeTab ? accent : muted} strokeWidth={2.1} /></View>
@@ -2291,6 +2309,12 @@ const styles = StyleSheet.create({
   feedFloatingHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30, minHeight: 72, paddingHorizontal: 15, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(1,3,2,.62)', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.10)' },
   feedFloatingHeaderCompact: { minHeight: 114, alignItems: 'stretch', flexDirection: 'column', gap: 8 },
   feedHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  feedModeScroll: { flexGrow: 0, height: 49, minHeight: 49, maxHeight: 49, marginTop: screenWidth < 520 ? 114 : 72, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.08)' },
+  feedModeRail: { gap: 7, paddingHorizontal: 12, paddingVertical: 8 },
+  feedModeChip: { height: 32, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,.16)', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(4,7,5,.86)' },
+  feedModeChipActive: { borderColor: accent, backgroundColor: 'rgba(167,229,154,.14)' },
+  feedModeText: { color: muted, fontSize: 8, fontWeight: '900' },
+  feedModeTextActive: { color: paper },
   feedComposerOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 45, paddingTop: 78, backgroundColor: 'rgba(0,0,0,.78)' },
   feedPage: { width: '100%', position: 'relative', backgroundColor: '#020302', overflow: 'hidden' },
   feedMedia: { ...StyleSheet.absoluteFillObject, backgroundColor: '#050705' },
@@ -2304,7 +2328,7 @@ const styles = StyleSheet.create({
   feedAction: { minWidth: 45, minHeight: 42, alignItems: 'center', justifyContent: 'center', gap: 3 },
   feedActionCount: { color: paper, fontSize: 8, fontWeight: '900' },
   feedActionLabel: { color: paper, fontSize: 6, fontWeight: '900' },
-  feedCommentComposer: { position: 'absolute', left: 12, right: 12, bottom: 18, minHeight: 48, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(3,6,4,.9)' },
+  feedCommentComposer: { position: 'absolute', left: 12, right: 64, bottom: 88, zIndex: 24, minHeight: 48, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(3,6,4,.96)' },
   composerPanel: { marginHorizontal: 14, marginBottom: 12 },
   mediaPicker: { minHeight: 150, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(145,185,133,.4)', backgroundColor: 'rgba(145,185,133,.05)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   composerPreview: { width: '100%', height: 210, resizeMode: 'cover' },
