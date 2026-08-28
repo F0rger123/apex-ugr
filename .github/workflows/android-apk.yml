@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      promote:
+        description: Promote this verified build to the public Android download
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -20,6 +26,11 @@ jobs:
       APEX_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.APEX_ANDROID_KEYSTORE_PASSWORD }}
       APEX_ANDROID_KEY_ALIAS: ${{ secrets.APEX_ANDROID_KEY_ALIAS }}
       APEX_ANDROID_KEY_PASSWORD: ${{ secrets.APEX_ANDROID_KEY_PASSWORD }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      R2_BUCKET: apex-ugr-media
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +51,7 @@ jobs:
           npm run type-check
           npm run build
           npx wrangler pages functions build functions --outdir .wrangler/functions-build
-          node scripts/navigationSimulation.mjs
+          node scripts/navigationRegression.mjs
 
       - name: Generate Android project
         run: npx expo prebuild --platform android --no-install --clean
@@ -78,22 +89,72 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs apex-ugr.apk
           unzip -t apex-ugr.apk >/dev/null
 
-      - name: Publish public Cloudflare download
-        if: github.ref == 'refs/heads/main'
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)"
+          APP_VERSION="$(node -p "require('./app.json').expo.version")"
+          VERSION_CODE="$(node -p "require('./app.json').expo.android.versionCode")"
+          BADGING="$("$AAPT" dump badging apex-ugr.apk | head -1)"
+          echo "$BADGING" | grep -F "name='com.apexugr.app'"
+          echo "$BADGING" | grep -F "versionCode='${VERSION_CODE}'"
+          echo "$BADGING" | grep -F "versionName='${APP_VERSION}'"
+
+      - name: Prepare immutable release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(node -p "require('./app.json').expo.version")"
+          VERSION_CODE="$(node -p "require('./app.json').expo.android.versionCode")"
+          SHA256="$(sha256sum apex-ugr.apk | cut -d' ' -f1)"
+          SIZE="$(stat -c%s apex-ugr.apk)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          SIGNER_FINGERPRINT="$("$APKSIGNER" verify --print-certs apex-ugr.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
+          test -n "$SIGNER_FINGERPRINT"
+          OBJECT_KEY="android/releases/${APP_VERSION}/${VERSION_CODE}/${SHA256}/apex-ugr.apk"
+          UPLOADED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '%s\n' \
+            "version=${APP_VERSION}" "version_code=${VERSION_CODE}" "sha256=${SHA256}" \
+            "size=${SIZE}" "signer_fingerprint=${SIGNER_FINGERPRINT}" \
+            "object_key=${OBJECT_KEY}" "uploaded_at=${UPLOADED_AT}" >> "$GITHUB_OUTPUT"
+          node -e 'const fs=require("fs"); const v={version:process.argv[1],versionCode:Number(process.argv[2]),commit:process.env.GITHUB_SHA,sha256:process.argv[3],size:Number(process.argv[4]),signingFingerprint:process.argv[5],uploadedAt:process.argv[6],objectKey:process.argv[7]}; fs.writeFileSync("android-release.json",JSON.stringify(v,null,2));' \
+            "$APP_VERSION" "$VERSION_CODE" "$SHA256" "$SIZE" "$SIGNER_FINGERPRINT" "$UPLOADED_AT" "$OBJECT_KEY"
+
+      - name: Upload immutable APK directly to R2
+        env:
+          OBJECT_KEY: ${{ steps.release.outputs.object_key }}
+          SHA256: ${{ steps.release.outputs.sha256 }}
+          APP_VERSION: ${{ steps.release.outputs.version }}
+          VERSION_CODE: ${{ steps.release.outputs.version_code }}
+          SIGNER_FINGERPRINT: ${{ steps.release.outputs.signer_fingerprint }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp apex-ugr.apk "s3://${R2_BUCKET}/${OBJECT_KEY}" --endpoint-url "$ENDPOINT" \
+            --content-type application/vnd.android.package-archive \
+            --content-disposition 'attachment; filename="apex-ugr.apk"' \
+            --cache-control 'public,max-age=31536000,immutable' \
+            --metadata "sha256=${SHA256},version=${APP_VERSION},versioncode=${VERSION_CODE},commit=${GITHUB_SHA},signingfingerprint=${SIGNER_FINGERPRINT}"
+          aws s3api head-object --bucket "$R2_BUCKET" --key "$OBJECT_KEY" --endpoint-url "$ENDPOINT" > r2-head.json
+          test "$(node -p "require('./r2-head.json').ContentLength")" = "${{ steps.release.outputs.size }}"
+          aws s3 cp "s3://${R2_BUCKET}/${OBJECT_KEY}" "$RUNNER_TEMP/r2-verify.apk" --endpoint-url "$ENDPOINT" --no-progress
+          echo "${SHA256}  $RUNNER_TEMP/r2-verify.apk" | sha256sum --check --strict
+
+      - name: Atomically promote public Cloudflare download
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.promote == true)
         env:
           RELEASE_UPLOAD_TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
         run: |
-          APP_VERSION="$(node -p "require('./app.json').expo.version")"
-          VERSION_CODE="$(node -p "require('./app.json').expo.android.versionCode")"
           curl --fail --show-error --retry 3 \
-            -H "Content-Type: application/vnd.android.package-archive" \
+            -H "Content-Type: application/json" \
             -H "X-Apex-Release-Token: $RELEASE_UPLOAD_TOKEN" \
-            -H "X-Apex-Version: ${APP_VERSION} (${VERSION_CODE})" \
-            --data-binary @apex-ugr.apk \
-            https://apex-ugr.pages.dev/api/admin/android-release
+            --data-binary @android-release.json \
+            https://apex-ugr.pages.dev/api/admin/android-release/promote | tee promotion.json
+          node -e 'const p=require("./promotion.json"); if(!p.promoted || p.release.sha256!==process.argv[1]) process.exit(1)' "${{ steps.release.outputs.sha256 }}"
+          curl --fail --show-error --retry 3 -L https://apex-ugr.pages.dev/api/download/android -o "$RUNNER_TEMP/public-apex-ugr.apk"
+          echo "${{ steps.release.outputs.sha256 }}  $RUNNER_TEMP/public-apex-ugr.apk" | sha256sum --check --strict
 
       - name: Publish immutable GitHub release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.promote == true)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -106,9 +167,13 @@ jobs:
             --latest
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: apex-ugr-android-${{ github.sha }}
           path: |
             apex-ugr.apk
             apex-ugr.apk.sha256
+            android-release.json
+            r2-head.json
+          if-no-files-found: warn
           retention-days: 30

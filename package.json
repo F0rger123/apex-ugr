@@ -1,6 +1,6 @@
 {
   "name": "apex-ugr",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -13,7 +13,11 @@
     "test:migration3": "node scripts/phase3MigrationRehearsal.mjs",
     "test:http3": "node scripts/phase3HttpRegression.mjs",
     "test:cotw3": "node scripts/phase3CotwHttpRegression.mjs",
-    "test:invites": "node scripts/inviteCodeRegression.mjs"
+    "test:invites": "node scripts/inviteCodeRegression.mjs",
+    "test:android-release": "node scripts/androidReleaseRegression.mjs",
+    "test:phase4": "node scripts/phase4Regression.mjs",
+    "test:bounty4": "node scripts/phase4BountyHttpRegression.mjs",
+    "test:migration4": "node scripts/phase4MigrationRehearsal.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",

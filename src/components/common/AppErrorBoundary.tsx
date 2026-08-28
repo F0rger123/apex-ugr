@@ -4,17 +4,18 @@ import { colors } from '../../config/colors';
 
 interface AppErrorBoundaryState {
   error: Error | null;
+  incidentId: string | null;
 }
 
 export class AppErrorBoundary extends React.Component<React.PropsWithChildren, AppErrorBoundaryState> {
-  state: AppErrorBoundaryState = { error: null };
+  state: AppErrorBoundaryState = { error: null, incidentId: null };
 
   static getDerivedStateFromError(error: Error) {
-    return { error };
+    return { error, incidentId: `UI-${Date.now().toString(36).toUpperCase()}` };
   }
 
   componentDidCatch(error: Error) {
-    console.error('[Apex UGR] App startup error:', error);
+    console.error('[Apex UGR] UI boundary', { incidentId: this.state.incidentId, name: error.name, message: error.message });
   }
 
   handleReload = () => {
@@ -22,7 +23,16 @@ export class AppErrorBoundary extends React.Component<React.PropsWithChildren, A
       window.location.reload();
       return;
     }
-    this.setState({ error: null });
+    this.setState({ error: null, incidentId: null });
+  };
+
+  handleHud = () => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState({}, '', '/app/command');
+      window.location.reload();
+      return;
+    }
+    this.setState({ error: null, incidentId: null });
   };
 
   render() {
@@ -30,13 +40,11 @@ export class AppErrorBoundary extends React.Component<React.PropsWithChildren, A
 
     return (
       <View style={styles.container}>
-        <Text style={styles.kicker}>APEX UGR / RECOVERABLE ERROR</Text>
-        <Text style={styles.title}>Apex UGR needs a quick reload.</Text>
-        <Text style={styles.body}>One screen hit an unexpected error. Your garage, radar, and account data are safe.</Text>
-        <Text selectable style={styles.debug}>{this.state.error.message || 'Unknown runtime error'}</Text>
-        <Pressable style={styles.button} onPress={this.handleReload}>
-          <Text style={styles.buttonText}>RELOAD APP</Text>
-        </Pressable>
+        <Text style={styles.kicker}>APEX UGR / RECOVERY CHANNEL</Text>
+        <Text style={styles.title}>SIGNAL INTERRUPTED</Text>
+        <Text style={styles.body}>This screen lost its secure connection. Your account and saved progress remain intact.</Text>
+        <Text selectable style={styles.debug}>INCIDENT // {this.state.incidentId}</Text>
+        <View style={styles.actions}><Pressable accessibilityRole="button" style={styles.button} onPress={this.handleReload}><Text style={styles.buttonText}>RETRY</Text></Pressable><Pressable accessibilityRole="button" style={styles.secondaryButton} onPress={this.handleHud}><Text style={styles.secondaryButtonText}>BACK TO HUD</Text></Pressable></View>
       </View>
     );
   }
@@ -50,4 +58,7 @@ const styles = StyleSheet.create({
   debug: { color: colors.textMuted, fontSize: 11, lineHeight: 16, maxWidth: 560, marginTop: 10, textAlign: 'center' },
   button: { backgroundColor: colors.primary, borderRadius: 8, marginTop: 22, paddingHorizontal: 18, paddingVertical: 12 },
   buttonText: { color: colors.buttonTextDark, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 22 },
+  secondaryButton: { borderWidth: 1, borderColor: colors.cardBorder, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12 },
+  secondaryButtonText: { color: colors.text, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
 });

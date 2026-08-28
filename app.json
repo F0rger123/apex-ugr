@@ -3,7 +3,7 @@
     "name": "Apex UGR",
     "slug": "apex-ugr",
     "scheme": "apexugr",
-    "version": "1.5.1",
+    "version": "1.5.2",
     "icon": "./assets/apex-app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.apexugr.app",
-      "versionCode": 16,
+      "versionCode": 17,
       "adaptiveIcon": {
         "foregroundImage": "./assets/apex-brand-mark.png",
         "backgroundColor": "#050706"

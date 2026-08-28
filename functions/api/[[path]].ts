@@ -8,6 +8,14 @@ import { nextSerial } from "../lib/phase2-core.mjs";
 import { handlePhase3 } from "../lib/phase3-api.mjs";
 // @ts-ignore JavaScript module is shared with the deterministic Node regression suite.
 import { racePayoutShare } from "../lib/phase3-core.mjs";
+// @ts-ignore JavaScript module is shared with the deterministic Node regression suite.
+import {
+  ANDROID_LATEST_POINTER_KEY,
+  ANDROID_LEGACY_RELEASE_KEY,
+  validateAndroidReleaseMetadata,
+} from "../lib/android-release-core.mjs";
+// @ts-ignore JavaScript module is shared with the deterministic Node regression suite.
+import { requestLog } from "../lib/request-observability.mjs";
 
 interface Env {
   DB: D1Database;
@@ -32,17 +40,30 @@ type UserRow = {
   losses: number;
   reputation: number;
   decline_streak: number;
+  isDeveloper?: boolean;
 };
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization,content-type",
   "Access-Control-Allow-Methods": "GET,HEAD,POST,PUT,DELETE,OPTIONS",
+  "Access-Control-Expose-Headers": "X-Request-ID,X-Apex-Version,X-Apex-Version-Code,X-Apex-SHA256",
 };
 
 const DEVELOPER_EMAIL = "drummerforger@gmail.com";
 const ROOT_ACCESS_CODE_HASH = "99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718";
-const ANDROID_RELEASE_KEY = "releases/apex-ugr-latest.apk";
+type AndroidReleaseMetadata = ReturnType<typeof validateAndroidReleaseMetadata>;
+
+async function currentAndroidRelease(env: Env) {
+  const pointer = await env.MEDIA.get(ANDROID_LATEST_POINTER_KEY);
+  if (!pointer) return { objectKey: ANDROID_LEGACY_RELEASE_KEY, metadata: null as AndroidReleaseMetadata | null };
+  try {
+    const metadata = validateAndroidReleaseMetadata(await pointer.json());
+    return { objectKey: metadata.objectKey, metadata };
+  } catch {
+    return { objectKey: ANDROID_LEGACY_RELEASE_KEY, metadata: null as AndroidReleaseMetadata | null };
+  }
+}
 
 function normalizeInviteCode(value: string) {
   return value
@@ -246,12 +267,13 @@ async function authenticatedUser(request: Request, env: Env) {
   const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!bearer) return null;
   const tokenHash = await sha256(bearer);
-  return env.DB.prepare(
+  const user = await env.DB.prepare(
     `SELECT u.id,u.email,u.username,u.display_name,u.avatar_url,u.credits,u.points,u.tier,u.wins,u.losses,u.reputation,u.decline_streak
     FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`,
   )
     .bind(tokenHash, new Date().toISOString())
     .first<UserRow>();
+  return user ? { ...user, isDeveloper: user.email.toLowerCase() === DEVELOPER_EMAIL } : null;
 }
 
 async function createSession(user: UserRow, env: Env) {
@@ -327,6 +349,8 @@ function cotwWeekIdentifier(value = new Date()) {
 }
 
 async function finalizeClosedCotw(activeWeek: string, env: Env) {
+  await env.DB.prepare(`INSERT OR IGNORE INTO badges(id,name,description,icon,reward_credits,category)
+    VALUES('cotw-champion','CAR OF THE WEEK','Win a verified weekly community category.','trophy',0,'community')`).run();
   const unresolved = await env.DB.prepare(`SELECT s.* FROM car_of_the_week_submissions s
     WHERE s.week_identifier<? AND NOT EXISTS(
       SELECT 1 FROM car_of_the_week_winners w
@@ -376,6 +400,57 @@ async function refreshRank(userId: string, env: Env) {
   await env.DB.batch([env.DB.prepare("UPDATE users SET tier=? WHERE id=?").bind(thresholds.rank, userId), env.DB.prepare("INSERT INTO rank_history(id,user_id,rank,rep) VALUES(?,?,?,?)").bind(crypto.randomUUID(), userId, thresholds.rank, user.points), env.DB.prepare("INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)").bind(crypto.randomUUID(), userId, "rank_up", "RANK UP", `You reached ${thresholds.rank}.`, JSON.stringify({ rank: thresholds.rank }))]);
   if (thresholds.reward_gc) await grantGhostCredits(userId, thresholds.reward_gc, "RANK REWARD", thresholds.rank, env);
   return { rank: thresholds.rank, changed: true, next: null };
+}
+
+async function advanceExpiredBountySession(sessionId: string, env: Env) {
+  const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=?").bind(sessionId).first<any>();
+  if (!session) return { error: "Bounty session was not found.", statusCode: 404 };
+  if (!["active", "escalating"].includes(session.status)) return { session };
+  const now = new Date();
+  if (now.getTime() < Date.parse(session.stage_ends_at)) return { session };
+
+  const config = (await env.DB.prepare('SELECT * FROM bounty_config WHERE id="default"').first<any>()) || {};
+  if (Number(session.star_level) < 5) {
+    const nextStar = Number(session.star_level) + 1;
+    const durations = JSON.parse(config.stage_duration_seconds || '{"1":600,"2":600,"3":600,"4":600,"5":900}');
+    const rewardsGc = JSON.parse(config.stage_reward_gc || '{"1":300,"2":500,"3":850,"4":1200,"5":2500}');
+    const rewardsRep = JSON.parse(config.stage_reward_rep || '{"1":150,"2":250,"3":450,"4":650,"5":1000}');
+    const durationSec = Number(durations[String(nextStar)] || 600);
+    const rewardGc = Number(rewardsGc[String(nextStar)] || 500);
+    const rewardRep = Number(rewardsRep[String(nextStar)] || 250);
+    const endsAt = new Date(now.getTime() + durationSec * 1000).toISOString();
+    const updated = await env.DB.prepare(`UPDATE bounty_sessions
+      SET star_level=?,status='escalating',stage_started_at=?,stage_ends_at=?,reward_gc=?,reward_rep=?,
+        escalation_history=json_insert(escalation_history,'$[#]',json_object('star_level',?,'reached_at',?,'reward_gc',?,'reward_rep',?))
+      WHERE id=? AND status IN ('active','escalating') AND star_level=? AND stage_ends_at=?`)
+      .bind(nextStar, now.toISOString(), endsAt, rewardGc, rewardRep, nextStar, now.toISOString(), rewardGc, rewardRep, sessionId, session.star_level, session.stage_ends_at).run();
+    if (updated.meta.changes) {
+      await env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json)
+        SELECT lower(hex(randomblob(16))),user_id,'bounty_escalated','BOUNTY ESCALATED',?,json_object('sessionId',?,'starLevel',?)
+        FROM (SELECT target_user_id user_id FROM bounty_sessions WHERE id=? UNION SELECT user_id FROM bounty_participants WHERE session_id=? AND status='hunting')`)
+        .bind(`THE SESSION REACHED ★${nextStar}.`, sessionId, nextStar, sessionId, sessionId).run();
+    }
+    return { status: "escalated", starLevel: nextStar, rewardGc, rewardRep, stageEndsAt: endsAt, remainingSeconds: durationSec };
+  }
+
+  const rewardGc = Number(session.reward_gc || 2500);
+  const rewardRep = Number(session.reward_rep || 1000);
+  const escaped = await env.DB.prepare("UPDATE bounty_sessions SET status='escaped',escaped_at=?,completed_at=? WHERE id=? AND status IN ('active','escalating') AND stage_ends_at=?")
+    .bind(now.toISOString(), now.toISOString(), sessionId, session.stage_ends_at).run();
+  if (!escaped.meta.changes) return { session: await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=?").bind(sessionId).first<any>() };
+  await grantGhostCredits(session.target_user_id, rewardGc, "BOUNTY ESCAPE", sessionId, env);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE users SET points=points+? WHERE id=?").bind(rewardRep, session.target_user_id),
+    env.DB.prepare("UPDATE bounty_user_settings SET cooldown_until=datetime('now',?),updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(`+${Math.max(1, Number(config.cooldown_minutes || 30))} minutes`, session.target_user_id),
+    env.DB.prepare(`INSERT INTO bounty_user_stats(user_id,escapes,highest_star_survived,five_star_survivals,current_survival_streak,best_survival_streak,survivor_gc_earned,survivor_rep_earned)
+      VALUES(?,1,5,1,1,1,?,?) ON CONFLICT(user_id) DO UPDATE SET escapes=escapes+1,highest_star_survived=5,five_star_survivals=five_star_survivals+1,current_survival_streak=current_survival_streak+1,best_survival_streak=MAX(best_survival_streak,current_survival_streak+1),survivor_gc_earned=survivor_gc_earned+excluded.survivor_gc_earned,survivor_rep_earned=survivor_rep_earned+excluded.survivor_rep_earned,updated_at=CURRENT_TIMESTAMP`).bind(session.target_user_id, rewardGc, rewardRep),
+    env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'survivor')").bind(session.target_user_id),
+    env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'five-star-survivor')").bind(session.target_user_id),
+    env.DB.prepare("INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,'bounty_escaped','★★★★★ SURVIVED',?,?)")
+      .bind(crypto.randomUUID(), session.target_user_id, `FIVE-STAR SURVIVOR // +${rewardGc} GC // +${rewardRep} REP`, JSON.stringify({ sessionId, rewardGc, rewardRep })),
+  ]);
+  await refreshRank(session.target_user_id, env);
+  return { escaped: true, starLevel: 5, rewardGc, rewardRep, badgeEarned: "FIVE-STAR SURVIVOR" };
 }
 
 function providerSearches(vehicle: Record<string, string | number>, query: string) {
@@ -579,7 +654,8 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === "health") return json({ status: "live", backend: "cloudflare", storage: "d1+r2" });
   if (path === "download/android" && (method === "GET" || method === "HEAD")) {
     const rangeHeader = request.headers.get("range");
-    const object = await env.MEDIA.get(ANDROID_RELEASE_KEY, rangeHeader ? { range: request.headers } : undefined);
+    const release = await currentAndroidRelease(env);
+    const object = await env.MEDIA.get(release.objectKey, rangeHeader ? { range: request.headers } : undefined);
     if (!object) return json({ error: "Android release is not available yet." }, 404);
     const headers = new Headers(cors);
     object.writeHttpMetadata(headers);
@@ -587,6 +663,11 @@ async function handle(request: Request, env: Env, path: string) {
     headers.set("Cache-Control", "public,max-age=300");
     headers.set("Accept-Ranges", "bytes");
     headers.set("Content-Disposition", 'attachment; filename="apex-ugr.apk"');
+    if (release.metadata) {
+      headers.set("X-Apex-Version", release.metadata.version);
+      headers.set("X-Apex-Version-Code", String(release.metadata.versionCode));
+      headers.set("X-Apex-SHA256", release.metadata.sha256);
+    }
     let status = 200;
     if (rangeHeader && object.range) {
       const range = object.range as {
@@ -605,6 +686,31 @@ async function handle(request: Request, env: Env, path: string) {
       status,
     });
   }
+  if (path === "admin/android-release/promote" && method === "POST") {
+    const releaseToken = request.headers.get("x-apex-release-token") || "";
+    const automatedRelease = Boolean(env.RELEASE_UPLOAD_TOKEN) && (await sha256Hex(releaseToken)) === (await sha256Hex(env.RELEASE_UPLOAD_TOKEN || ""));
+    if (!automatedRelease) return json({ error: "Release automation access required." }, 403);
+    const size = Number(request.headers.get("content-length") || 0);
+    if (size > 16 * 1024) return json({ error: "Release metadata is too large." }, 413);
+    let metadata: AndroidReleaseMetadata;
+    try {
+      metadata = validateAndroidReleaseMetadata(await request.json());
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "Invalid release metadata." }, 400);
+    }
+    const artifact = await env.MEDIA.head(metadata.objectKey);
+    if (!artifact) return json({ error: "Immutable APK object was not found." }, 404);
+    if (artifact.size !== metadata.size) return json({ error: "Immutable APK size verification failed." }, 409);
+    const storedHash = artifact.customMetadata?.sha256?.toLowerCase();
+    if (!storedHash || storedHash !== metadata.sha256) return json({ error: "Immutable APK hash metadata verification failed." }, 409);
+    await env.MEDIA.put(ANDROID_LATEST_POINTER_KEY, JSON.stringify(metadata), {
+      httpMetadata: { contentType: "application/json", cacheControl: "no-store" },
+      customMetadata: { version: metadata.version, versionCode: String(metadata.versionCode), sha256: metadata.sha256 },
+    });
+    const promoted = await currentAndroidRelease(env);
+    if (promoted.objectKey !== metadata.objectKey) return json({ error: "Latest release pointer verification failed." }, 500);
+    return json({ promoted: true, release: metadata });
+  }
   if (path === "admin/android-release" && method === "POST") {
     const user = await authenticatedUser(request, env);
     const releaseToken = request.headers.get("x-apex-release-token") || "";
@@ -614,7 +720,7 @@ async function handle(request: Request, env: Env, path: string) {
     if (!request.body || size > 100 * 1024 * 1024) return json({ error: "A valid APK under 100 MB is required." }, 400);
     const contentType = request.headers.get("content-type") || "";
     if (!contentType.includes("android.package-archive") && !contentType.includes("application/octet-stream")) return json({ error: "Only Android APK files are accepted." }, 400);
-    await env.MEDIA.put(ANDROID_RELEASE_KEY, request.body, {
+    await env.MEDIA.put(ANDROID_LEGACY_RELEASE_KEY, request.body, {
       httpMetadata: {
         contentType: "application/vnd.android.package-archive",
         contentDisposition: 'attachment; filename="apex-ugr.apk"',
@@ -626,7 +732,7 @@ async function handle(request: Request, env: Env, path: string) {
         version: request.headers.get("x-apex-version") || "unknown",
       },
     });
-    const object = await env.MEDIA.head(ANDROID_RELEASE_KEY);
+    const object = await env.MEDIA.head(ANDROID_LEGACY_RELEASE_KEY);
     return json({
       published: true,
       size: object?.size || size,
@@ -2533,6 +2639,14 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   if (path === "bounty/active" && method === "GET") {
+    const activeCandidate = await env.DB.prepare(`SELECT DISTINCT s.id,s.stage_ends_at FROM bounty_sessions s
+      LEFT JOIN bounty_participants p ON p.session_id=s.id AND p.user_id=? AND p.status='hunting'
+      WHERE (s.target_user_id=? OR p.user_id IS NOT NULL) AND s.status IN ('active','escalating')
+      ORDER BY s.stage_ends_at LIMIT 1`).bind(user.id, user.id).first<{ id: string; stage_ends_at: string }>();
+    if (activeCandidate?.id && Date.parse(activeCandidate.stage_ends_at.replace(' ', 'T') + (activeCandidate.stage_ends_at.includes('T') ? '' : 'Z')) <= Date.now()) {
+      await advanceExpiredBountySession(activeCandidate.id, env);
+    }
+
     // Check if user is the target of an active bounty
     const asTarget = await env.DB.prepare(
       `
@@ -2787,7 +2901,6 @@ async function handle(request: Request, env: Env, path: string) {
   const bountySignal = path.match(/^bounty\/sessions\/([^/]+)\/signal$/);
   if (bountySignal && method === "POST") {
     const sessionId = bountySignal[1];
-    const body = await request.json<any>();
     const session = await env.DB.prepare("SELECT * FROM bounty_sessions WHERE id=? AND status IN ('active','escalating')").bind(sessionId).first<any>();
     if (!session) return json({ error: "Session no longer active." }, 404);
 
@@ -2795,9 +2908,9 @@ async function handle(request: Request, env: Env, path: string) {
     if (!participant) return json({ error: "Join this Bounty before tracking its signal." }, 403);
     const hunterLoc = await env.DB.prepare("SELECT latitude, longitude FROM driver_locations WHERE user_id=? AND drive_mode=1 AND expires_at>?").bind(user.id, new Date().toISOString()).first<any>();
     const targetLoc = await env.DB.prepare("SELECT latitude, longitude FROM driver_locations WHERE user_id=? AND drive_mode=1 AND expires_at>?").bind(session.target_user_id, new Date().toISOString()).first<any>();
-    if ((!hunterLoc || !targetLoc) && !user.isDeveloper) return json({ error: "Both participating drivers need an active location signal." }, 409);
+    if (!hunterLoc || !targetLoc) return json({ error: "Both participating drivers need an active location signal." }, 409);
     const config = await env.DB.prepare('SELECT claim_radius_miles,lock_duration_seconds FROM bounty_config WHERE id="default"').first<any>();
-    let distMiles = user.isDeveloper && Number.isFinite(Number(body.simulatedDistanceMiles)) ? Number(body.simulatedDistanceMiles) : distanceMeters(hunterLoc.latitude, hunterLoc.longitude, targetLoc.latitude, targetLoc.longitude) / 1609.34;
+    let distMiles = distanceMeters(hunterLoc.latitude, hunterLoc.longitude, targetLoc.latitude, targetLoc.longitude) / 1609.34;
     distMiles = Math.round(distMiles * 10) / 10;
     const dLat = (targetLoc?.latitude || 0) - (hunterLoc?.latitude || 0),
       dLng = (targetLoc?.longitude || 0) - (hunterLoc?.longitude || 0),
@@ -2807,7 +2920,7 @@ async function handle(request: Request, env: Env, path: string) {
       signalPct = Math.max(10, Math.min(100, Math.round(100 - Math.min(1, distMiles / 5) * 85)));
     const claimRadius = Number(config?.claim_radius_miles || 0.5),
       lockDuration = Math.max(5, Number(config?.lock_duration_seconds || 20));
-    const inRange = distMiles <= claimRadius || (user.isDeveloper && body.forceInRange === true);
+    const inRange = distMiles <= claimRadius;
     let lockSec = participant?.proximity_lock_seconds || 0;
     let lockStartedAt = participant?.lock_started_at;
 
@@ -2946,6 +3059,8 @@ async function handle(request: Request, env: Env, path: string) {
         remainingSeconds: Math.max(0, Math.ceil((Date.parse(session.stage_ends_at) - now.getTime()) / 1000)),
       });
     }
+
+    return json(await advanceExpiredBountySession(sessionId, env));
 
     // Timer expired for current stage! Check if we escalate or escape
     if (session.star_level < 5) {
@@ -3104,6 +3219,7 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   if (path === "bounty/dev-override" && method === "POST") {
+    return json({ error: "Bounty simulation controls are disabled in production." }, 404);
     if (!user.isDeveloper) return json({ error: "Developer authority required." }, 403);
     const body = await request.json<any>();
     const action = body.action; // 'force_trigger', 'set_star', 'shorten_timer', 'force_claim', 'force_escape'
@@ -4073,16 +4189,23 @@ async function handle(request: Request, env: Env, path: string) {
 export const onRequest: PagesFunction<Env> = async (context) => {
   const raw = context.params.path;
   const path = Array.isArray(raw) ? raw.join("/") : String(raw || "");
+  const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
+  let response: Response;
+  let errorCode: string | null = null;
+  let errorMessage: string | null = null;
   try {
-    return await handle(context.request, context.env, path);
+    response = await handle(context.request, context.env, path);
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "api_error",
-        path,
-        message: error instanceof Error ? error.message : "unknown",
-      }),
-    );
-    return json({ error: "Request failed." }, 500);
+    errorCode = "INTERNAL_ERROR";
+    errorMessage = error instanceof Error ? `${error.name}: ${error.message}` : "Unknown server error";
+    response = json({ error: "Request failed.", code: errorCode }, 500);
   }
+  const headers = new Headers(response.headers);
+  headers.set("X-Request-ID", requestId);
+  const statusCode = response.status;
+  if (!errorCode && statusCode >= 400) errorCode = statusCode === 401 ? "UNAUTHORIZED" : statusCode === 403 ? "FORBIDDEN" : statusCode === 409 ? "CONFLICT" : statusCode === 429 ? "RATE_LIMITED" : statusCode >= 500 ? "UPSTREAM_OR_SERVER_ERROR" : "BAD_REQUEST";
+  const log = requestLog({ requestId, path, method: context.request.method, status: statusCode, durationMs: Date.now() - startedAt, errorCode, errorMessage });
+  (statusCode >= 500 ? console.error : console.log)(JSON.stringify(log));
+  return new Response(response.body, { status: statusCode, statusText: response.statusText, headers });
 };

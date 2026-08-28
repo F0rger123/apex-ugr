@@ -76,8 +76,18 @@ async function ensureEvent(env, requestingUserId) {
   if (!event) {
     const startsAt = new Date(window.startMs).toISOString();
     const endsAt = new Date(window.startMs + Number(cfg.eventDurationSeconds) * 1000).toISOString();
-    await env.DB.prepare(`INSERT OR IGNORE INTO bounty_world_events(id,scheduled_at,starts_at,ends_at,status,reward_gc,reward_rep) VALUES(?,?,?,?,?,?,?)`)
+    const created = await env.DB.prepare(`INSERT OR IGNORE INTO bounty_world_events(id,scheduled_at,starts_at,ends_at,status,reward_gc,reward_rep) VALUES(?,?,?,?,?,?,?)`)
       .bind(window.key, startsAt, startsAt, endsAt, now < parseTime(endsAt) ? 'open' : 'escaped', rewardForStar(1, cfg.rewards), 150).run();
+    if (created.meta.changes) {
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json)
+          SELECT lower(hex(randomblob(16))),id,'bounty_world_started','BOUNTY EVENT LIVE',?,json_object('eventId',?,'startsAt',?,'endsAt',?) FROM users`)
+          .bind('A two-hour Bounty window is active. Join, hunt, run, or watch from Radar.', window.key, startsAt, endsAt),
+        env.DB.prepare(`INSERT OR IGNORE INTO underground_broadcasts(id,event_type,text,source_key,expires_at)
+          VALUES(?,'bounty_started','BOUNTY EVENT LIVE // ALL PILOTS NOTIFIED',?,?)`)
+          .bind(crypto.randomUUID(), `bounty-start:${window.key}`, endsAt),
+      ]);
+    }
     event = await env.DB.prepare('SELECT * FROM bounty_world_events WHERE id=?').bind(window.key).first();
   }
   if (!event.target_actor_id && event.status === 'open') {

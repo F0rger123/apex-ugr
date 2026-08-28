@@ -193,89 +193,42 @@ async function driverProfile(env, user, targetId) {
     (profile.privacy_mode === "private" || Number(settings.profile_visibility ?? 1) !== 1)
   )
     return response({ error: "This driver profile is private." }, 403);
-  const [
-    vehicles,
-    records,
-    badges,
-    milestones,
-    ghost,
-    bounty,
-    equipped,
-    crew,
-    legacy,
-    preference,
-    meetCount,
-    safeHouseCount,
-    cotwWins,
-    seasons,
-    socialStats,
-    recentPosts,
-    rankThresholds,
-    rankHistory,
-  ] = await Promise.all([
+  const batch = await env.DB.batch([
     env.DB.prepare(
       "SELECT id,nickname,year,make,model,trim,color,horsepower,photo_url,digital_twin_url,is_active FROM vehicles WHERE user_id=? ORDER BY is_active DESC,created_at DESC",
-    )
-      .bind(id)
-      .all(),
+    ).bind(id),
     env.DB.prepare(
       "SELECT * FROM personal_performance_records WHERE user_id=? ORDER BY created_at DESC LIMIT 100",
-    )
-      .bind(id)
-      .all(),
+    ).bind(id),
     env.DB.prepare(
       `SELECT b.id,b.name,b.description,b.category,COALESCE(b.rarity,'COMMON') rarity,ub.earned_at,bp.current_value,bp.target_value,
       CASE WHEN ub.user_id IS NULL THEN 0 ELSE 1 END earned,fb.slot FROM badges b LEFT JOIN user_badges ub ON ub.badge_id=b.id AND ub.user_id=? LEFT JOIN badge_progress bp ON bp.badge_id=b.id AND bp.user_id=? LEFT JOIN featured_badges fb ON fb.badge_id=b.id AND fb.user_id=? ORDER BY earned DESC,ub.earned_at DESC,b.name`,
-    )
-      .bind(id, id, id)
-      .all(),
+    ).bind(id, id, id),
     env.DB.prepare(
       "SELECT * FROM driver_milestones WHERE user_id=? ORDER BY earned_at DESC",
-    )
-      .bind(id)
-      .all(),
-    env.DB.prepare("SELECT * FROM ghost_profiles WHERE user_id=?")
-      .bind(id)
-      .first(),
-    env.DB.prepare("SELECT * FROM bounty_user_stats WHERE user_id=?")
-      .bind(id)
-      .first(),
+    ).bind(id),
+    env.DB.prepare("SELECT * FROM ghost_profiles WHERE user_id=?").bind(id),
+    env.DB.prepare("SELECT * FROM bounty_user_stats WHERE user_id=?").bind(id),
     env.DB.prepare(
       `SELECT ge.category,i.id,i.name,i.rarity,i.preview_json FROM ghost_equipped_items ge JOIN ghost_shop_items i ON i.id=ge.item_id WHERE ge.user_id=?`,
-    )
-      .bind(id)
-      .all(),
+    ).bind(id),
     env.DB.prepare(
       `SELECT c.id,c.name,c.tag FROM crew_members cm JOIN crews c ON c.id=cm.crew_id WHERE cm.user_id=? AND cm.status='approved' LIMIT 1`,
-    )
-      .bind(id)
-      .first(),
+    ).bind(id),
     env.DB.prepare(
       `SELECT vls.*,v.nickname,v.year,v.make,v.model,v.photo_url FROM vehicle_legacy_stats vls JOIN vehicles v ON v.id=vls.vehicle_id WHERE v.user_id=? ORDER BY v.is_active DESC`,
-    )
-      .bind(id)
-      .all(),
-    env.DB.prepare("SELECT * FROM profile_preferences WHERE user_id=?")
-      .bind(id)
-      .first(),
-    env.DB.prepare("SELECT COUNT(*) count FROM meet_checkins WHERE user_id=?")
-      .bind(id)
-      .first(),
-    env.DB.prepare("SELECT COUNT(*) count FROM safe_houses WHERE user_id=?")
-      .bind(id)
-      .first(),
+    ).bind(id),
+    env.DB.prepare("SELECT * FROM profile_preferences WHERE user_id=?").bind(id),
+    env.DB.prepare("SELECT COUNT(*) count FROM meet_checkins WHERE user_id=?").bind(id),
+    env.DB.prepare("SELECT COUNT(*) count FROM safe_houses WHERE user_id=?").bind(id),
     env.DB.prepare(
       "SELECT COUNT(*) count FROM car_of_the_week_winners WHERE user_id=?",
-    )
-      .bind(id)
-      .first(),
+    ).bind(id),
     env.DB.prepare(
       `SELECT s.id,s.season_number,s.name,s.theme,s.starts_at,s.ends_at,s.is_active,COALESCE(sp.xp,0) xp,COALESCE(sp.level,1) level
       FROM apex_seasons s LEFT JOIN season_user_progress sp ON sp.season_id=s.id AND sp.user_id=?
       WHERE s.is_active=1 OR sp.user_id IS NOT NULL ORDER BY s.season_number DESC`,
-    )
-      .bind(id)
-      .all(),
+    ).bind(id),
     env.DB.prepare(
       `SELECT
       (SELECT COUNT(*) FROM posts WHERE user_id=?) posts,
@@ -283,26 +236,23 @@ async function driverProfile(env, user, targetId) {
       (SELECT COUNT(*) FROM follows WHERE follower_id=?) following,
       (SELECT COUNT(*) FROM post_likes pl JOIN posts p ON p.id=pl.post_id WHERE p.user_id=?) likes_received,
       (SELECT COUNT(*) FROM comments c JOIN posts p ON p.id=c.post_id WHERE p.user_id=?) comments_received`,
-    )
-      .bind(id, id, id, id, id)
-      .first(),
+    ).bind(id, id, id, id, id),
     env.DB.prepare(
       `SELECT p.id,p.media_url,p.media_type,p.caption,p.feed_category,p.created_at,
       (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) likes,
       (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id) comments
       FROM posts p WHERE p.user_id=? ORDER BY p.created_at DESC LIMIT 12`,
-    )
-      .bind(id)
-      .all(),
+    ).bind(id),
     env.DB.prepare(
       "SELECT rank,minimum_rep,reward_gc,shop_access FROM rank_thresholds ORDER BY minimum_rep",
-    ).all(),
+    ),
     env.DB.prepare(
       "SELECT rank,rep,awarded_at FROM rank_history WHERE user_id=? ORDER BY awarded_at DESC LIMIT 20",
-    )
-      .bind(id)
-      .all(),
+    ).bind(id),
   ]);
+  const [vehicles, records, badges, milestones, ghostRows, bountyRows, equipped, crewRows, legacy, preferenceRows, meetCountRows, safeHouseCountRows, cotwWinsRows, seasons, socialStatsRows, recentPosts, rankThresholds, rankHistory] = batch;
+  const first = (result) => result.results?.[0] || null;
+  const ghost = first(ghostRows), bounty = first(bountyRows), crew = first(crewRows), preference = first(preferenceRows), meetCount = first(meetCountRows), safeHouseCount = first(safeHouseCountRows), cotwWins = first(cotwWinsRows), socialStats = first(socialStatsRows);
   const parsedPublicStats = parseJson(preference?.public_stats_json, []),
     publicStats = Array.isArray(parsedPublicStats) ? parsedPublicStats : [],
     canShow = (name) => isSelf || publicStats.includes(name),
