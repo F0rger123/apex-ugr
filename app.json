@@ -3,7 +3,7 @@
     "name": "Apex UGR",
     "slug": "apex-ugr",
     "scheme": "apexugr",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "icon": "./assets/apex-app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.apexugr.app",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Apex UGR uses your location while the app is open to track drives, reveal the world map, show nearby events, and provide navigation.",
         "NSCameraUsageDescription": "Apex UGR uses the camera when you add vehicle photos or race proof media.",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.apexugr.app",
-      "versionCode": 14,
+      "versionCode": 15,
       "adaptiveIcon": {
         "foregroundImage": "./assets/apex-app-icon.png",
         "backgroundColor": "#010201"
@@ -53,6 +53,22 @@
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Apex UGR needs access to your GPS location for real-time driver radar, telemetry logging, and car meet navigation."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Apex UGR uses the camera to scan encrypted Apex IDs and capture vehicle media.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Apex UGR accesses your photo library to save generated Ghost Run share cards.",
+          "savePhotosPermission": "Apex UGR saves generated Ghost Run share cards to your photo library.",
+          "isAccessMediaLocationEnabled": false
         }
       ]
     ],

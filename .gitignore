@@ -9,4 +9,6 @@ web-build/
 .env
 .env.local
 .wrangler/
+.wrangler-*/
 .functions-build*/
+.phase3qa*/

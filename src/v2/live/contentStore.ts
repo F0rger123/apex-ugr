@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { cloudflareApi } from '../../config/cloudflareApi';
 
-export type LivePost = { id:string; userId:string; alias:string; avatarUrl:string|null; mediaUrl:string; videoUrl:string|null; caption:string; likes:number; comments:number; liked:boolean; saved:boolean; following:boolean; createdAt:string };
+export type LivePost = { id:string; userId:string; alias:string; avatarUrl:string|null; mediaUrl:string; videoUrl:string|null; caption:string; category:string; likes:number; comments:number; liked:boolean; saved:boolean; following:boolean; createdAt:string };
 export type Ranking = { id:string; alias:string; avatarUrl:string|null; tier:string; points:number; wins:number; losses:number; entered:number; topSpeed:number; reputation:number; credits:number };
 export type ActiveVehicle = { id:string; nickname:string; year:number; make:string; model:string; trim:string|null; engine:string; drivetrain:string; horsepower:number; color:string; photoUrl:string|null;digitalTwinUrl:string|null;digitalTwinStatus:string };
 export type ProviderProduct = { id:string; provider:string; title:string; imageUrl:string|null; price:number; currency:string; condition:string|null; seller:string|null; shipping:string|null; purchaseUrl:string; compatibility:string };
@@ -14,9 +14,9 @@ interface ContentState {
   profile:{alias:string;displayName:string;credits:number;points:number;tier:string;wins:number;entered:number;reputation:number;isDeveloper:boolean}|null;
   posts:LivePost[]; rankings:Ranking[]; pilots:PilotDirectoryEntry[]; races:RaceContract[]; vehicles:ActiveVehicle[]; activeVehicleId:string|null; challengeTargetId:string|null; radarTargetId:string|null;
   products:ProviderProduct[]; providers:ProviderLink[]; loading:boolean; error:string|null;
-  initialize:()=>Promise<void>; loadFeed:()=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>; toggleFollow:(userId:string)=>Promise<void>;
-  addComment:(id:string,text:string)=>Promise<boolean>; createPost:(uri:string,caption:string,type:'photo'|'video')=>Promise<boolean>; updateProfile:(displayName:string)=>Promise<boolean>;
-  loadRankings:()=>Promise<void>; loadPilots:()=>Promise<void>; loadRaces:()=>Promise<void>; respondToRace:(id:string,action:'accept'|'decline'|'reschedule',startsAt?:string)=>Promise<string>; startRace:(id:string)=>Promise<string>; checkRace:(id:string,location:{latitude:number;longitude:number;accuracy:number|null})=>Promise<string>; setChallengeTarget:(id:string|null)=>void; setRadarTarget:(id:string|null)=>void; loadVehicles:()=>Promise<void>; addVehicle:(vehicle:{nickname:string;year:number;make:string;model:string;trim:string;engine:string;drivetrain:string;horsepower:number;color:string},photoUri:string|null)=>Promise<boolean>; setActiveVehicle:(id:string)=>void; searchParts:(query:string)=>Promise<void>;
+  initialize:()=>Promise<void>; loadFeed:(mode?:string)=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>; toggleFollow:(userId:string)=>Promise<void>;
+  addComment:(id:string,text:string)=>Promise<boolean>; createPost:(uri:string,caption:string,type:'photo'|'video',category?:string)=>Promise<boolean>; updateProfile:(displayName:string)=>Promise<boolean>;
+  loadRankings:()=>Promise<void>; loadPilots:()=>Promise<void>; loadRaces:()=>Promise<void>; respondToRace:(id:string,action:'accept'|'decline'|'reschedule',startsAt?:string)=>Promise<string>; startRace:(id:string)=>Promise<string>; checkRace:(id:string,location:{latitude:number;longitude:number;accuracy:number|null;sampleAgeMs:number})=>Promise<string>; setChallengeTarget:(id:string|null)=>void; setRadarTarget:(id:string|null)=>void; loadVehicles:()=>Promise<void>; addVehicle:(vehicle:{nickname:string;year:number;make:string;model:string;trim:string;engine:string;drivetrain:string;horsepower:number;color:string},photoUri:string|null)=>Promise<boolean>; setActiveVehicle:(id:string)=>void; searchParts:(query:string)=>Promise<void>;
 }
 
 export const useContentStore=create<ContentState>((set,get)=>({
@@ -28,11 +28,11 @@ export const useContentStore=create<ContentState>((set,get)=>({
     set({userId:user.id,profile:{alias:user.username,displayName:user.displayName,credits:user.credits,points:user.points,tier:user.tier,wins:user.wins,entered:user.wins+user.losses,reputation:user.reputation,isDeveloper:Boolean(user.isDeveloper)},error:null});
     await Promise.all([get().loadFeed(),get().loadRankings(),get().loadPilots(),get().loadRaces(),get().loadVehicles()]);
   },
-  loadFeed:async()=>{
+  loadFeed:async(mode='FOR_YOU')=>{
     if(!get().userId)return;
     try{
-      const data=await cloudflareApi.request<{posts:any[]}>('/api/feed');
-      set({posts:data.posts.map(row=>({id:row.id,userId:row.user_id,alias:row.username,avatarUrl:row.avatar_url||null,mediaUrl:row.media_url,videoUrl:row.media_type==='video'?row.media_url:null,caption:row.caption||'',likes:Number(row.likes||0),comments:Number(row.comments||0),liked:Boolean(row.liked),saved:Boolean(row.saved),following:Boolean(row.following),createdAt:row.created_at}))});
+      const data=await cloudflareApi.request<{posts:any[]}>(`/api/feed?mode=${encodeURIComponent(mode)}`);
+      set({posts:data.posts.map(row=>({id:row.id,userId:row.user_id,alias:row.username,avatarUrl:row.avatar_url||null,mediaUrl:row.media_url,videoUrl:row.media_type==='video'?row.media_url:null,caption:row.caption||'',category:row.feed_category||'FOR_YOU',likes:Number(row.likes||0),comments:Number(row.comments||0),liked:Boolean(row.liked),saved:Boolean(row.saved),following:Boolean(row.following),createdAt:row.created_at}))});
     }catch(error){set({error:error instanceof Error?error.message:'Feed failed'});}
   },
   toggleLike:async id=>{
@@ -45,9 +45,9 @@ export const useContentStore=create<ContentState>((set,get)=>({
   addComment:async(id,text)=>{
     try{await cloudflareApi.request(`/api/posts/${id}/comment`,{method:'POST',body:JSON.stringify({body:text})});set(state=>({posts:state.posts.map(post=>post.id===id?{...post,comments:post.comments+1}:post)}));return true;}catch(error){set({error:error instanceof Error?error.message:'Comment failed'});return false;}
   },
-  createPost:async(uri,caption,type)=>{
+  createPost:async(uri,caption,type,category='FOR_YOU')=>{
     set({loading:true,error:null});
-    try{const upload=await cloudflareApi.upload(uri,type);await cloudflareApi.request('/api/posts',{method:'POST',body:JSON.stringify({mediaUrl:upload.url,mediaType:type,caption})});await get().loadFeed();set({loading:false});return true;}catch(error){set({loading:false,error:error instanceof Error?error.message:'Upload failed'});return false;}
+    try{const upload=await cloudflareApi.upload(uri,type);await cloudflareApi.request('/api/posts',{method:'POST',body:JSON.stringify({mediaUrl:upload.url,mediaType:type,caption,category})});await get().loadFeed(category);set({loading:false});return true;}catch(error){set({loading:false,error:error instanceof Error?error.message:'Upload failed'});return false;}
   },
   updateProfile:async displayName=>{
     try{const data=await cloudflareApi.request<{user:any}>('/api/profile',{method:'PUT',body:JSON.stringify({displayName})});const user=data.user;set(state=>({profile:state.profile?{...state.profile,displayName:user.displayName}:state.profile}));return true;}catch(error){set({error:error instanceof Error?error.message:'Profile update failed'});return false;}
