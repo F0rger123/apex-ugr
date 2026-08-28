@@ -303,6 +303,54 @@ async function grantGhostCredits(userId: string, amount: number, source: string,
   return after;
 }
 
+function cotwWeekIdentifier(value = new Date()) {
+  const year = value.getUTCFullYear(),
+    oneJan = new Date(Date.UTC(year, 0, 1)),
+    week = Math.ceil(((value.getTime() - oneJan.getTime()) / 86400000 + oneJan.getUTCDay() + 1) / 7);
+  return `${year}-W${String(week).padStart(2, "0")}`;
+}
+
+async function finalizeClosedCotw(activeWeek: string, env: Env) {
+  const unresolved = await env.DB.prepare(`SELECT s.* FROM car_of_the_week_submissions s
+    WHERE s.week_identifier<? AND NOT EXISTS(
+      SELECT 1 FROM car_of_the_week_winners w
+      WHERE w.week_identifier=s.week_identifier AND w.category=s.category
+    )
+    ORDER BY s.week_identifier,s.category,s.votes_count DESC,s.created_at,s.id`).bind(activeWeek).all<any>();
+  const seen = new Set<string>();
+  for (const submission of unresolved.results) {
+    const key = `${submission.week_identifier}:${submission.category}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await env.DB.prepare(`INSERT OR IGNORE INTO car_of_the_week_winners
+      (id,week_identifier,category,submission_id,user_id,vehicle_id,gc_awarded,rep_awarded,xp_awarded,badge_id,rewards_applied)
+      VALUES(?,?,?,?,?,?,500,250,1000,'cotw-champion',0)`)
+      .bind(crypto.randomUUID(), submission.week_identifier, submission.category, submission.id, submission.user_id, submission.vehicle_id)
+      .run();
+  }
+
+  const pending = await env.DB.prepare("SELECT * FROM car_of_the_week_winners WHERE week_identifier<? AND rewards_applied=0 ORDER BY created_at,id").bind(activeWeek).all<any>();
+  for (const winner of pending.results) {
+    await ghostProfile(winner.user_id, env);
+    const ledgerId = crypto.randomUUID(),
+      notificationId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE users SET points=points+? WHERE id=? AND EXISTS(SELECT 1 FROM car_of_the_week_winners WHERE id=? AND rewards_applied=0)").bind(Number(winner.rep_awarded), winner.user_id, winner.id),
+      env.DB.prepare("UPDATE ghost_profiles SET credits=credits+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND EXISTS(SELECT 1 FROM car_of_the_week_winners WHERE id=? AND rewards_applied=0)").bind(Number(winner.gc_awarded), winner.user_id, winner.id),
+      env.DB.prepare(`INSERT INTO ghost_credit_transactions(id,user_id,amount,source,activity_id,balance_before,balance_after)
+        SELECT ?,?,?,'CAR OF THE WEEK',?,credits-?,credits FROM ghost_profiles
+        WHERE user_id=? AND EXISTS(SELECT 1 FROM car_of_the_week_winners WHERE id=? AND rewards_applied=0)`)
+        .bind(ledgerId, winner.user_id, Number(winner.gc_awarded), winner.id, Number(winner.gc_awarded), winner.user_id, winner.id),
+      env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) SELECT ?,? WHERE EXISTS(SELECT 1 FROM car_of_the_week_winners WHERE id=? AND rewards_applied=0)").bind(winner.user_id, winner.badge_id, winner.id),
+      env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json)
+        SELECT ?,?,'cotw_winner','CAR OF THE WEEK',?,? WHERE EXISTS(SELECT 1 FROM car_of_the_week_winners WHERE id=? AND rewards_applied=0)`)
+        .bind(notificationId, winner.user_id, `${winner.category.replaceAll("_", " ")} // WINNER`, JSON.stringify({ winnerId: winner.id, weekIdentifier: winner.week_identifier }), winner.id),
+      env.DB.prepare("UPDATE car_of_the_week_winners SET rewards_applied=1 WHERE id=? AND rewards_applied=0").bind(winner.id),
+    ]);
+  }
+  return { finalized: seen.size, rewardsApplied: pending.results.length };
+}
+
 async function refreshRank(userId: string, env: Env) {
   const user = await env.DB.prepare("SELECT points,tier FROM users WHERE id=?").bind(userId).first<{ points: number; tier: string }>();
   const thresholds = await env.DB.prepare("SELECT * FROM rank_thresholds WHERE minimum_rep<=? ORDER BY minimum_rep DESC LIMIT 1")
@@ -1034,6 +1082,12 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === "location" && method === "POST") {
     const body = await request.json<Record<string, number | string | boolean | null>>();
     if (!Number.isFinite(Number(body.latitude)) || !Number.isFinite(Number(body.longitude))) return json({ error: "Valid latitude and longitude are required." }, 400);
+    if (body.driveMode) {
+      const accuracy = Number(body.accuracy),
+        sampleAgeMs = Number(body.sampleAgeMs);
+      if (!Number.isFinite(accuracy) || accuracy <= 0 || accuracy > 65 || !Number.isFinite(sampleAgeMs) || sampleAgeMs < 0 || sampleAgeMs > 10_000)
+        return json({ error: "Driver Mode requires a fresh, precise GPS fix." }, 422);
+    }
     const shareMinutes = Math.min(120, Math.max(5, Math.floor(Number(body.shareMinutes) || 15)));
     const requestedExpiry = typeof body.expiresAt === "string" ? Date.parse(body.expiresAt) : NaN;
     const expiryMs = Number.isFinite(requestedExpiry) ? Math.min(Date.now() + 120 * 60_000, Math.max(Date.now() + 60_000, requestedExpiry)) : Date.now() + shareMinutes * 60_000;
@@ -1495,7 +1549,10 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   if (path === "leaderboard" && method === "GET") {
-    const rows = await env.DB.prepare(`SELECT id,username,avatar_url,tier,points,wins,losses,reputation,credits,top_speed_kph,(wins+losses) entered FROM users ORDER BY points DESC,wins DESC,reputation DESC,created_at ASC LIMIT 250`).all();
+    const rows = await env.DB.prepare(`SELECT u.id,u.username,u.avatar_url,u.tier,u.points,u.wins,u.losses,u.reputation,u.credits,u.top_speed_kph,(u.wins+u.losses) entered
+      FROM users u LEFT JOIN apex_user_settings s ON s.user_id=u.id
+      WHERE u.privacy_mode<>'private' AND COALESCE(s.profile_visibility,1)=1
+      ORDER BY u.points DESC,u.wins DESC,u.reputation DESC,u.created_at ASC,u.id LIMIT 250`).all();
     return json({ rankings: rows.results });
   }
 
@@ -1523,6 +1580,8 @@ async function handle(request: Request, env: Env, path: string) {
       raceMode = ["route", "relay"].includes(body.raceMode || "") ? String(body.raceMode) : "challenge";
     const course = (body.route || []).filter((point) => point.name && Number.isFinite(point.latitude) && Number.isFinite(point.longitude)).slice(0, 24);
     if (!opponents.length || !body.raceType || !body.startsAt) return json({ error: "Opponent, race type, and start time are required." }, 400);
+    const validOpponents = await env.DB.prepare(`SELECT id FROM users WHERE id IN (${opponents.map(() => "?").join(",")})`).bind(...opponents).all<{ id: string }>();
+    if (validOpponents.results.length !== opponents.length) return json({ error: "Every invited pilot must be a valid Apex account." }, 400);
     if (raceMode !== "challenge" && (course.length < 2 || !body.courseVerified))
       return json(
         {
@@ -1531,6 +1590,9 @@ async function handle(request: Request, env: Env, path: string) {
         400,
       );
     if (wager > user.credits) return json({ error: "Wager exceeds available Apex Credits." }, 400);
+    const participantIds = new Set([user.id, ...opponents]);
+    if (raceMode === "relay" && course.some((point) => point.assignedUserId && !participantIds.has(point.assignedUserId)))
+      return json({ error: "Every relay leg must belong to an invited pilot." }, 400);
     const id = crypto.randomUUID();
     const statements = [env.DB.prepare(`INSERT INTO race_contracts(id,challenger_id,race_type,route_name,distance_miles,rules,starts_at,wager_credits,race_mode,route_json,max_participants,course_verified) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, user.id, body.raceType, body.routeName || body.raceType, Number(body.distanceMiles) || 0, body.rules || "", body.startsAt, wager, raceMode, JSON.stringify(course), Math.max(opponents.length + 1, Math.min(16, Number(body.maxParticipants) || opponents.length + 1)), raceMode === "challenge" ? 0 : 1), env.DB.prepare("INSERT INTO race_entries(race_id,user_id,status) VALUES(?,?,'joined')").bind(id, user.id)];
     course.forEach((point, index) => statements.push(env.DB.prepare("INSERT INTO race_checkpoints(id,race_id,stop_order,label,latitude,longitude,assigned_user_id) VALUES(?,?,?,?,?,?,?)").bind(crypto.randomUUID(), id, index, String(point.name).slice(0, 100), point.latitude, point.longitude, raceMode === "relay" ? point.assignedUserId || [user.id, ...opponents][index % [user.id, ...opponents].length] : null)));
@@ -1568,20 +1630,24 @@ async function handle(request: Request, env: Env, path: string) {
     const opponent = await env.DB.prepare("SELECT status FROM race_opponents WHERE race_id=? AND user_id=?").bind(raceId, user.id).first<{ status: string }>();
     const isChallenger = race.challenger_id === user.id;
     if (!opponent && !isChallenger) return json({ error: "Race challenge not found." }, 404);
+    if (["live", "completed", "cancelled", "declined", "credit_failed"].includes(String(race.status))) return json({ error: "This race contract can no longer be modified." }, 409);
     if (action === "decline") {
       if (!opponent) return json({ error: "The challenger cannot decline their own contract." }, 400);
+      if (opponent.status !== "invited") return json({ error: "This invitation was already answered." }, 409);
       const next = user.decline_streak + 1,
         penalty = next >= 3 ? 25 : 0;
       await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='declined' WHERE race_id=? AND user_id=?").bind(raceId, user.id), env.DB.prepare("UPDATE race_contracts SET status='declined',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId), env.DB.prepare("UPDATE users SET decline_streak=?,reputation=MAX(0,reputation-?) WHERE id=?").bind(next >= 3 ? 0 : next, penalty, user.id)]);
       return json({ status: "declined", reputationPenalty: penalty });
     }
     if (action === "reschedule") {
+      if (!isChallenger) return json({ error: "Only the race host can reschedule the contract." }, 403);
       const body = await request.json<{ startsAt?: string }>();
       if (!body.startsAt || Number.isNaN(Date.parse(body.startsAt))) return json({ error: "A valid new start time is required." }, 400);
       await env.DB.batch([env.DB.prepare("UPDATE race_contracts SET starts_at=?,status='rescheduled',reschedule_count=reschedule_count+1,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(body.startsAt, raceId), env.DB.prepare("UPDATE race_opponents SET status='invited' WHERE race_id=?").bind(raceId)]);
       return json({ status: "rescheduled", startsAt: body.startsAt });
     }
     if (!opponent) return json({ error: "Challenge is already accepted by the host." }, 400);
+    if (opponent.status !== "invited") return json({ error: "This invitation was already answered." }, 409);
     if (Number(race.wager_credits || 0) > user.credits) return json({ error: "You do not have enough credits to accept this wager." }, 409);
     await env.DB.batch([env.DB.prepare("UPDATE race_opponents SET status='accepted' WHERE race_id=? AND user_id=?").bind(raceId, user.id), env.DB.prepare("UPDATE users SET decline_streak=0 WHERE id=?").bind(user.id)]);
     const pending = await env.DB.prepare("SELECT COUNT(*) count FROM race_opponents WHERE race_id=? AND status<>'accepted'").bind(raceId).first<{ count: number }>();
@@ -1629,7 +1695,9 @@ async function handle(request: Request, env: Env, path: string) {
       longitude?: number;
       accuracy?: number;
     }>();
-    if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude) || Number(body.accuracy || 0) > 65) return json({ error: "A precise GPS fix is required." }, 400);
+    const accuracy = Number(body.accuracy),
+      sampleAgeMs = Number((body as any).sampleAgeMs);
+    if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude) || !Number.isFinite(accuracy) || accuracy <= 0 || accuracy > 65 || !Number.isFinite(sampleAgeMs) || sampleAgeMs < 0 || sampleAgeMs > 10000) return json({ error: "A fresh, precise GPS fix is required." }, 400);
     const race = await env.DB.prepare("SELECT status,race_mode,prize_pool,started_at FROM race_contracts WHERE id=? AND course_verified=1").bind(raceCheckpoint[1]).first<{
       status: string;
       race_mode: string;
@@ -1647,6 +1715,13 @@ async function handle(request: Request, env: Env, path: string) {
     const checkpointTotal = await env.DB.prepare("SELECT COUNT(*) count FROM race_checkpoints WHERE race_id=?").bind(raceCheckpoint[1]).first<{ count: number }>();
     const next = checkpointIndex + 1,
       complete = next >= (checkpointTotal?.count || 0);
+    if (race.race_mode === "relay") {
+      const leg = await env.DB.prepare(`INSERT OR IGNORE INTO relay_leg_results(race_id,leg_order,user_id,started_at,completed_at,elapsed_ms,handoff_verified)
+        VALUES(?,?,?,COALESCE((SELECT completed_at FROM relay_leg_results WHERE race_id=? AND leg_order=?),?),CURRENT_TIMESTAMP,?,1)`)
+        .bind(raceCheckpoint[1], checkpointIndex, user.id, raceCheckpoint[1], checkpointIndex - 1, race.started_at, Math.max(0, Date.now() - Date.parse(race.started_at)))
+        .run();
+      if (!leg.meta.changes) return json({ error: "This relay handoff was already recorded." }, 409);
+    }
     if (!complete) {
       if (race.race_mode === "relay") await env.DB.prepare("UPDATE race_entries SET current_checkpoint=? WHERE race_id=?").bind(next, raceCheckpoint[1]).run();
       else await env.DB.prepare("UPDATE race_entries SET current_checkpoint=? WHERE race_id=? AND user_id=?").bind(next, raceCheckpoint[1], user.id).run();
@@ -1667,20 +1742,30 @@ async function handle(request: Request, env: Env, path: string) {
         payoutCredits: 0,
       });
     }
-    const [placed, totalEntries] = await Promise.all([env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=? AND place IS NOT NULL").bind(raceCheckpoint[1]).first<{ count: number }>(), env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=?").bind(raceCheckpoint[1]).first<{ count: number }>()]);
+    const [placed, totalEntries] = await Promise.all([env.DB.prepare("SELECT COUNT(*) count FROM race_payouts WHERE race_id=?").bind(raceCheckpoint[1]).first<{ count: number }>(), env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=?").bind(raceCheckpoint[1]).first<{ count: number }>()]);
     const place = (placed?.count || 0) + 1,
       entrantTotal = Math.max(1, Number(totalEntries?.count || 1)),
       payout = Math.floor(Number(race.prize_pool || 0) * racePayoutShare(entrantTotal, place)),
       elapsed = Math.max(0, Date.now() - Date.parse(race.started_at));
-    const statements = [env.DB.prepare("UPDATE race_entries SET status='finished',current_checkpoint=?,finished_at=CURRENT_TIMESTAMP,elapsed_ms=?,place=?,payout_credits=? WHERE race_id=? AND user_id=?").bind(next, elapsed, place, payout, raceCheckpoint[1], user.id), env.DB.prepare("UPDATE users SET credits=credits+?,points=points+?,wins=wins+?,losses=losses+? WHERE id=?").bind(payout, place === 1 ? 250 : place === 2 ? 120 : 60, place === 1 ? 1 : 0, place === 1 ? 0 : 1, user.id)];
+    const rep = place === 1 ? 250 : place === 2 ? 120 : 60,
+      payoutReservation = await env.DB.prepare("INSERT OR IGNORE INTO race_payouts(race_id,user_id,place,credits,rep) VALUES(?,?,?,?,?)").bind(raceCheckpoint[1], user.id, place, payout, rep).run(),
+      reserved = await env.DB.prepare("SELECT place,credits,rep,applied FROM race_payouts WHERE race_id=? AND user_id=?").bind(raceCheckpoint[1], user.id).first<{ place: number; credits: number; rep: number; applied: number }>();
+    if (!payoutReservation.meta.changes && !reserved) return json({ error: "Finish ordering changed. Retry the final checkpoint." }, 409);
+    if (!reserved || reserved.applied) return json({ error: "This race finish was already settled." }, 409);
+    const reservedPlace = Number(reserved.place),
+      reservedPayout = Number(reserved.credits),
+      reservedRep = Number(reserved.rep),
+      settlementGuard = "EXISTS (SELECT 1 FROM race_payouts WHERE race_id=? AND user_id=? AND applied=0)";
+    const statements = [env.DB.prepare(`UPDATE race_entries SET status='finished',current_checkpoint=?,finished_at=CURRENT_TIMESTAMP,elapsed_ms=?,place=?,payout_credits=? WHERE race_id=? AND user_id=? AND status='racing' AND ${settlementGuard}`).bind(next, elapsed, reservedPlace, reservedPayout, raceCheckpoint[1], user.id, raceCheckpoint[1], user.id), env.DB.prepare(`UPDATE users SET credits=credits+?,points=points+?,wins=wins+?,losses=losses+? WHERE id=? AND ${settlementGuard}`).bind(reservedPayout, reservedRep, reservedPlace === 1 ? 1 : 0, reservedPlace === 1 ? 0 : 1, user.id, raceCheckpoint[1], user.id)];
     const entrants = await env.DB.prepare("SELECT COUNT(*) count FROM race_entries WHERE race_id=? AND status<>'finished'").bind(raceCheckpoint[1]).first<{ count: number }>();
     if ((entrants?.count || 0) <= 1) statements.push(env.DB.prepare("UPDATE race_contracts SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceCheckpoint[1]));
+    statements.push(env.DB.prepare("UPDATE race_payouts SET applied=1,awarded_at=CURRENT_TIMESTAMP WHERE race_id=? AND user_id=? AND applied=0").bind(raceCheckpoint[1], user.id));
     await env.DB.batch(statements);
     return json({
       checkpoint: next,
       complete: true,
-      place,
-      payoutCredits: payout,
+      place: reservedPlace,
+      payoutCredits: reservedPayout,
       elapsedMs: elapsed,
     });
   }
@@ -2652,21 +2737,20 @@ async function handle(request: Request, env: Env, path: string) {
     if (!eligibility.drive_mode || Date.parse(eligibility.expires_at || "") <= Date.now()) return json({ error: "Active Driver Mode is required to hunt a Bounty." }, 409);
     const vehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1").bind(user.id).first<any>();
 
-    await env.DB.batch([
-      env.DB.prepare(
-        `
-        INSERT INTO bounty_participants(session_id, user_id, active_vehicle_id, status)
-        VALUES(?, ?, ?, 'hunting')
-        ON CONFLICT(session_id, user_id) DO UPDATE SET status='hunting', left_at=NULL
-      `,
-      ).bind(sessionId, user.id, vehicle?.id || null),
-      env.DB.prepare(
+    const joined = await env.DB.prepare(
+      "INSERT OR IGNORE INTO bounty_participants(session_id,user_id,active_vehicle_id,status) VALUES(?,?,?,'hunting')",
+    ).bind(sessionId, user.id, vehicle?.id || null).run();
+    const statements = [
+      env.DB.prepare("UPDATE bounty_participants SET status='hunting',active_vehicle_id=?,left_at=NULL WHERE session_id=? AND user_id=?").bind(vehicle?.id || null, sessionId, user.id),
+    ];
+    if (joined.meta.changes)
+      statements.push(env.DB.prepare(
         `
         INSERT INTO bounty_user_stats(user_id, hunts_joined) VALUES(?, 1)
         ON CONFLICT(user_id) DO UPDATE SET hunts_joined = hunts_joined + 1, updated_at = CURRENT_TIMESTAMP
       `,
-      ).bind(user.id),
-    ]);
+      ).bind(user.id));
+    await env.DB.batch(statements);
 
     return json({ success: true, sessionId, status: "hunting" });
   }
@@ -2708,7 +2792,7 @@ async function handle(request: Request, env: Env, path: string) {
     if (inRange) {
       if (!lockStartedAt) lockStartedAt = new Date().toISOString();
       const elapsed = Math.floor((Date.now() - Date.parse(lockStartedAt)) / 1000);
-      lockSec = Math.min(lockDuration, Math.max(lockSec + 1, elapsed));
+      lockSec = Math.min(lockDuration, Math.max(0, elapsed));
     } else {
       lockSec = 0;
       lockStartedAt = null;
@@ -3059,10 +3143,8 @@ async function handle(request: Request, env: Env, path: string) {
   // =========================================================================
   if (path === "cotw/active" && method === "GET") {
     const now = new Date();
-    const year = now.getUTCFullYear();
-    const oneJan = new Date(Date.UTC(year, 0, 1));
-    const weekNum = Math.ceil(((now.getTime() - oneJan.getTime()) / 86400000 + oneJan.getUTCDay() + 1) / 7);
-    const weekIdentifier = `${year}-W${String(weekNum).padStart(2, "0")}`;
+    const weekIdentifier = cotwWeekIdentifier(now);
+    await finalizeClosedCotw(weekIdentifier, env);
 
     const [submissions, myVotes, mySubmissions] = await Promise.all([
       env.DB.prepare(
@@ -3098,15 +3180,22 @@ async function handle(request: Request, env: Env, path: string) {
     }
     const ownedVehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND user_id=?").bind(body.vehicleId, user.id).first();
     if (!ownedVehicle) return json({ error: "Choose a vehicle from your own garage." }, 403);
-    if (body.category === "BEST_SOUND" && !Array.isArray(body.mediaUrls)) return json({ error: "Best Sound requires uploaded video or audio proof." }, 400);
+    const mediaUrls = Array.isArray(body.mediaUrls) ? body.mediaUrls.slice(0, 8) : [];
+    if (!mediaUrls.length) return json({ error: "At least one Apex-hosted photo or video is required." }, 400);
+    for (const mediaUrl of mediaUrls) {
+      if (typeof mediaUrl !== "string" || !mediaUrl.startsWith("/api/media/")) return json({ error: "COTW media must use the encrypted Apex uploader." }, 400);
+      const mediaKey = decodeURIComponent(mediaUrl.slice("/api/media/".length));
+      if (!mediaKey.startsWith(`${user.id}/`)) return json({ error: "COTW media belongs to another pilot." }, 403);
+      const mediaObject = await env.MEDIA.head(mediaKey),
+        contentType = String(mediaObject?.httpMetadata?.contentType || "");
+      if (!mediaObject || (!contentType.startsWith("image/") && !contentType.startsWith("video/"))) return json({ error: "COTW media is missing or unsupported." }, 400);
+      if (body.category === "BEST_SOUND" && !contentType.startsWith("video/")) return json({ error: "Best Sound requires an uploaded video." }, 400);
+    }
     const now = new Date();
-    const year = now.getUTCFullYear();
-    const oneJan = new Date(Date.UTC(year, 0, 1));
-    const weekNum = Math.ceil(((now.getTime() - oneJan.getTime()) / 86400000 + oneJan.getUTCDay() + 1) / 7);
-    const weekIdentifier = `${year}-W${String(weekNum).padStart(2, "0")}`;
+    const weekIdentifier = cotwWeekIdentifier(now);
 
     const id = crypto.randomUUID();
-    const mediaUrlsJson = JSON.stringify(body.mediaUrls || []);
+    const mediaUrlsJson = JSON.stringify(mediaUrls);
 
     await env.DB.prepare(
       `
@@ -3133,10 +3222,7 @@ async function handle(request: Request, env: Env, path: string) {
     }
 
     const now = new Date(),
-      year = now.getUTCFullYear(),
-      oneJan = new Date(Date.UTC(year, 0, 1));
-    const weekNum = Math.ceil(((now.getTime() - oneJan.getTime()) / 86400000 + oneJan.getUTCDay() + 1) / 7),
-      activeWeek = `${year}-W${String(weekNum).padStart(2, "0")}`;
+      activeWeek = cotwWeekIdentifier(now);
     const submission = await env.DB.prepare("SELECT id,week_identifier,category FROM car_of_the_week_submissions WHERE id=?").bind(body.submissionId).first<any>();
     if (!submission || submission.week_identifier !== activeWeek || body.weekIdentifier !== activeWeek || submission.category !== body.category) return json({ error: "This COTW entry is not eligible for the active category." }, 409);
     try {
@@ -3384,34 +3470,13 @@ async function handle(request: Request, env: Env, path: string) {
 
   const meetCheckinMatch = path.match(/^meets\/([^/]+)\/checkin$/);
   if (meetCheckinMatch && method === "POST") {
-    const meetId = meetCheckinMatch[1];
-    const body = await request.json<any>();
-    const lat = Number(body.latitude);
-    const lng = Number(body.longitude);
-
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return json({ error: "Valid GPS latitude and longitude required for check-in." }, 400);
-    }
-
-    const event = await env.DB.prepare(`SELECT * FROM events WHERE id = ?`).bind(meetId).first<any>();
-    if (!event) return json({ error: "Meet not found." }, 404);
-
-    const activeVehicle = await env.DB.prepare(`SELECT id FROM vehicles WHERE user_id = ? AND is_active = 1 LIMIT 1`).bind(user.id).first<any>();
-
-    await env.DB.prepare(
-      `
-      INSERT INTO meet_checkins (event_id, user_id, vehicle_id, checked_in_at, latitude, longitude)
-      VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
-      ON CONFLICT(event_id, user_id) DO UPDATE SET checked_in_at = CURRENT_TIMESTAMP, latitude = excluded.latitude, longitude = excluded.longitude
-    `,
-    )
-      .bind(meetId, user.id, activeVehicle?.id || null, lat, lng)
-      .run();
-
-    // Award +100 REP for checking in
-    await env.DB.prepare(`UPDATE users SET points = points + 100 WHERE id = ?`).bind(user.id).run();
-
-    return json({ success: true, repAwarded: 100, xpAwarded: 200 });
+    return handlePhase3({
+      request,
+      env,
+      user,
+      path: `v3/meets/${meetCheckinMatch[1]}/checkin`,
+      method,
+    });
   }
 
   // =========================================================================
@@ -3524,23 +3589,7 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   if (path === "performance/records" && method === "POST") {
-    const body = await request.json<any>();
-    if (!body.vehicleId || !body.runType || !body.resultSeconds) {
-      return json({ error: "Vehicle, run type, and result seconds required." }, 400);
-    }
-
-    const id = crypto.randomUUID();
-    await env.DB.prepare(
-      `
-      INSERT INTO personal_performance_records
-        (id, user_id, vehicle_id, run_type, result_seconds, gps_confidence_pct, evidence_url, verification_status, event_context, unit)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    )
-      .bind(id, user.id, body.vehicleId, body.runType, Number(body.resultSeconds), Number(body.gpsConfidencePct) || 100, body.evidenceUrl || null, body.verificationStatus || "private", body.eventContext || null, body.unit || "MPH")
-      .run();
-
-    return json({ success: true, id });
+    return handlePhase3({ request, env, user, path: "v3/performance", method });
   }
 
   if (path === "performance/leaderboards" && method === "GET") {

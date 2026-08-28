@@ -4,6 +4,7 @@ import {
   performanceConfidence,
   personalBest,
   utcDay,
+  validatePerformanceTelemetry,
 } from "./phase3-core.mjs";
 
 const response = (body, status = 200) =>
@@ -84,22 +85,23 @@ const BOARD_SQL = {
   },
   zero_sixty: {
     metric:
-      "COALESCE((SELECT MIN(p.result_seconds) FROM personal_performance_records p WHERE p.user_id=u.id AND p.run_type='0-60' AND p.verification_status='verified'),999999)",
+      "(SELECT MIN(p.result_seconds) FROM personal_performance_records p WHERE p.user_id=u.id AND p.run_type='0-60' AND p.verification_status='verified')",
     order: "ASC",
-    empty: 999999,
+    visibility: "performance",
   },
   sixty_130: {
     metric:
-      "COALESCE((SELECT MIN(p.result_seconds) FROM personal_performance_records p WHERE p.user_id=u.id AND p.run_type='60-130' AND p.verification_status='verified'),999999)",
+      "(SELECT MIN(p.result_seconds) FROM personal_performance_records p WHERE p.user_id=u.id AND p.run_type='60-130' AND p.verification_status='verified')",
     order: "ASC",
-    empty: 999999,
+    visibility: "performance",
   },
   top_speed: {
     metric:
-      "COALESCE((SELECT MAX(p.top_speed_kph) FROM personal_performance_records p WHERE p.user_id=u.id AND p.verification_status='verified'),0)",
+      "(SELECT MAX(p.top_speed_kph) FROM personal_performance_records p WHERE p.user_id=u.id AND p.verification_status='verified')",
     order: "DESC",
+    visibility: "performance",
   },
-  h2h: { metric: "u.wins", order: "DESC" },
+  h2h: { metric: "u.wins", order: "DESC", visibility: "races" },
   convoy: {
     metric: "(SELECT COUNT(*) FROM cruise_members cm WHERE cm.user_id=u.id)",
     order: "DESC",
@@ -115,36 +117,55 @@ async function leaderboard(env, user, request) {
   const url = new URL(request.url),
     boardKey = url.searchParams.get("board") || "rep",
     scope = url.searchParams.get("scope") || "global";
-  const board = BOARD_SQL[boardKey] || BOARD_SQL.rep;
+  const board = BOARD_SQL[boardKey] || BOARD_SQL.rep,
+    safeScope = ["global", "local", "friends", "crew"].includes(scope)
+      ? scope
+      : "global";
   let scopeSql = "",
     bindings = [];
-  if (scope === "friends") {
+  if (safeScope === "friends") {
     scopeSql =
       "AND (u.id=? OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.following_id=u.id))";
     bindings = [user.id, user.id];
-  } else if (scope === "crew") {
+  } else if (safeScope === "crew") {
     scopeSql = `AND EXISTS(SELECT 1 FROM crew_members mine JOIN crew_members theirs ON theirs.crew_id=mine.crew_id WHERE mine.user_id=? AND mine.status='approved' AND theirs.user_id=u.id AND theirs.status='approved')`;
     bindings = [user.id];
-  } else if (scope === "local") {
-    scopeSql = `AND EXISTS(SELECT 1 FROM driver_locations me JOIN driver_locations them ON them.user_id=u.id WHERE me.user_id=? AND ABS(me.latitude-them.latitude)<.55 AND ABS(me.longitude-them.longitude)<.55)`;
+  } else if (safeScope === "local") {
+    scopeSql = `AND COALESCE(settings.location_visibility,1)=1 AND EXISTS(SELECT 1 FROM driver_locations me JOIN driver_locations them ON them.user_id=u.id LEFT JOIN apex_user_settings mine_settings ON mine_settings.user_id=me.user_id WHERE me.user_id=? AND COALESCE(mine_settings.location_visibility,1)=1 AND me.expires_at>CURRENT_TIMESTAMP AND them.expires_at>CURRENT_TIMESTAMP AND ABS(me.latitude-them.latitude)<.55 AND ABS(me.longitude-them.longitude)<.55)`;
     bindings = [user.id];
   }
+  let visibilitySql = "";
+  if (board.visibility === "performance")
+    visibilitySql = "AND COALESCE(settings.public_performance_visibility,1)=1";
+  else if (board.visibility === "races")
+    visibilitySql = "AND COALESCE(settings.public_race_records,1)=1";
+  else if (boardKey === "meets")
+    visibilitySql = "AND COALESCE(settings.meet_attendance_visibility,1)=1";
+  else if (boardKey === "safe_houses")
+    visibilitySql = "AND COALESCE(prefs.public_stats_json,'[]') LIKE '%safeHouses%'";
+  else if (["most_wanted", "bounty_hunters", "bounty_survivors"].includes(boardKey))
+    visibilitySql = "AND COALESCE(prefs.public_stats_json,'[]') LIKE '%bounties%'";
   const rows = await env.DB.prepare(
-    `SELECT u.id,u.username,u.display_name,u.avatar_url,u.apex_id,u.tier,u.points,u.wins,u.losses,
+    `SELECT u.id,u.username,u.display_name,u.avatar_url,CASE WHEN COALESCE(settings.apex_id_visibility,1)=1 THEN u.apex_id ELSE NULL END apex_id,u.tier,u.points,u.wins,u.losses,
       ${board.metric} metric,
       (SELECT c.name FROM crew_members cm JOIN crews c ON c.id=cm.crew_id WHERE cm.user_id=u.id AND cm.status='approved' LIMIT 1) crew_name,
       (SELECT i.name FROM ghost_equipped_items ge JOIN ghost_shop_items i ON i.id=ge.item_id WHERE ge.user_id=u.id AND ge.category='frame') frame_name,
       (SELECT i.name FROM ghost_equipped_items ge JOIN ghost_shop_items i ON i.id=ge.item_id WHERE ge.user_id=u.id AND ge.category='banner') banner_name
-    FROM users u WHERE 1=1 ${scopeSql} ORDER BY metric ${board.order},u.points DESC,u.id LIMIT 100`,
+    FROM users u
+    LEFT JOIN apex_user_settings settings ON settings.user_id=u.id
+    LEFT JOIN profile_preferences prefs ON prefs.user_id=u.id
+    WHERE u.privacy_mode<>'private' AND COALESCE(settings.profile_visibility,1)=1
+      ${visibilitySql} ${scopeSql}
+    ORDER BY metric ${board.order},u.points DESC,u.id LIMIT 100`,
   )
     .bind(...bindings)
     .all();
   const filtered = (rows.results || []).filter(
-    (row) => board.empty === undefined || Number(row.metric) !== board.empty,
+    (row) => row.metric !== null && row.metric !== undefined,
   );
   return response({
     board: boardKey,
-    scope,
+    scope: safeScope,
     generatedAt: new Date().toISOString(),
     entries: filtered.map((row, index) => ({
       ...row,
@@ -157,11 +178,21 @@ async function leaderboard(env, user, request) {
 async function driverProfile(env, user, targetId) {
   const id = targetId || user.id;
   const profile = await env.DB.prepare(
-    `SELECT id,username,display_name,avatar_url,apex_id,tier,points,wins,losses,created_at FROM users WHERE id=?`,
+    `SELECT id,username,display_name,avatar_url,apex_id,tier,points,wins,losses,privacy_mode,created_at FROM users WHERE id=?`,
   )
     .bind(id)
     .first();
   if (!profile) return response({ error: "Driver profile not found." }, 404);
+  const isSelf = id === user.id,
+    settings =
+      (await env.DB.prepare("SELECT * FROM apex_user_settings WHERE user_id=?")
+        .bind(id)
+        .first()) || {};
+  if (
+    !isSelf &&
+    (profile.privacy_mode === "private" || Number(settings.profile_visibility ?? 1) !== 1)
+  )
+    return response({ error: "This driver profile is private." }, 403);
   const [
     vehicles,
     records,
@@ -272,7 +303,16 @@ async function driverProfile(env, user, targetId) {
       .bind(id)
       .all(),
   ]);
-  const recordRows = records.results || [];
+  const parsedPublicStats = parseJson(preference?.public_stats_json, []),
+    publicStats = Array.isArray(parsedPublicStats) ? parsedPublicStats : [],
+    canShow = (name) => isSelf || publicStats.includes(name),
+    recordRows = isSelf
+      ? records.results || []
+      : Number(settings.public_performance_visibility ?? 1) === 1
+        ? (records.results || []).filter(
+            (row) => row.verification_status === "verified",
+          )
+        : [];
   const best = (type) => {
     const values = recordRows
       .filter((row) => row.run_type === type)
@@ -314,35 +354,52 @@ async function driverProfile(env, user, targetId) {
         ),
       )
     : 100;
-  return response({
-    profile: {
-      ...profile,
-      crew,
-      title: preference?.title || "UNDERGROUND DRIVER",
-      publicStats: parseJson(preference?.public_stats_json, []),
-    },
-    stats: {
-      wins: Number(profile.wins || 0),
-      losses: Number(profile.losses || 0),
-      winRate:
-        Number(profile.wins || 0) + Number(profile.losses || 0)
+  const stats = {
+    wins: canShow("wins") ? Number(profile.wins || 0) : undefined,
+    losses: canShow("losses") ? Number(profile.losses || 0) : undefined,
+    winRate:
+      canShow("wins") || canShow("losses")
+        ? Number(profile.wins || 0) + Number(profile.losses || 0)
           ? Math.round(
               (Number(profile.wins || 0) /
                 (Number(profile.wins || 0) + Number(profile.losses || 0))) *
                 100,
             )
-          : 0,
-      topSpeedKph: topSpeed,
-      bestZeroSixty: best("0-60"),
-      bestSixty130: best("60-130"),
-      bountiesClaimed: Number(bounty?.successful_claims || 0),
-      fiveStarEscapes: Number(bounty?.five_star_survivals || 0),
-      meets: Number(meetCount?.count || 0),
-      safeHouses: Number(safeHouseCount?.count || 0),
-      ghostCaches: Number(ghost?.drops_claimed || 0),
-      currentStreak: Number(ghost?.current_streak || 0),
-      cotwWins: Number(cotwWins?.count || 0),
+          : 0
+        : undefined,
+    topSpeedKph: canShow("topSpeed") ? topSpeed : undefined,
+    bestZeroSixty: canShow("zeroToSixty") ? best("0-60") : undefined,
+    bestSixty130: canShow("sixtyTo130") ? best("60-130") : undefined,
+    bountiesClaimed: canShow("bounties")
+      ? Number(bounty?.successful_claims || 0)
+      : undefined,
+    fiveStarEscapes: canShow("bounties")
+      ? Number(bounty?.five_star_survivals || 0)
+      : undefined,
+    meets: canShow("meets") ? Number(meetCount?.count || 0) : undefined,
+    safeHouses: canShow("safeHouses")
+      ? Number(safeHouseCount?.count || 0)
+      : undefined,
+    ghostCaches: canShow("ghost")
+      ? Number(ghost?.drops_claimed || 0)
+      : undefined,
+    currentStreak: canShow("ghost")
+      ? Number(ghost?.current_streak || 0)
+      : undefined,
+    cotwWins: canShow("cotw") ? Number(cotwWins?.count || 0) : undefined,
+  };
+  return response({
+    profile: {
+      ...profile,
+      apex_id:
+        isSelf || Number(settings.apex_id_visibility ?? 1) === 1
+          ? profile.apex_id
+          : null,
+      crew: canShow("crew") ? crew : null,
+      title: preference?.title || "UNDERGROUND DRIVER",
+      publicStats,
     },
+    stats,
     rank: {
       current: currentThreshold?.rank || profile.tier,
       rep: currentRep,
@@ -354,24 +411,31 @@ async function driverProfile(env, user, targetId) {
       progress: rankProgress,
       history: rankHistory.results || [],
     },
-    seasons: seasons.results || [],
-    social: {
+    seasons: canShow("seasons") ? seasons.results || [] : [],
+    social: canShow("posts") ? {
       posts: Number(socialStats?.posts || 0),
       followers: Number(socialStats?.followers || 0),
       following: Number(socialStats?.following || 0),
       likesReceived: Number(socialStats?.likes_received || 0),
       commentsReceived: Number(socialStats?.comments_received || 0),
       recentPosts: recentPosts.results || [],
-    },
-    vehicles: vehicles.results,
+    } : { posts: 0, followers: 0, following: 0, likesReceived: 0, commentsReceived: 0, recentPosts: [] },
+    vehicles:
+      isSelf || Number(settings.vehicle_visibility ?? 1) === 1
+        ? vehicles.results
+        : [],
     records: recordRows,
     badges: badges.results,
-    milestones: milestones.results,
-    ghost: ghost || {},
-    bounty: bounty || {},
+    milestones: canShow("milestones") ? milestones.results : [],
+    ghost: canShow("ghost") ? ghost || {} : {},
+    bounty: canShow("bounties") ? bounty || {} : {},
     equipped: equipped.results,
-    legacy: legacy.results,
-    isSelf: id === user.id,
+    legacy:
+      isSelf || Number(settings.vehicle_visibility ?? 1) === 1
+        ? legacy.results
+        : [],
+    isSelf,
+    privacy: isSelf ? settings : undefined,
   });
 }
 
@@ -386,11 +450,19 @@ async function savePerformance(env, user, request) {
     .first();
   if (!vehicle)
     return response({ error: "Choose a vehicle from your garage." }, 404);
+  const telemetry = validatePerformanceTelemetry({
+    runType: body.runType,
+    route: body.route,
+    resultSeconds: body.resultSeconds,
+    topSpeedKph: body.topSpeedKph,
+  });
+  if (!telemetry.valid)
+    return response({ error: telemetry.reason, telemetry }, 422);
   const confidence = performanceConfidence({
     accuracyM: body.gpsAccuracyM,
     sampleAgeMs: body.gpsSampleAgeMs,
-    resultSeconds: body.resultSeconds,
-    topSpeedKph: body.topSpeedKph,
+    resultSeconds: telemetry.derivedSeconds,
+    topSpeedKph: telemetry.derivedTopSpeedKph,
   });
   if (!confidence.valid)
     return response(
@@ -406,8 +478,7 @@ async function savePerformance(env, user, request) {
     .bind(user.id, body.vehicleId, body.runType)
     .all();
   const id = crypto.randomUUID(),
-    verification =
-      body.verificationStatus === "verified" ? "pending" : "private";
+    verification = body.evidenceUrl && confidence.score >= 80 ? "pending" : "private";
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO personal_performance_records(id,user_id,vehicle_id,run_type,result_seconds,gps_confidence_pct,evidence_url,verification_status,event_context,unit,top_speed_kph,gps_accuracy_m,gps_sample_age_ms,route_json,confidence_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -416,16 +487,16 @@ async function savePerformance(env, user, request) {
       user.id,
       body.vehicleId,
       body.runType,
-      Number(body.resultSeconds),
+      telemetry.derivedSeconds,
       confidence.score,
       body.evidenceUrl || null,
       verification,
       body.eventContext || "PRIVATE / CLOSED COURSE",
       body.unit === "KMH" ? "KMH" : "MPH",
-      Number(body.topSpeedKph || 0),
+      telemetry.derivedTopSpeedKph,
       Number(body.gpsAccuracyM),
       Number(body.gpsSampleAgeMs),
-      JSON.stringify((body.route || []).slice(0, 5000)),
+      JSON.stringify(telemetry.samples),
       confidence.label,
     ),
     env.DB.prepare(
@@ -441,13 +512,13 @@ async function savePerformance(env, user, request) {
       {
         vehicle_id: body.vehicleId,
         run_type: body.runType,
-        result_seconds: Number(body.resultSeconds),
+        result_seconds: telemetry.derivedSeconds,
       },
     ],
     body.runType,
     body.vehicleId,
   );
-  return response({ saved: true, id, confidence, personalBest: result }, 201);
+  return response({ saved: true, id, confidence, telemetry, personalBest: result }, 201);
 }
 
 async function listMeets(env, user) {
@@ -529,18 +600,32 @@ async function checkInMeet(env, user, eventId, request) {
   const body = await request.json(),
     lat = Number(body.latitude),
     lng = Number(body.longitude),
-    accuracy = Number(body.accuracyM);
-  if (![lat, lng, accuracy].every(Number.isFinite) || accuracy > 65)
+    accuracy = Number(body.accuracyM),
+    sampleAgeMs = Number(body.sampleAgeMs);
+  if (
+    ![lat, lng, accuracy, sampleAgeMs].every(Number.isFinite) ||
+    accuracy <= 0 ||
+    accuracy > 65 ||
+    sampleAgeMs < 0 ||
+    sampleAgeMs > 10_000
+  )
     return response(
       { error: "A fresh GPS fix with 65 m accuracy or better is required." },
       422,
     );
   const event = await env.DB.prepare(
-    "SELECT id,latitude,longitude,radius_m FROM events WHERE id=?",
+    "SELECT id,latitude,longitude,radius_m,starts_at,ends_at FROM events WHERE id=?",
   )
     .bind(eventId)
     .first();
   if (!event) return response({ error: "Meet not found." }, 404);
+  const startsAt = Date.parse(event.starts_at),
+    endsAt = event.ends_at
+      ? Date.parse(event.ends_at)
+      : startsAt + 6 * 60 * 60 * 1000,
+    now = Date.now();
+  if (!Number.isFinite(startsAt) || now < startsAt || now > endsAt)
+    return response({ error: "Meet check-in is outside the active event window." }, 409);
   const distance = distanceMeters(
     lat,
     lng,

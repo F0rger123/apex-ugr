@@ -50,6 +50,127 @@ export function performanceConfidence({
   };
 }
 
+const PERFORMANCE_TARGET_KPH = {
+  "0-30": [0, 48.2803],
+  "0-60": [0, 96.5606],
+  "0-100": [0, 160.9344],
+  "30-60": [48.2803, 96.5606],
+  "40-100": [64.3738, 160.9344],
+  "60-130": [96.5606, 209.2147],
+  CUSTOM: [0, 96.5606],
+};
+
+export function validatePerformanceTelemetry({
+  runType,
+  route,
+  resultSeconds,
+  topSpeedKph,
+}) {
+  const target = PERFORMANCE_TARGET_KPH[runType],
+    samples = Array.isArray(route) ? route.slice(0, 5000) : [];
+  if (!target || samples.length < 4)
+    return { valid: false, reason: "At least four GPS samples are required." };
+
+  const normalized = samples.map((sample) => ({
+    latitude: Number(sample.latitude),
+    longitude: Number(sample.longitude),
+    speedKph: Number(sample.speedKph),
+    timestamp: Number(sample.timestamp),
+  }));
+  if (
+    normalized.some(
+      (sample) =>
+        ![
+          sample.latitude,
+          sample.longitude,
+          sample.speedKph,
+          sample.timestamp,
+        ].every(Number.isFinite) ||
+        Math.abs(sample.latitude) > 90 ||
+        Math.abs(sample.longitude) > 180 ||
+        sample.speedKph < 0 ||
+        sample.speedKph > 500,
+    )
+  )
+    return { valid: false, reason: "Telemetry contains invalid sensor values." };
+
+  for (let index = 1; index < normalized.length; index += 1) {
+    const previous = normalized[index - 1],
+      current = normalized[index],
+      deltaMs = current.timestamp - previous.timestamp;
+    if (deltaMs <= 0 || deltaMs > 10_000)
+      return { valid: false, reason: "Telemetry timestamps are not continuous." };
+    const accelerationKphPerSecond =
+      Math.abs(current.speedKph - previous.speedKph) / (deltaMs / 1000);
+    if (accelerationKphPerSecond > 180)
+      return { valid: false, reason: "Telemetry acceleration is not plausible." };
+  }
+
+  const [startKph, endKph] = target,
+    startThreshold = startKph === 0 ? 4 : startKph,
+    startIndex = normalized.findIndex(
+      (sample) => sample.speedKph >= startThreshold,
+    ),
+    endIndex = normalized.findIndex(
+      (sample, index) => index > startIndex && sample.speedKph >= endKph,
+    );
+  if (startIndex < 0 || endIndex < 0)
+    return { valid: false, reason: "Telemetry does not cross the run thresholds." };
+  if (startKph === 0 && normalized[0].speedKph > 12)
+    return { valid: false, reason: "Standing-start telemetry began while moving." };
+
+  const derivedSeconds =
+      (normalized[endIndex].timestamp - normalized[startIndex].timestamp) / 1000,
+    derivedTopSpeedKph = Math.max(
+      ...normalized.slice(startIndex, endIndex + 1).map((sample) => sample.speedKph),
+    ),
+    claimedSeconds = Number(resultSeconds),
+    claimedTopSpeed = Number(topSpeedKph);
+  if (
+    !Number.isFinite(claimedSeconds) ||
+    Math.abs(claimedSeconds - derivedSeconds) > Math.max(0.75, derivedSeconds * 0.12)
+  )
+    return { valid: false, reason: "Claimed elapsed time does not match telemetry." };
+  if (
+    !Number.isFinite(claimedTopSpeed) ||
+    Math.abs(claimedTopSpeed - derivedTopSpeedKph) > 8
+  )
+    return { valid: false, reason: "Claimed top speed does not match telemetry." };
+
+  return {
+    valid: true,
+    samples: normalized,
+    startIndex,
+    endIndex,
+    derivedSeconds: Number(derivedSeconds.toFixed(3)),
+    derivedTopSpeedKph: Number(derivedTopSpeedKph.toFixed(3)),
+  };
+}
+
+export function ghostSampleAtElapsed(route, elapsedMs) {
+  const samples = Array.isArray(route) ? route : [];
+  if (samples.length < 2) return null;
+  const first = Number(samples[0].timestamp),
+    target = first + Math.max(0, Number(elapsedMs) || 0);
+  if (!Number.isFinite(first)) return null;
+  let right = samples.findIndex((sample) => Number(sample.timestamp) >= target);
+  if (right < 0) right = samples.length - 1;
+  if (right === 0) return { ...samples[0], progress: 0 };
+  const left = right - 1,
+    a = samples[left],
+    b = samples[right],
+    span = Math.max(1, Number(b.timestamp) - Number(a.timestamp)),
+    ratio = Math.max(0, Math.min(1, (target - Number(a.timestamp)) / span));
+  return {
+    latitude: Number(a.latitude) + (Number(b.latitude) - Number(a.latitude)) * ratio,
+    longitude:
+      Number(a.longitude) + (Number(b.longitude) - Number(a.longitude)) * ratio,
+    speedKph: Number(a.speedKph) + (Number(b.speedKph) - Number(a.speedKph)) * ratio,
+    timestamp: target,
+    progress: Math.max(0, Math.min(1, right / (samples.length - 1))),
+  };
+}
+
 export function personalBest(records, runType, vehicleId) {
   const matching = records
     .filter(
@@ -73,6 +194,7 @@ export function personalBest(records, runType, vehicleId) {
 
 export function parseApexQr(payload) {
   const value = String(payload || "").trim();
+  if (!value || value.length > 256) return null;
   const match = value.match(
     /^apex:\/\/(driver|vehicle|crew|meet|build|profile|invite)\/([A-Za-z0-9_-]{2,80})$/i,
   );

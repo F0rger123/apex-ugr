@@ -10,8 +10,9 @@ ALTER TABLE posts ADD COLUMN feed_category TEXT NOT NULL DEFAULT 'FOR_YOU';
 CREATE INDEX IF NOT EXISTS idx_perf_verified_board
   ON personal_performance_records(run_type,verification_status,result_seconds);
 
-DELETE FROM daily_ghost_claims
-WHERE rowid NOT IN (SELECT MIN(rowid) FROM daily_ghost_claims GROUP BY user_id,claim_date);
+-- Intentionally fail closed if duplicate claims exist. Run
+-- scripts/phase3_preflight.sql before this migration and reconcile any duplicate
+-- reward/ledger history explicitly instead of deleting production data here.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_claim_user_date
   ON daily_ghost_claims(user_id,claim_date);
 
@@ -26,6 +27,7 @@ ALTER TABLE events ADD COLUMN capacity INTEGER NOT NULL DEFAULT 100;
 ALTER TABLE events ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public';
 ALTER TABLE events ADD COLUMN categories_json TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE events ADD COLUMN announcements_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE car_of_the_week_winners ADD COLUMN rewards_applied INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS meet_showcase_votes (
   event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -65,6 +67,18 @@ CREATE TABLE IF NOT EXISTS relay_leg_results (
   handoff_verified INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(race_id,leg_order)
 );
+
+CREATE TABLE IF NOT EXISTS race_payouts (
+  race_id TEXT NOT NULL REFERENCES race_contracts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  place INTEGER NOT NULL,
+  credits INTEGER NOT NULL DEFAULT 0,
+  rep INTEGER NOT NULL DEFAULT 0,
+  applied INTEGER NOT NULL DEFAULT 0,
+  awarded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(race_id,user_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_race_payout_place ON race_payouts(race_id,place);
 
 CREATE TABLE IF NOT EXISTS profile_preferences (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -118,7 +132,16 @@ CREATE TABLE IF NOT EXISTS qr_scan_history (
 INSERT OR IGNORE INTO badges(id,name,description,icon,reward_credits,category) VALUES
   ('meet-regular','MEET REGULAR','Check in at five verified meets.','calendar',0,'meets'),
   ('convoy-lead','CONVOY LEAD','Complete a convoy as route leader.','route',0,'convoy'),
-  ('cotw-voter','UNDERGROUND JURY','Cast a verified Car of the Week vote.','trophy',0,'community');
+  ('cotw-voter','UNDERGROUND JURY','Cast a verified Car of the Week vote.','trophy',0,'community'),
+  ('cotw-champion','CAR OF THE WEEK','Win a verified weekly community category.','trophy',0,'community');
 
 INSERT OR REPLACE INTO network_config(key,value_json,updated_at) VALUES
   ('phase3_limits','{"performanceMaxAccuracyM":35,"performanceMaxSampleAgeMs":3000,"meetCheckinMaxAccuracyM":65,"meetCheckinRewardRep":100,"ghostKeyBlackMarketCost":1}',CURRENT_TIMESTAMP);
+
+CREATE INDEX IF NOT EXISTS idx_users_rank_board ON users(points DESC,id);
+CREATE INDEX IF NOT EXISTS idx_driver_locations_area ON driver_locations(latitude,longitude,user_id);
+CREATE INDEX IF NOT EXISTS idx_meet_checkins_user ON meet_checkins(user_id,event_id);
+CREATE INDEX IF NOT EXISTS idx_safe_houses_user ON safe_houses(user_id);
+CREATE INDEX IF NOT EXISTS idx_cotw_winners_user ON car_of_the_week_winners(user_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_race_entries_authority ON race_entries(race_id,status,current_checkpoint);
+CREATE INDEX IF NOT EXISTS idx_posts_user_created ON posts(user_id,created_at DESC);

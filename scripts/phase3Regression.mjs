@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chestAvailable,
+  ghostSampleAtElapsed,
   parseApexQr,
   performanceConfidence,
   personalBest,
@@ -8,6 +9,7 @@ import {
   relayHandoffEligible,
   routeRaceTransition,
   utcDay,
+  validatePerformanceTelemetry,
 } from "../functions/lib/phase3-core.mjs";
 
 assert.equal(utcDay(Date.UTC(2026, 7, 26, 23, 59, 59)), "2026-08-26");
@@ -25,6 +27,8 @@ assert.deepEqual(parseApexQr("apex://profile/user_123"), {
   targetId: "user_123",
 });
 assert.equal(parseApexQr("https://malicious.example/profile/user_123"), null);
+assert.equal(parseApexQr("javascript:alert(1)"), null);
+assert.equal(parseApexQr(`apex://profile/${"a".repeat(300)}`), null);
 assert.equal(parseApexQr("apex://unknown/user_123"), null);
 
 const confidence = performanceConfidence({
@@ -44,6 +48,42 @@ assert.equal(
   }).valid,
   false,
 );
+
+const telemetryRoute = [0, 5, 35, 70, 100].map((speedKph, index) => ({
+  latitude: 38.9 + index * 0.0001,
+  longitude: -77.03 + index * 0.0001,
+  speedKph,
+  timestamp: 1_000_000 + index * 1000,
+}));
+const telemetry = validatePerformanceTelemetry({
+  runType: "0-60",
+  route: telemetryRoute,
+  resultSeconds: 3,
+  topSpeedKph: 100,
+});
+assert.equal(telemetry.valid, true);
+assert.equal(telemetry.derivedSeconds, 3);
+assert.equal(
+  validatePerformanceTelemetry({
+    runType: "0-60",
+    route: telemetryRoute,
+    resultSeconds: 1.2,
+    topSpeedKph: 100,
+  }).valid,
+  false,
+);
+assert.equal(
+  validatePerformanceTelemetry({
+    runType: "0-60",
+    route: telemetryRoute.slice(0, 2),
+    resultSeconds: 3,
+    topSpeedKph: 100,
+  }).valid,
+  false,
+);
+const ghost = ghostSampleAtElapsed(telemetryRoute, 2500);
+assert.equal(Math.round(ghost.speedKph), 53);
+assert.equal(ghost.progress > 0 && ghost.progress < 1, true);
 assert.equal(
   performanceConfidence({
     accuracyM: 5,
@@ -116,6 +156,8 @@ console.log(
     dailyChest: "utc-user-day",
     qr: "validated",
     performance: confidence.label,
+    telemetry: "server-derived",
+    pbGhost: "recorded-samples-only",
     personalBest: pb,
     routeLifecycle: "DRAFT>OPEN>READY>ACTIVE>FINISHED",
     relay: "handoff-verified",

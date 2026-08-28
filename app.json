@@ -62,6 +62,14 @@
           "recordAudioAndroid": false,
           "barcodeScannerEnabled": true
         }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Apex UGR accesses your photo library to save generated Ghost Run share cards.",
+          "savePhotosPermission": "Apex UGR saves generated Ghost Run share cards to your photo library.",
+          "isAccessMediaLocationEnabled": false
+        }
       ]
     ],
     "extra": {

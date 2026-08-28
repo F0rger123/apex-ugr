@@ -16,9 +16,13 @@ import {
 } from "react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
+import * as MediaLibrary from "expo-media-library";
+import * as Sharing from "expo-sharing";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
+import { captureRef } from "react-native-view-shot";
+import Svg, { Polyline } from "react-native-svg";
 import {
   BadgeCheck,
   Camera,
@@ -32,6 +36,8 @@ import {
   LockKeyhole,
   MapPin,
   Medal,
+  Mic,
+  MicOff,
   Navigation,
   Play,
   QrCode,
@@ -962,13 +968,123 @@ const targetMph: Record<string, [number, number]> = {
   "60-130": [60, 130],
   CUSTOM: [0, 60],
 };
+
+function tracePoints(route: any[], width = 280, height = 82) {
+  const valid = (route || []).filter(
+    (sample) =>
+      Number.isFinite(Number(sample.latitude)) &&
+      Number.isFinite(Number(sample.longitude)),
+  );
+  if (valid.length < 2) return "";
+  const lats = valid.map((sample) => Number(sample.latitude)),
+    lngs = valid.map((sample) => Number(sample.longitude)),
+    minLat = Math.min(...lats),
+    maxLat = Math.max(...lats),
+    minLng = Math.min(...lngs),
+    maxLng = Math.max(...lngs),
+    latSpan = Math.max(0.000001, maxLat - minLat),
+    lngSpan = Math.max(0.000001, maxLng - minLng);
+  return valid
+    .map((sample) => {
+      const x = 8 + ((Number(sample.longitude) - minLng) / lngSpan) * (width - 16),
+        y = 8 + (1 - (Number(sample.latitude) - minLat) / latSpan) * (height - 16);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function ghostAtElapsed(route: any[], elapsedMs: number) {
+  if (!Array.isArray(route) || route.length < 2) return null;
+  const first = Number(route[0].timestamp),
+    target = first + Math.max(0, elapsedMs);
+  if (!Number.isFinite(first)) return null;
+  let right = route.findIndex((sample) => Number(sample.timestamp) >= target);
+  if (right < 0) right = route.length - 1;
+  if (right === 0) return { ...route[0], progress: 0 };
+  const left = right - 1,
+    a = route[left],
+    b = route[right],
+    span = Math.max(1, Number(b.timestamp) - Number(a.timestamp)),
+    ratio = Math.max(0, Math.min(1, (target - Number(a.timestamp)) / span));
+  return {
+    speedKph:
+      Number(a.speedKph) + (Number(b.speedKph) - Number(a.speedKph)) * ratio,
+    progress: Math.max(0, Math.min(1, right / (route.length - 1))),
+  };
+}
+
+function PerformanceShareCard({
+  cardRef,
+  alias,
+  apexId,
+  vehicle,
+  runType,
+  result,
+}: {
+  cardRef: React.RefObject<View>;
+  alias: string;
+  apexId: string;
+  vehicle: any;
+  runType: string;
+  result: any;
+}) {
+  const points = tracePoints(result.route || []);
+  return (
+    <View ref={cardRef} collapsable={false} style={styles.shareCard}>
+      <View style={styles.shareCardHeader}>
+        <View>
+          <Text style={styles.shareBrand}>APEX UGR</Text>
+          <Text style={styles.shareSubhead}>GHOST RUN // VERIFIED TELEMETRY</Text>
+        </View>
+        <Radio size={28} color={accent} />
+      </View>
+      <View style={styles.shareDivider} />
+      <Text style={styles.shareAlias}>{alias.toUpperCase()}</Text>
+      <Text style={styles.shareApexId}>{apexId}</Text>
+      <Text style={styles.shareVehicle}>
+        {vehicle
+          ? `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.trim ? ` ${vehicle.trim}` : ""}`
+          : "REGISTERED VEHICLE"}
+      </Text>
+      <View style={styles.shareMetricRow}>
+        <View>
+          <Text style={styles.shareMetric}>{result.seconds.toFixed(3)}</Text>
+          <Text style={styles.shareMetricLabel}>{runType} // SEC</Text>
+        </View>
+        <View>
+          <Text style={styles.shareMetric}>{Math.round(result.topSpeedKph)}</Text>
+          <Text style={styles.shareMetricLabel}>TOP SPEED // KPH</Text>
+        </View>
+      </View>
+      <View style={styles.shareTrace}>
+        {points ? (
+          <Svg width="100%" height="82" viewBox="0 0 280 82">
+            <Polyline
+              points={points}
+              fill="none"
+              stroke={accent}
+              strokeWidth="2"
+            />
+          </Svg>
+        ) : (
+          <Text style={styles.shareMetricLabel}>ROUTE TRACE UNAVAILABLE</Text>
+        )}
+      </View>
+      <View style={styles.shareDivider} />
+      <Text style={styles.shareFooter}>
+        {new Date().toISOString().slice(0, 10)} // PRIVATE CLOSED COURSE
+      </Text>
+    </View>
+  );
+}
 export function Phase3RaceScreen({
   contracts,
 }: {
   contracts: React.ReactNode;
 }) {
   const vehicles = useContentStore((state) => state.vehicles),
-    activeVehicleId = useContentStore((state) => state.activeVehicleId);
+    activeVehicleId = useContentStore((state) => state.activeVehicleId),
+    localProfile = useContentStore((state) => state.profile);
   const [mode, setMode] = useState<"SOLO" | "ROUTE + RELAY">("SOLO"),
     [runType, setRunType] = useState("0-60"),
     [safe, setSafe] = useState(false),
@@ -977,13 +1093,49 @@ export function Phase3RaceScreen({
     [accuracy, setAccuracy] = useState(0),
     [elapsed, setElapsed] = useState(0),
     [result, setResult] = useState<any | null>(null),
-    [status, setStatus] = useState("");
+    [status, setStatus] = useState(""),
+    [driverData, setDriverData] = useState<any | null>(null);
   const watch = useRef<Location.LocationSubscription | null>(null),
     started = useRef(0),
     lastSample = useRef(0),
     route = useRef<any[]>([]),
+    shareCardRef = useRef<View>(null),
     visual = useRef(new Animated.Value(0)).current;
   useEffect(() => () => watch.current?.remove(), []);
+  const loadDriverData = async () => {
+    try {
+      setDriverData(await cloudflareApi.request<any>("/api/v3/profile"));
+    } catch {
+      setDriverData(null);
+    }
+  };
+  useEffect(() => {
+    void loadDriverData();
+  }, []);
+  const pbRecord = useMemo(() => {
+      const matches = (driverData?.records || [])
+        .filter(
+          (record: any) =>
+            record.vehicle_id === activeVehicleId &&
+            record.run_type === runType &&
+            Number(record.result_seconds) > 0,
+        )
+        .sort(
+          (a: any, b: any) =>
+            Number(a.result_seconds) - Number(b.result_seconds),
+        );
+      return matches[0] || null;
+    }, [driverData, activeVehicleId, runType]),
+    pbRoute = useMemo(() => {
+      try {
+        const parsed = JSON.parse(pbRecord?.route_json || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }, [pbRecord]),
+    ghostSample = ghostAtElapsed(pbRoute, elapsed * 1000),
+    activeVehicle = vehicles.find((item) => item.id === activeVehicleId);
   useEffect(() => {
     Animated.timing(visual, {
       toValue: speed,
@@ -1098,16 +1250,140 @@ export function Phase3RaceScreen({
       setStatus(
         `SAVED // PB ${data.personalBest.best.toFixed(3)} SEC${data.personalBest.improvement ? ` // -${data.personalBest.improvement.toFixed(3)}` : ""}`,
       );
+      await loadDriverData();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Run save failed.");
     }
   };
-  const share = async () => {
+  const webShareImage = async (action: "save" | "share") => {
     if (!result) return;
-    const vehicle = vehicles.find((item) => item.id === activeVehicleId);
-    await Share.share({
-      message: `APEX UGR // GHOST RUN\n${vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : "REGISTERED VEHICLE"}\n${runType} // ${result.seconds.toFixed(3)} SEC\nTOP SPEED // ${Math.round(result.topSpeedKph)} KPH`,
+    const canvas = document.createElement("canvas"),
+      context = canvas.getContext("2d");
+    if (!context) throw new Error("Share image renderer unavailable.");
+    canvas.width = 1080;
+    canvas.height = 1350;
+    context.fillStyle = "#020403";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = "#A7E59A";
+    context.lineWidth = 3;
+    context.strokeRect(55, 55, 970, 1240);
+    context.fillStyle = "#F7F9F7";
+    context.font = "700 74px sans-serif";
+    context.fillText("APEX UGR", 90, 150);
+    context.fillStyle = "#A7E59A";
+    context.font = "600 25px monospace";
+    context.fillText("GHOST RUN // VERIFIED TELEMETRY", 92, 205);
+    context.fillStyle = "#F7F9F7";
+    context.font = "700 52px sans-serif";
+    context.fillText(
+      String(localProfile?.alias || "UNKNOWN PILOT").toUpperCase(),
+      92,
+      330,
+    );
+    context.fillStyle = "#A7E59A";
+    context.font = "500 24px monospace";
+    context.fillText(driverData?.profile?.apex_id || "APEX ID PRIVATE", 94, 375);
+    context.fillStyle = "#B8C0BA";
+    context.font = "500 28px sans-serif";
+    context.fillText(
+      activeVehicle
+        ? `${activeVehicle.year} ${activeVehicle.make} ${activeVehicle.model}`
+        : "REGISTERED VEHICLE",
+      94,
+      445,
+    );
+    context.fillStyle = "#F7F9F7";
+    context.font = "700 112px sans-serif";
+    context.fillText(result.seconds.toFixed(3), 90, 610);
+    context.fillText(String(Math.round(result.topSpeedKph)), 620, 610);
+    context.fillStyle = "#A7E59A";
+    context.font = "600 24px monospace";
+    context.fillText(`${runType} // SEC`, 94, 655);
+    context.fillText("TOP SPEED // KPH", 624, 655);
+    const valid = (result.route || []).filter(
+      (sample: any) =>
+        Number.isFinite(Number(sample.latitude)) &&
+        Number.isFinite(Number(sample.longitude)),
+    );
+    if (valid.length > 1) {
+      const lats = valid.map((sample: any) => Number(sample.latitude)),
+        lngs = valid.map((sample: any) => Number(sample.longitude)),
+        minLat = Math.min(...lats),
+        maxLat = Math.max(...lats),
+        minLng = Math.min(...lngs),
+        maxLng = Math.max(...lngs),
+        latSpan = Math.max(0.000001, maxLat - minLat),
+        lngSpan = Math.max(0.000001, maxLng - minLng);
+      context.beginPath();
+      valid.forEach((sample: any, index: number) => {
+        const x = 100 + ((Number(sample.longitude) - minLng) / lngSpan) * 880,
+          y = 760 + (1 - (Number(sample.latitude) - minLat) / latSpan) * 320;
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.strokeStyle = "#A7E59A";
+      context.lineWidth = 7;
+      context.stroke();
+    }
+    context.fillStyle = "#929B95";
+    context.font = "500 22px monospace";
+    context.fillText(
+      `${new Date().toISOString().slice(0, 10)} // PRIVATE CLOSED COURSE`,
+      92,
+      1225,
+    );
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (value) => (value ? resolve(value) : reject(new Error("Image export failed."))),
+        "image/png",
+        1,
+      ),
+    );
+    const file = new File([blob], `apex-ghost-run-${Date.now()}.png`, {
+      type: "image/png",
     });
+    if (
+      action === "share" &&
+      navigator.share &&
+      (!navigator.canShare || navigator.canShare({ files: [file] }))
+    )
+      await navigator.share({ files: [file], title: "Apex UGR Ghost Run" });
+    else {
+      const url = URL.createObjectURL(blob),
+        anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = file.name;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  };
+  const exportShareImage = async (action: "save" | "share") => {
+    if (!result) return;
+    try {
+      if (Platform.OS === "web") await webShareImage(action);
+      else {
+        const uri = await captureRef(shareCardRef, {
+          format: "png",
+          quality: 1,
+          width: 1080,
+          height: 1350,
+        });
+        if (action === "save") {
+          const permission = await MediaLibrary.requestPermissionsAsync();
+          if (!permission.granted) throw new Error("Photo library permission is required.");
+          await MediaLibrary.createAssetAsync(uri);
+        } else {
+          if (!(await Sharing.isAvailableAsync())) throw new Error("System sharing is unavailable.");
+          await Sharing.shareAsync(uri, {
+            mimeType: "image/png",
+            dialogTitle: "Share Apex UGR Ghost Run",
+          });
+        }
+      }
+      setStatus(action === "save" ? "SHARE IMAGE SAVED" : "SHARE IMAGE READY");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Share image failed.");
+    }
   };
   return (
     <ScrollView
@@ -1184,8 +1460,8 @@ export function Phase3RaceScreen({
                     icon={Check}
                   />
                   <Action
-                    label="SHARE"
-                    onPress={() => void share()}
+                    label="SHARE IMAGE"
+                    onPress={() => void exportShareImage("share")}
                     icon={Share2}
                   />
                   <Action label="DISCARD" onPress={reset} icon={X} />
@@ -1201,32 +1477,81 @@ export function Phase3RaceScreen({
             ) : null}
           </Panel>
           {result ? (
-            <Panel>
-              <Text style={styles.eyebrow}>RUN SUMMARY</Text>
-              <View style={styles.metricGrid}>
-                <Metric
-                  value={`${result.seconds.toFixed(3)} S`}
-                  label={runType}
+            <>
+              <Panel>
+                <Text style={styles.eyebrow}>RUN SUMMARY</Text>
+                <View style={styles.metricGrid}>
+                  <Metric
+                    value={`${result.seconds.toFixed(3)} S`}
+                    label={runType}
+                  />
+                  <Metric
+                    value={`${Math.round(result.topSpeedKph)} KPH`}
+                    label="TOP SPEED"
+                  />
+                  <Metric
+                    value={`${accuracy.toFixed(0)} M`}
+                    label="GPS ACCURACY"
+                  />
+                  <Metric value={route.current.length} label="SAMPLES" />
+                </View>
+              </Panel>
+              <PerformanceShareCard
+                cardRef={shareCardRef}
+                alias={localProfile?.alias || "UNKNOWN PILOT"}
+                apexId={driverData?.profile?.apex_id || "APEX ID PRIVATE"}
+                vehicle={activeVehicle}
+                runType={runType}
+                result={result}
+              />
+              <View style={styles.actionRow}>
+                <Action
+                  label="SAVE IMAGE"
+                  onPress={() => void exportShareImage("save")}
+                  active
+                  icon={ImageIcon}
                 />
-                <Metric
-                  value={`${Math.round(result.topSpeedKph)} KPH`}
-                  label="TOP SPEED"
+                <Action
+                  label="SYSTEM SHARE"
+                  onPress={() => void exportShareImage("share")}
+                  icon={Share2}
                 />
-                <Metric
-                  value={`${accuracy.toFixed(0)} M`}
-                  label="GPS ACCURACY"
-                />
-                <Metric value={route.current.length} label="SAMPLES" />
               </View>
-            </Panel>
+            </>
           ) : null}
           <Panel>
             <Text style={styles.cardTitle}>YOUR PB GHOST</Text>
-            <Text style={styles.copy}>
-              A saved run becomes the truthful comparison trace for the next
-              attempt. Timing uses real sensor samples; animation smooths the
-              display without inventing measurements.
-            </Text>
+            {pbRoute.length >= 2 ? (
+              <>
+                <View style={styles.ghostMeter}>
+                  <View
+                    style={[
+                      styles.ghostMeterFill,
+                      { width: `${Math.round((ghostSample?.progress || 0) * 100)}%` },
+                    ]}
+                  />
+                </View>
+                <View style={styles.metricGrid}>
+                  <Metric
+                    value={`${Number(ghostSample?.speedKph || 0).toFixed(0)} KPH`}
+                    label="PB GHOST SPEED"
+                  />
+                  <Metric
+                    value={`${Number(pbRecord.result_seconds).toFixed(3)} S`}
+                    label="PB TIME"
+                  />
+                </View>
+                <Text style={styles.copy}>
+                  Replay is interpolated only between {pbRoute.length} recorded GPS
+                  samples from the saved run. No synthetic movement is generated.
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.copy}>
+                No timestamped PB trace is available. Older runs remain visible but
+                are marked unsupported; the next saved run records replay telemetry.
+              </Text>
+            )}
           </Panel>
         </>
       )}
@@ -1241,7 +1566,10 @@ export function Phase3MeetsScreen({ network }: { network: React.ReactNode }) {
     [meets, setMeets] = useState<any[]>([]),
     [convoys, setConvoys] = useState<any[]>([]),
     [status, setStatus] = useState(""),
-    [showcaseCategory, setShowcaseCategory] = useState("BEST_BUILD");
+    [showcaseCategory, setShowcaseCategory] = useState("BEST_BUILD"),
+    [radioMuted, setRadioMuted] = useState(false),
+    [pttConvoyId, setPttConvoyId] = useState<string | null>(null);
+  const joinedConvoy = convoys.find((convoy) => convoy.joined) || null;
   const load = async () => {
     try {
       const [m, c] = await Promise.all([
@@ -1272,6 +1600,7 @@ export function Phase3MeetsScreen({ network }: { network: React.ReactNode }) {
             latitude: point.coords.latitude,
             longitude: point.coords.longitude,
             accuracyM: point.coords.accuracy,
+            sampleAgeMs: Math.max(0, Date.now() - point.timestamp),
           }),
         },
       );
@@ -1509,12 +1838,61 @@ export function Phase3MeetsScreen({ network }: { network: React.ReactNode }) {
             </Panel>
           ))}
           <Panel>
-            <Text style={styles.cardTitle}>CONVOY RADIO // PARTIAL</Text>
+            <View style={styles.header}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>CONVOY RADIO // FOUNDATION</Text>
+                <Text style={styles.meta}>
+                  {joinedConvoy
+                    ? `${joinedConvoy.title} · ${joinedConvoy.my_role || "MID"}`
+                    : "JOIN A CONVOY TO ARM RADIO"}
+                </Text>
+              </View>
+              {radioMuted ? <MicOff size={22} color={muted} /> : <Mic size={22} color={accent} />}
+            </View>
             <Text style={styles.copy}>
-              Role, route, regroup, membership, and recap state are real. Live
-              voice transport is not represented as working because no
-              WebRTC/SFU voice infrastructure is deployed.
+              PTT, mute, member roles, and speaker state are functional locally.
+              Voice transport remains unavailable until authenticated signaling
+              and a mobile-compatible WebRTC SFU are deployed.
             </Text>
+            <View style={styles.memberRail}>
+              {(joinedConvoy?.members || []).map((member: any) => (
+                <View key={member.user_id} style={styles.memberChip}>
+                  <Text style={styles.memberRole}>{member.role}</Text>
+                  <Text style={styles.meta}>{member.username}</Text>
+                  <Text style={styles.meta}>SPEAKER // IDLE</Text>
+                </View>
+              ))}
+            </View>
+            <View style={styles.actionRow}>
+              <Action
+                label={radioMuted ? "UNMUTE" : "MUTE"}
+                onPress={() => {
+                  setRadioMuted((value) => !value);
+                  setPttConvoyId(null);
+                }}
+                icon={radioMuted ? Mic : MicOff}
+                disabled={!joinedConvoy}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Push to talk"
+                disabled={!joinedConvoy || radioMuted}
+                onPressIn={() => setPttConvoyId(joinedConvoy?.id || null)}
+                onPressOut={() => setPttConvoyId(null)}
+                style={({ pressed }) => [
+                  styles.ptt,
+                  Boolean(pttConvoyId) && styles.pttActive,
+                  (!joinedConvoy || radioMuted) && styles.disabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Radio size={17} color={pttConvoyId ? "#041006" : paper} />
+                <Text style={[styles.actionText, Boolean(pttConvoyId) && styles.actionTextActive]}>
+                  {pttConvoyId ? "TRANSMIT STATE" : "HOLD PTT"}
+                </Text>
+              </Pressable>
+            </View>
+            <Text style={styles.error}>VOICE TRANSPORT // UNAVAILABLE</Text>
           </Panel>
         </>
       )}
@@ -2043,6 +2421,46 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   actionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  shareCard: {
+    width: "100%",
+    aspectRatio: 0.8,
+    minHeight: 410,
+    borderWidth: 1,
+    borderColor: accent,
+    borderRadius: 6,
+    padding: 20,
+    backgroundColor: "#020403",
+    justifyContent: "space-between",
+  },
+  shareCardHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  shareBrand: { color: paper, fontSize: 27, fontWeight: "900" },
+  shareSubhead: { color: accent, fontSize: 8, fontWeight: "900", marginTop: 3 },
+  shareDivider: { height: 1, backgroundColor: "rgba(167,229,154,.35)" },
+  shareAlias: { color: paper, fontSize: 24, fontWeight: "900" },
+  shareApexId: { color: accent, fontSize: 9, fontWeight: "900" },
+  shareVehicle: { color: muted, fontSize: 12, fontWeight: "700" },
+  shareMetricRow: { flexDirection: "row", justifyContent: "space-between" },
+  shareMetric: { color: paper, fontSize: 40, fontWeight: "900" },
+  shareMetricLabel: { color: accent, fontSize: 8, fontWeight: "900" },
+  shareTrace: {
+    height: 90,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shareFooter: { color: muted, fontSize: 8, fontWeight: "800" },
+  ghostMeter: {
+    height: 5,
+    borderRadius: 3,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,.1)",
+  },
+  ghostMeterFill: { height: "100%", backgroundColor: accent },
   speedPanel: { alignItems: "center", paddingVertical: 26 },
   speedValue: { color: paper, fontSize: 80, fontWeight: "900", lineHeight: 88 },
   speedUnit: { color: accent, fontSize: 12, fontWeight: "900" },
@@ -2090,6 +2508,19 @@ const styles = StyleSheet.create({
     padding: 7,
   },
   memberRole: { color: accent, fontSize: 8, fontWeight: "900" },
+  ptt: {
+    minHeight: 40,
+    flexGrow: 1,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    backgroundColor: "rgba(255,255,255,.04)",
+  },
+  pttActive: { backgroundColor: accent, borderColor: accent },
   hudEvents: { gap: 8 },
   hudEvent: {
     minHeight: 62,
