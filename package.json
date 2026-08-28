@@ -6,7 +6,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build": "npx expo export --platform web",
+    "build": "npx expo export --platform web && node scripts/prepareWebBrand.mjs",
     "type-check": "tsc --noEmit",
     "test:phase2": "node scripts/phase2Regression.mjs",
     "test:phase3": "node scripts/phase3Regression.mjs",
