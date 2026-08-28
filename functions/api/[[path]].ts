@@ -57,8 +57,24 @@ async function isRootAccessCode(value: string) {
 }
 
 function createInviteCode() {
-  const bytes = crypto.getRandomValues(new Uint8Array(6));
-  return Array.from(bytes, (byte) => String(byte % 10)).join("");
+  const digits: string[] = [];
+  while (digits.length < 6) {
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    for (const byte of bytes) {
+      if (byte < 250) digits.push(String(byte % 10));
+      if (digits.length === 6) break;
+    }
+  }
+  return digits.join("");
+}
+
+async function createUniqueInviteCode(env: Env) {
+  let code = createInviteCode();
+  while (
+    (await isRootAccessCode(code)) ||
+    (await env.DB.prepare("SELECT 1 found FROM invite_codes WHERE REPLACE(code,'-','')=?").bind(code).first())
+  ) code = createInviteCode();
+  return code;
 }
 
 let ebayAccessToken: { value: string; expiresAt: number } | null = null;
@@ -953,8 +969,16 @@ async function handle(request: Request, env: Env, path: string) {
   }
 
   if (path === "invites" && method === "GET") {
-    const codes = await env.DB.prepare("SELECT * FROM invite_codes WHERE created_by=? ORDER BY created_at DESC").bind(user.id).all();
-    return json({ codes: codes.results, redemptions: [] });
+    const [codes, redemptions] = await Promise.all([
+      env.DB.prepare("SELECT * FROM invite_codes WHERE created_by=? ORDER BY created_at DESC").bind(user.id).all(),
+      env.DB.prepare(`SELECT r.code_id,r.redeemed_at,u.id user_id,u.username,u.display_name,u.avatar_url
+        FROM invite_redemptions r
+        JOIN invite_codes c ON c.id=r.code_id
+        JOIN users u ON u.id=r.user_id
+        WHERE c.created_by=?
+        ORDER BY r.redeemed_at DESC LIMIT 100`).bind(user.id).all(),
+    ]);
+    return json({ codes: codes.results, redemptions: redemptions.results });
   }
   if (path === "invites" && method === "POST") {
     const body = await request.json<{
@@ -968,8 +992,7 @@ async function handle(request: Request, env: Env, path: string) {
     const maxUses = burnAfterUse ? 1 : requestedUses;
     const requestedExpiry = body.expiresAt ? Date.parse(body.expiresAt) : NaN;
     const expiresAt = Number.isFinite(requestedExpiry) ? new Date(Math.min(requestedExpiry, Date.now() + 30 * 86400000)).toISOString() : new Date(Date.now() + 7 * 86400000).toISOString();
-    let code = createInviteCode();
-    while (await env.DB.prepare("SELECT 1 found FROM invite_codes WHERE code=?").bind(code).first()) code = createInviteCode();
+    const code = await createUniqueInviteCode(env);
     const id = crypto.randomUUID();
     await env.DB.prepare("INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by,burn_after_use) VALUES(?,?,?,?,?,?,?)")
       .bind(id, code, body.label?.trim().slice(0, 60) || "PILOT INVITE", maxUses, expiresAt, user.id, burnAfterUse ? 1 : 0)
@@ -999,8 +1022,7 @@ async function handle(request: Request, env: Env, path: string) {
     const burnAfterUse = Boolean(body.burnAfterUse) || requestedUses === 1;
     const maxUses = burnAfterUse ? 1 : requestedUses;
     const expiresAt = body.expiresAt && Number.isFinite(Date.parse(body.expiresAt)) ? new Date(body.expiresAt).toISOString() : null;
-    let code = createInviteCode();
-    while (await env.DB.prepare("SELECT 1 found FROM invite_codes WHERE code=?").bind(code).first()) code = createInviteCode();
+    const code = await createUniqueInviteCode(env);
     const id = crypto.randomUUID();
     await env.DB.prepare("INSERT INTO invite_codes(id,code,label,max_uses,expires_at,created_by,burn_after_use) VALUES(?,?,?,?,?,?,?)")
       .bind(id, code, body.label?.trim().slice(0, 60) || "PRIVATE ACCESS", maxUses, expiresAt, user.id, burnAfterUse ? 1 : 0)

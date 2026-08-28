@@ -3,7 +3,7 @@
     "name": "Apex UGR",
     "slug": "apex-ugr",
     "scheme": "apexugr",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "icon": "./assets/apex-app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.apexugr.app",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Apex UGR uses your location while the app is open to track drives, reveal the world map, show nearby events, and provide navigation.",
         "NSCameraUsageDescription": "Apex UGR uses the camera when you add vehicle photos or race proof media.",
@@ -27,10 +27,10 @@
     },
     "android": {
       "package": "com.apexugr.app",
-      "versionCode": 15,
+      "versionCode": 16,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/apex-app-icon.png",
-        "backgroundColor": "#010201"
+        "foregroundImage": "./assets/apex-brand-mark.png",
+        "backgroundColor": "#050706"
       },
       "permissions": [
         "ACCESS_COARSE_LOCATION",
@@ -44,9 +44,9 @@
       "bundler": "metro",
       "name": "Apex UGR",
       "shortName": "Apex UGR",
-      "favicon": "./assets/apex-app-icon.png",
-      "themeColor": "#010201",
-      "backgroundColor": "#010201"
+      "favicon": "./assets/apex-favicon.png",
+      "themeColor": "#050706",
+      "backgroundColor": "#050706"
     },
     "plugins": [
       [
