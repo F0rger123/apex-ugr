@@ -65,7 +65,7 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
     if(location||route)set({location,revealOrigin:revealOrigin||location,route,navigationState:route?(navigation.navigationState||'route_preview'):'idle',navigationStepIndex:navigation.navigationStepIndex||0,navigationStopIndex:navigation.navigationStopIndex||0,navigationStartedAt:navigation.navigationStartedAt||null,remainingDistanceKm:navigation.remainingDistanceKm||route?.distanceKm||0,remainingDurationMinutes:navigation.remainingDurationMinutes||route?.durationMinutes||0});
     if(!session){set({_userId:null,networkStatus:'auth_required'});return;}
     set({_userId:session.user.id,networkStatus:'live',error:null});await Promise.all([get().refreshNetwork(),get().loadNavigation()]);if(get().navigationState==='navigating')void get().startDrive();
-    const poll=setInterval(()=>{void get().refreshNetwork();},5000);set({_poll:poll});
+    const poll=setInterval(()=>{void get().refreshNetwork();},12000);set({_poll:poll});
   },
   lockLocation:async()=>{
     set({error:null});let permission:Location.LocationPermissionResponse;try{permission=await foregroundPermission();}catch(error){set({networkStatus:'gps_required',error:error instanceof Error?error.message:'Location permission is required.'});return;}
