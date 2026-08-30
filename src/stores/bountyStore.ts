@@ -34,7 +34,7 @@ interface BountyState {
   triggerBounty: (options: { mode?: 'roaming' | 'venue'; starLevel?: number; venueName?: string }, token?: string) => Promise<BountySession>;
   joinHunt: (sessionId: string, token?: string) => Promise<boolean>;
   leaveHunt: (sessionId: string, token?: string) => Promise<boolean>;
-  sendSignalUpdate: (sessionId: string, params: { latitude?: number; longitude?: number; simulatedDistanceMiles?: number; forceInRange?: boolean }, token?: string) => Promise<void>;
+  sendSignalUpdate: (sessionId: string, params: { latitude?: number; longitude?: number }, token?: string) => Promise<void>;
   claimBounty: (sessionId: string, token?: string) => Promise<{ claimed: boolean; rewardGc: number; rewardRep: number; starLevel: number; badgeEarned?: string }>;
   progressBounty: (sessionId: string, token?: string) => Promise<{ status: string; starLevel: number; escaped?: boolean; badgeEarned?: string }>;
 

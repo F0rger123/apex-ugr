@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Alert } from 'react-native';
 import { useBountyStore } from '../../stores/bountyStore';
-import { BountyDevControlsPanel } from '../../components/bounty/BountyDevControlsPanel';
 
 interface Props {
   navigation?: any;
@@ -24,7 +23,6 @@ export const BountyHuntScreen: React.FC<Props> = ({ navigation }) => {
   } = useBountyStore();
 
   const [secondsRemaining, setSecondsRemaining] = useState<number>(0);
-  const [showDevControls, setShowDevControls] = useState<boolean>(false);
 
   useEffect(() => {
     if (!activeSession?.stage_ends_at) return;
@@ -100,12 +98,8 @@ export const BountyHuntScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTitle}>
           {activeRole === 'target' ? 'BOUNTY TARGET HUD' : 'BOUNTY HUNT HUD'}
         </Text>
-        <TouchableOpacity style={styles.devToggleBtn} onPress={() => setShowDevControls(!showDevControls)}>
-          <Text style={styles.devToggleText}>DEV</Text>
-        </TouchableOpacity>
+        <View style={styles.headerSpacer} />
       </View>
-
-      {showDevControls ? <BountyDevControlsPanel /> : null}
 
       <View style={styles.cardHeader}>
         <View style={styles.badgeBox}>
@@ -246,17 +240,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 1,
   },
-  devToggleBtn: {
-    backgroundColor: 'rgba(255,0,85,0.2)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  devToggleText: {
-    color: '#FF0055',
-    fontSize: 10,
-    fontWeight: '900',
-  },
+  headerSpacer: { width: 44 },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

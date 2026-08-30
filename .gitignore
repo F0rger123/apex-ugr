@@ -12,3 +12,4 @@ web-build/
 .wrangler-*/
 .functions-build*/
 .phase3qa*/
+.phase*-functions-build*/

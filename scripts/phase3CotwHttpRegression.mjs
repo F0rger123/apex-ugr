@@ -45,24 +45,26 @@ async function fetchRetry(url, options) {
 }
 
 try {
+  const fixtureId = `phase3-cotw-${Date.now()}`;
+  const fixtureCategory = `BEST_BUILD_${Date.now()}`;
   const signIn = await fetchRetry(`${base}/auth/signin`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "drummerforger@gmail.com", password: "Phase3-QA-Password!" }) });
   assert.equal(signIn.status, 200);
   const { token } = await signIn.json();
   sql(`INSERT OR IGNORE INTO car_of_the_week_submissions(id,week_identifier,category,user_id,vehicle_id,year_make_model,media_urls_json,description,votes_count)
-    SELECT 'phase3-cotw-fixture','2020-W01','BEST_BUILD',u.id,v.id,'2024 Nissan GT-R','["/api/media/phase3-fixture.png"]','QA fixture',12
+    SELECT '${fixtureId}','2020-W01','${fixtureCategory}',u.id,v.id,'2024 Nissan GT-R','["/api/media/phase3-fixture.png"]','QA fixture',12
     FROM users u JOIN vehicles v ON v.user_id=u.id WHERE u.email='drummerforger@gmail.com' ORDER BY v.created_at LIMIT 1;`);
   const before = sql(`SELECT u.points,(SELECT credits FROM ghost_profiles WHERE user_id=u.id) gc FROM users u WHERE u.email='drummerforger@gmail.com';`)[0];
   assert.equal((await api("cotw/active", token)).status, 200);
   const afterFirst = sql(`SELECT u.points,(SELECT credits FROM ghost_profiles WHERE user_id=u.id) gc,
-    (SELECT COUNT(*) FROM car_of_the_week_winners WHERE submission_id='phase3-cotw-fixture') winners,
-    (SELECT COUNT(*) FROM ghost_credit_transactions WHERE activity_id IN (SELECT id FROM car_of_the_week_winners WHERE submission_id='phase3-cotw-fixture')) ledgers,
-    (SELECT COUNT(*) FROM notifications WHERE type='cotw_winner' AND json_extract(data_json,'$.weekIdentifier')='2020-W01') notices
+    (SELECT COUNT(*) FROM car_of_the_week_winners WHERE submission_id='${fixtureId}') winners,
+    (SELECT COUNT(*) FROM ghost_credit_transactions WHERE activity_id IN (SELECT id FROM car_of_the_week_winners WHERE submission_id='${fixtureId}')) ledgers,
+    (SELECT COUNT(*) FROM notifications WHERE type='cotw_winner' AND json_extract(data_json,'$.winnerId') IN (SELECT id FROM car_of_the_week_winners WHERE submission_id='${fixtureId}')) notices
     FROM users u WHERE u.email='drummerforger@gmail.com';`)[0];
   assert.equal((await api("cotw/active", token)).status, 200);
   const afterSecond = sql(`SELECT u.points,(SELECT credits FROM ghost_profiles WHERE user_id=u.id) gc,
-    (SELECT COUNT(*) FROM car_of_the_week_winners WHERE submission_id='phase3-cotw-fixture') winners,
-    (SELECT COUNT(*) FROM ghost_credit_transactions WHERE activity_id IN (SELECT id FROM car_of_the_week_winners WHERE submission_id='phase3-cotw-fixture')) ledgers,
-    (SELECT COUNT(*) FROM notifications WHERE type='cotw_winner' AND json_extract(data_json,'$.weekIdentifier')='2020-W01') notices
+    (SELECT COUNT(*) FROM car_of_the_week_winners WHERE submission_id='${fixtureId}') winners,
+    (SELECT COUNT(*) FROM ghost_credit_transactions WHERE activity_id IN (SELECT id FROM car_of_the_week_winners WHERE submission_id='${fixtureId}')) ledgers,
+    (SELECT COUNT(*) FROM notifications WHERE type='cotw_winner' AND json_extract(data_json,'$.winnerId') IN (SELECT id FROM car_of_the_week_winners WHERE submission_id='${fixtureId}')) notices
     FROM users u WHERE u.email='drummerforger@gmail.com';`)[0];
   assert.equal(afterFirst.points - before.points, 250);
   assert.equal(afterFirst.gc - before.gc, 500);

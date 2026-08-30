@@ -12,19 +12,46 @@ async function token() {
   return AsyncStorage.getItem(TOKEN_KEY);
 }
 
+export class ApexApiError extends Error {
+  constructor(message: string, public status: number, public requestId: string | null, public code: string | null) {
+    super(message);
+    this.name = 'ApexApiError';
+  }
+}
+
+function failureMessage(status: number, fallback?: string) {
+  if (status === 401) return 'SESSION EXPIRED // SIGN IN AGAIN';
+  if (status === 403) return fallback || 'ACCESS DENIED';
+  if (status === 409) return fallback || 'STATE CHANGED // REFRESH AND RETRY';
+  if (status === 429) return 'NETWORK BUSY // WAIT A MOMENT AND RETRY';
+  if (status >= 500) return 'APEX NETWORK INTERRUPTED // RETRY';
+  return fallback || `REQUEST FAILED (${status})`;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const sessionToken = await token();
-  const response = await fetch(`${configuredBase}${path}`, {
-    ...init,
-    headers: {
-      ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-      ...(init.headers || {}),
-    },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
-  return payload as T;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${configuredBase}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        ...(init.headers || {}),
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new ApexApiError(failureMessage(response.status, payload.error), response.status, response.headers.get('x-request-id'), payload.code || null);
+    return payload as T;
+  } catch (error) {
+    if (error instanceof ApexApiError) throw error;
+    if (error instanceof Error && error.name === 'AbortError') throw new ApexApiError('NETWORK TIMEOUT // RETRY', 0, null, 'TIMEOUT');
+    throw new ApexApiError('OFFLINE OR NETWORK UNAVAILABLE // RETRY', 0, null, 'NETWORK_ERROR');
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export const cloudflareApi = {
@@ -50,13 +77,6 @@ export const cloudflareApi = {
     const form = new FormData();
     form.append('file', file, `upload.${mediaType === 'video' ? 'mp4' : 'jpg'}`);
     return request<{ url: string }>('/api/upload', { method: 'POST', body: form });
-  },
-  async publishAndroidRelease(file: Blob) {
-    return request<{ published: boolean; size: number; version: string }>('/api/admin/android-release', {
-      method: 'POST',
-      body: file,
-      headers: { 'Content-Type': 'application/vnd.android.package-archive', 'X-Apex-Version': '1.5.0 (15)' },
-    });
   },
 };
 

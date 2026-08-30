@@ -93,7 +93,7 @@ export const bountyService = {
 
   async sendSignalUpdate(
     sessionId: string,
-    params: { latitude?: number; longitude?: number; simulatedDistanceMiles?: number; forceInRange?: boolean },
+    params: { latitude?: number; longitude?: number },
     token?: string
   ): Promise<{
     sessionId: string;

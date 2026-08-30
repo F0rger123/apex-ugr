@@ -17,8 +17,8 @@ if (initial.legs.length !== 2 || steps.length < 3) throw new Error('Multi-stop r
 
 const geometry = initial.geometry.coordinates;
 const checkpoints = [geometry[0], geometry[Math.floor(geometry.length * .45)], geometry[Math.floor(geometry.length * .8)], geometry.at(-1)];
-let nearestIndexes = checkpoints.map(point => geometry.findIndex(candidate => candidate[0] === point[0] && candidate[1] === point[1]));
-if (nearestIndexes.some((value, index) => index && value <= nearestIndexes[index - 1])) throw new Error('Simulated GPS progression did not advance along route geometry.');
+const nearestIndexes = checkpoints.map(point => geometry.findIndex(candidate => candidate[0] === point[0] && candidate[1] === point[1]));
+if (nearestIndexes.some((value, index) => index && value <= nearestIndexes[index - 1])) throw new Error('Route checkpoints did not advance along the returned geometry.');
 
 const offRouteOrigin = { latitude: 39.9412, longitude: -75.1738 };
 const recalculated = await route([offRouteOrigin, stop, destination]);
@@ -26,10 +26,11 @@ if (recalculated.geometry.coordinates[0][0] === geometry[0][0] && recalculated.g
 
 console.log(JSON.stringify({
   status: 'pass',
+  provider: 'live-osrm',
   legs: initial.legs.length,
   turnSteps: steps.length,
   distanceKm: Number((initial.distance / 1000).toFixed(2)),
   durationMinutes: Math.ceil(initial.duration / 60),
-  simulatedProgressPoints: checkpoints.length,
+  routeCheckpoints: checkpoints.length,
   rerouteDistanceKm: Number((recalculated.distance / 1000).toFixed(2)),
 }));
