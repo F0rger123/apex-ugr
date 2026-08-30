@@ -51,6 +51,7 @@ const cors = {
 };
 
 const DEVELOPER_EMAIL = "drummerforger@gmail.com";
+const CURRENT_SAFETY_DISCLAIMER_VERSION = "2026-08-private-venue-v1";
 const ROOT_ACCESS_CODE_HASH = "99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718";
 type AndroidReleaseMetadata = ReturnType<typeof validateAndroidReleaseMetadata>;
 
@@ -1164,15 +1165,24 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === "vehicles" && method === "POST") {
     const body = await request.json<Record<string, string | number>>();
     if (!Number.isInteger(Number(body.year)) || !body.make || !body.model) return json({ error: "Year, make, and model are required." }, 400);
+    const vehicleType = body.vehicleType === "MOTORCYCLE" ? "MOTORCYCLE" : "CAR";
     const id = crypto.randomUUID();
     const existing = await env.DB.prepare("SELECT COUNT(*) count FROM vehicles WHERE user_id=?").bind(user.id).first<{ count: number }>();
     await env.DB.prepare(
-      `INSERT INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,photo_url,is_active)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,photo_url,is_active,vehicle_type,displacement_cc)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
-      .bind(id, user.id, body.nickname || `${body.make} ${body.model}`, Number(body.year), body.make, body.model, body.trim || null, body.engine || null, body.drivetrain || null, Number(body.horsepower) || 0, body.color || null, body.photoUrl || null, existing?.count ? 0 : 1)
+      .bind(id, user.id, body.nickname || `${body.make} ${body.model}`, Number(body.year), body.make, body.model, body.trim || null, body.engine || null, body.drivetrain || null, Number(body.horsepower) || 0, body.color || null, body.photoUrl || null, existing?.count ? 0 : 1, vehicleType, Number(body.displacementCc) || null)
       .run();
     return json({ id }, 201);
+  }
+  if (path === "disclaimer" && method === "GET") {
+    const acceptance = await env.DB.prepare("SELECT accepted_at FROM user_disclaimer_acceptances WHERE user_id=? AND disclaimer_version=?").bind(user.id, CURRENT_SAFETY_DISCLAIMER_VERSION).first<{ accepted_at: string }>();
+    return json({ version: CURRENT_SAFETY_DISCLAIMER_VERSION, accepted: Boolean(acceptance), acceptedAt: acceptance?.accepted_at || null });
+  }
+  if (path === "disclaimer/accept" && method === "POST") {
+    await env.DB.prepare("INSERT OR IGNORE INTO user_disclaimer_acceptances(user_id,disclaimer_version) VALUES(?,?)").bind(user.id, CURRENT_SAFETY_DISCLAIMER_VERSION).run();
+    return json({ version: CURRENT_SAFETY_DISCLAIMER_VERSION, accepted: true });
   }
   const activateVehicle = path.match(/^vehicles\/([^/]+)\/active$/);
   if (activateVehicle && method === "POST") {
@@ -3646,7 +3656,7 @@ async function handle(request: Request, env: Env, path: string) {
     if (!ownedVehicle) return json({ error: "Vehicle was not found in your garage." }, 404);
 
     if (method === "GET") {
-      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? AND user_id = ? ORDER BY created_at DESC`).bind(vehicleId, user.id).all();
+      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? AND user_id = ? ORDER BY installed ASC, sort_order ASC, created_at DESC`).bind(vehicleId, user.id).all();
       return json({ wishlist: rows.results });
     }
 
@@ -3657,15 +3667,16 @@ async function handle(request: Request, env: Env, path: string) {
       const id = body.id || crypto.randomUUID();
       await env.DB.prepare(
         `
-        INSERT INTO mod_wishlist (id, vehicle_id, user_id, part, brand, category, price, url, priority, notes, purchased, installed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO mod_wishlist (id, vehicle_id, user_id, part, brand, category, price, url, priority, notes, purchased, installed, installed_at, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           part = excluded.part, brand = excluded.brand, category = excluded.category,
           price = excluded.price, url = excluded.url, priority = excluded.priority,
-          notes = excluded.notes, purchased = excluded.purchased, installed = excluded.installed
+          notes = excluded.notes, purchased = excluded.purchased, installed = excluded.installed,
+          installed_at = excluded.installed_at, sort_order = excluded.sort_order
       `,
       )
-        .bind(id, vehicleId, user.id, body.part, body.brand || "", body.category || "Other", Number(body.price) || 0, body.url || "", body.priority || "MEDIUM", body.notes || "", body.purchased ? 1 : 0, body.installed ? 1 : 0)
+        .bind(id, vehicleId, user.id, body.part, body.brand || "", body.category || "Other", Number(body.price) || 0, body.url || "", body.priority || "MEDIUM", body.notes || "", body.purchased ? 1 : 0, body.installed ? 1 : 0, body.installed ? (body.installedAt || new Date().toISOString()) : null, Math.max(0, Number(body.sortOrder) || 0))
         .run();
 
       return json({ success: true, id });

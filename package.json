@@ -17,7 +17,8 @@
     "test:android-release": "node scripts/androidReleaseRegression.mjs",
     "test:phase4": "node scripts/phase4Regression.mjs",
     "test:bounty4": "node scripts/phase4BountyHttpRegression.mjs",
-    "test:migration4": "node scripts/phase4MigrationRehearsal.mjs"
+    "test:migration4": "node scripts/phase4MigrationRehearsal.mjs",
+    "test:pr23": "node scripts/pr23Regression.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
