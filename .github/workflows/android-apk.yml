@@ -127,6 +127,9 @@ jobs:
           SIGNER_FINGERPRINT: ${{ steps.release.outputs.signer_fingerprint }}
         run: |
           set -euo pipefail
+          # GitHub secrets pasted from dashboards can include a trailing newline.
+          export AWS_ACCESS_KEY_ID="$(printf '%s' "$AWS_ACCESS_KEY_ID" | tr -d '\r\n')"
+          export AWS_SECRET_ACCESS_KEY="$(printf '%s' "$AWS_SECRET_ACCESS_KEY" | tr -d '\r\n')"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp apex-ugr.apk "s3://${R2_BUCKET}/${OBJECT_KEY}" --endpoint-url "$ENDPOINT" \
