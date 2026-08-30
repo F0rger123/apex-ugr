@@ -201,6 +201,11 @@ function generatedImageBlock(value: unknown): { data: string; mimeType: string }
       data: row.data,
       mimeType: typeof row.mime_type === "string" ? row.mime_type : "image/png",
     };
+  if (typeof row.data === "string" && (typeof row.mimeType === "string" || typeof row.mime_type === "string"))
+    return {
+      data: row.data,
+      mimeType: String(row.mimeType || row.mime_type || "image/png"),
+    };
   for (const child of Object.values(row)) {
     if (Array.isArray(child)) {
       for (const item of child) {
@@ -1646,6 +1651,15 @@ async function handle(request: Request, env: Env, path: string) {
       .run();
     return json({ id }, 201);
   }
+  const commentList = path.match(/^posts\/([^/]+)\/comments$/);
+  if (commentList && method === "GET") {
+    const post = await env.DB.prepare("SELECT id FROM posts WHERE id=?").bind(commentList[1]).first();
+    if (!post) return json({ error: "Post not found." }, 404);
+    const comments = await env.DB.prepare(`SELECT c.id,c.body,c.created_at,u.id user_id,u.username,u.avatar_url
+      FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? ORDER BY c.created_at ASC LIMIT 100`)
+      .bind(commentList[1]).all();
+    return json({ comments: comments.results });
+  }
   const postAction = path.match(/^posts\/([^/]+)\/(like|save|comment)$/);
   if (postAction && method === "POST") {
     const [, postId, action] = postAction;
@@ -2154,9 +2168,8 @@ async function handle(request: Request, env: Env, path: string) {
         },
         400,
       );
-    const input: Array<Record<string, unknown>> = [
+    const parts: Array<Record<string, unknown>> = [
       {
-        type: "text",
         text: `Create one accurate photorealistic digital garage render of this exact ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim || ""} in ${vehicle.color || "its photographed color"}. Reconcile the four reference angles into the same vehicle. Preserve its actual body kit, wheels, paint, lights, stance, badges, and visible modifications. Three-quarter front view in a dark neutral studio garage, full car visible, no text, no people, no invented parts.`,
       },
     ];
@@ -2168,27 +2181,27 @@ async function handle(request: Request, env: Env, path: string) {
       total += object.size;
       if (total > 22 * 1024 * 1024) return json({ error: "Angle images must total less than 22 MB." }, 400);
       const bytes = new Uint8Array(await object.arrayBuffer());
-      input.push({
-        type: "image",
-        mime_type: object.httpMetadata?.contentType || "image/jpeg",
-        data: bytesToBase64(bytes),
+      parts.push({
+        inlineData: {
+          mimeType: object.httpMetadata?.contentType || "image/jpeg",
+          data: bytesToBase64(bytes),
+        },
       });
     }
     await env.DB.prepare("UPDATE vehicles SET digital_twin_status='generating' WHERE id=?").bind(vehicle.id).run();
-    const provider = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    const provider = await fetch("https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-image:generateContent", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-goog-api-key": body.geminiApiKey.trim(),
       },
       body: JSON.stringify({
-        model: "gemini-3.1-flash-image",
-        input,
-        response_format: {
-          type: "image",
-          mime_type: "image/png",
-          aspect_ratio: "16:9",
-          image_size: "1K",
+        contents: [{ role: "user", parts }],
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"],
+          responseFormat: {
+            image: { aspectRatio: "16:9", imageSize: "1K" },
+          },
         },
       }),
     });
@@ -2196,10 +2209,16 @@ async function handle(request: Request, env: Env, path: string) {
     const image = generatedImageBlock(generated);
     if (!provider.ok || !image) {
       await env.DB.prepare("UPDATE vehicles SET digital_twin_status='failed' WHERE id=?").bind(vehicle.id).run();
+      const providerError = generated && typeof generated === "object" && "error" in generated
+        ? String((generated as { error?: { message?: string } }).error?.message || "")
+        : "";
+      const message = provider.status === 400 && /api key|key not valid/i.test(providerError)
+        ? "Gemini rejected this API key. Create or enable a Gemini API key in Google AI Studio and retry."
+        : provider.status === 429
+          ? "Gemini quota is unavailable for this key. Check its free-tier quota or billing limits."
+          : "Gemini could not generate the digital vehicle. Confirm image-generation access for this key and retry.";
       return json(
-        {
-          error: "Gemini could not generate the digital vehicle. Check API access and try again.",
-        },
+        { error: message },
         502,
       );
     }

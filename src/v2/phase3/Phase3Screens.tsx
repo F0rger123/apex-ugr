@@ -1972,6 +1972,15 @@ function ChestModal({ state, onClose }: { state: any; onClose: () => void }) {
   const [stage, setStage] = useState(0),
     [reward, setReward] = useState<any | null>(null),
     [error, setError] = useState("");
+  const pulse=useRef(new Animated.Value(0)).current;
+  useEffect(()=>{
+    const loop=Animated.loop(Animated.sequence([
+      Animated.timing(pulse,{toValue:1,duration:1300,useNativeDriver:true}),
+      Animated.timing(pulse,{toValue:0,duration:1300,useNativeDriver:true}),
+    ]));
+    loop.start();
+    return()=>loop.stop();
+  },[pulse]);
   const labels = [
     "WAKE SIGNAL",
     "BREAK ENCRYPTION",
@@ -2009,14 +2018,8 @@ function ChestModal({ state, onClose }: { state: any; onClose: () => void }) {
           </Pressable>
           <Text style={styles.eyebrow}>DAILY ENCRYPTED DROP</Text>
           <Text style={styles.title}>GHOST CHEST</Text>
-          <Pressable
-            onPress={() => void tap()}
-            style={[
-              styles.chest,
-              stage > 0 && styles.chestAwake,
-              stage === 4 && styles.chestOpen,
-            ]}
-          >
+          <Animated.View style={{width:"100%",transform:[{scale:pulse.interpolate({inputRange:[0,1],outputRange:[1,1.025]})}],opacity:pulse.interpolate({inputRange:[0,1],outputRange:[.9,1]})}}>
+          <Pressable onPress={() => void tap()} style={[styles.chest,stage > 0 && styles.chestAwake,stage === 4 && styles.chestOpen]}>
             {reward ? (
               <>
                 <Sparkles size={52} color={accent} />
@@ -2046,6 +2049,7 @@ function ChestModal({ state, onClose }: { state: any; onClose: () => void }) {
               </>
             )}
           </Pressable>
+          </Animated.View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Text style={styles.copy}>
             Four deliberate decrypt stages. Claim state and reward are
@@ -2058,11 +2062,39 @@ function ChestModal({ state, onClose }: { state: any; onClose: () => void }) {
 }
 
 function CotwModal({ state, onClose }: { state: any; onClose: () => void }) {
-  const [category, setCategory] = useState("appearance"),
-    [status, setStatus] = useState("");
-  const entries = (state?.submissions || []).filter(
+  const vehicles=useContentStore((store)=>store.vehicles),activeVehicleId=useContentStore((store)=>store.activeVehicleId);
+  const [data,setData]=useState(state),
+    [category, setCategory] = useState("BEST_APPEARANCE"),
+    [status, setStatus] = useState(""),
+    [selectedVehicleId,setSelectedVehicleId]=useState(activeVehicleId||vehicles[0]?.id||""),
+    [submissionUri,setSubmissionUri]=useState<string|null>(null),
+    [submissionType,setSubmissionType]=useState<"photo"|"video">("photo"),
+    [submitting,setSubmitting]=useState(false);
+  const selectedVehicle=vehicles.find(vehicle=>vehicle.id===selectedVehicleId)||null;
+  const refresh=async()=>{const next=await cloudflareApi.request<any>("/api/cotw/active");setData(next);};
+  const entries = (data?.submissions || []).filter(
     (item: any) => item.category === category,
   );
+  const pickMedia=async()=>{
+    const sound=category==="BEST_SOUND";
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:sound?ImagePicker.MediaTypeOptions.Videos:ImagePicker.MediaTypeOptions.All,quality:.88,allowsEditing:false});
+    if(result.canceled||!result.assets[0])return;
+    const asset=result.assets[0],type=asset.type==="video"?"video":"photo";
+    if(sound&&type!=="video"){setStatus("BEST SOUND REQUIRES A VIDEO");return;}
+    setSubmissionUri(asset.uri);setSubmissionType(type);setStatus("MEDIA READY // PRESS ENTER CAR");
+  };
+  const enterCar=async()=>{
+    if(!selectedVehicle){setStatus("SELECT A GARAGE VEHICLE");return;}
+    setSubmitting(true);setStatus("ENCRYPTING COTW ENTRY");
+    try{
+      let mediaUrl:string|null=null;
+      if(submissionUri)mediaUrl=(await cloudflareApi.upload(submissionUri,submissionType)).url;
+      else if(selectedVehicle.photoUrl?.startsWith("/api/media/"))mediaUrl=selectedVehicle.photoUrl;
+      if(!mediaUrl)throw new Error("Upload a photo or video for this entry.");
+      await cloudflareApi.request("/api/cotw/submit",{method:"POST",body:JSON.stringify({category,vehicleId:selectedVehicle.id,yearMakeModel:`${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}`,mediaUrls:[mediaUrl],description:selectedVehicle.nickname,buildInfo:`${selectedVehicle.trim||""} · ${selectedVehicle.horsepower} HP`})});
+      await refresh();setSubmissionUri(null);setStatus("CAR ENTERED // VOTING LIVE");
+    }catch(e){setStatus(e instanceof Error?e.message:"Entry failed.");}finally{setSubmitting(false);}
+  };
   const vote = async (item: any) => {
     try {
       await cloudflareApi.request("/api/cotw/vote", {
@@ -2070,10 +2102,10 @@ function CotwModal({ state, onClose }: { state: any; onClose: () => void }) {
         body: JSON.stringify({
           submissionId: item.id,
           category,
-          weekIdentifier: state.weekIdentifier,
+          weekIdentifier: data.weekIdentifier,
         }),
       });
-      setStatus("VOTE VERIFIED");
+      await refresh();setStatus("VOTE VERIFIED");
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Vote failed.");
     }
@@ -2093,10 +2125,18 @@ function CotwModal({ state, onClose }: { state: any; onClose: () => void }) {
           <Text style={styles.eyebrow}>THE UNDERGROUND IS VOTING</Text>
           <Text style={styles.title}>CAR OF THE WEEK</Text>
           <Segments
-            items={["appearance", "build", "sound"]}
+            items={["BEST_APPEARANCE", "BEST_BUILD", "BEST_SOUND"]}
             value={category}
             onChange={setCategory}
           />
+          <Text style={styles.eyebrow}>ENTER YOUR GARAGE CAR</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cotwVehicleRail}>
+            {vehicles.map(vehicle=><Pressable key={vehicle.id} onPress={()=>setSelectedVehicleId(vehicle.id)} style={[styles.cotwVehicle,vehicle.id===selectedVehicleId&&styles.cotwVehicleActive]}>{vehicle.photoUrl?<Image source={{uri:vehicle.photoUrl}} style={styles.cotwVehicleImage}/>:<CarFront size={24} color={muted}/>}<Text numberOfLines={1} style={styles.cardTitle}>{vehicle.nickname||vehicle.model}</Text><Text style={styles.meta}>{vehicle.year} {vehicle.make} {vehicle.model}</Text></Pressable>)}
+          </ScrollView>
+          <View style={styles.actionRow}>
+            <Action label={submissionUri?"CHANGE MEDIA":"UPLOAD PHOTO / VIDEO"} onPress={()=>void pickMedia()} icon={ImageIcon}/>
+            <Action label={submitting?"ENTERING...":"ENTER CAR"} onPress={()=>void enterCar()} active={Boolean(selectedVehicle&&!submitting)} disabled={!selectedVehicle||submitting} icon={Trophy}/>
+          </View>
           <ScrollView style={{ maxHeight: 420 }}>
             {entries.map((item: any) => (
               <Panel key={item.id}>
@@ -2554,4 +2594,8 @@ const styles = StyleSheet.create({
   stageDot: { width: 28, height: 3, backgroundColor: "rgba(255,255,255,.13)" },
   stageDotActive: { backgroundColor: accent },
   cotwImage: { height: 180, width: "100%", borderRadius: 6 },
+  cotwVehicleRail: { gap: 8, paddingVertical: 4 },
+  cotwVehicle: { width: 132, minHeight: 112, borderWidth: 1, borderColor: border, borderRadius: 7, padding: 8, gap: 5, backgroundColor: "rgba(255,255,255,.025)" },
+  cotwVehicleActive: { borderColor: accent, backgroundColor: "rgba(167,229,154,.09)" },
+  cotwVehicleImage: { width: "100%", height: 62, borderRadius: 5 },
 });
