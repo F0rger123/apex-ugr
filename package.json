@@ -18,7 +18,9 @@
     "test:phase4": "node scripts/phase4Regression.mjs",
     "test:bounty4": "node scripts/phase4BountyHttpRegression.mjs",
     "test:migration4": "node scripts/phase4MigrationRehearsal.mjs",
-    "test:pr23": "node scripts/pr23Regression.mjs"
+    "test:pr23": "node scripts/pr23Regression.mjs",
+    "test:pr23:http": "node scripts/pr23HttpIntegration.mjs",
+    "qa:http:reset": "node scripts/qaHttpReset.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",

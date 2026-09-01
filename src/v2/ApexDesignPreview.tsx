@@ -584,7 +584,7 @@ function RadarMap({
     return (
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
-          key: `${mode}-${followRevision}-${fitAll}`,
+          key: mode,
           srcDoc: mapDocument.replace('</body>',worldOverlay.replace('t.unlocked?.16:.28','t.unlocked?0.16:0.28')+canvasFogOverlay+smoothFogOverlay+driveTraceOverlay+rewardReplayOverlay+routeFitOverlay+'</body>'),
           title: 'Apex Map',
           style: { width: '100%', height: '100%', border: 0 },

@@ -1165,7 +1165,9 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === "vehicles" && method === "POST") {
     const body = await request.json<Record<string, string | number>>();
     if (!Number.isInteger(Number(body.year)) || !body.make || !body.model) return json({ error: "Year, make, and model are required." }, 400);
-    const vehicleType = body.vehicleType === "MOTORCYCLE" ? "MOTORCYCLE" : "CAR";
+    const rawVehicleType = body.vehicleType === undefined || body.vehicleType === null || body.vehicleType === "" ? "CAR" : String(body.vehicleType).toUpperCase();
+    if (!["CAR", "MOTORCYCLE"].includes(rawVehicleType)) return json({ error: "Vehicle type must be CAR or MOTORCYCLE." }, 400);
+    const vehicleType = rawVehicleType as "CAR" | "MOTORCYCLE";
     const id = crypto.randomUUID();
     const existing = await env.DB.prepare("SELECT COUNT(*) count FROM vehicles WHERE user_id=?").bind(user.id).first<{ count: number }>();
     await env.DB.prepare(

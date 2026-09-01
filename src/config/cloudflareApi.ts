@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const TOKEN_KEY = 'apex.cloudflare.session';
+const TOKEN_COOKIE = 'apex_cloudflare_session';
 const configuredBase = process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || '';
 
 export type CloudflareSession = {
@@ -8,8 +9,52 @@ export type CloudflareSession = {
   user: { id: string; email: string; username: string; displayName: string; avatarUrl: string | null; credits: number; points: number; tier: string; wins: number; losses: number; reputation: number; declineStreak: number; isDeveloper:boolean };
 };
 
+function canUseDocument() {
+  return typeof document !== 'undefined';
+}
+
+function readCookieToken() {
+  if (!canUseDocument()) return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${TOKEN_COOKIE}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function writeCookieToken(value: string) {
+  if (!canUseDocument()) return;
+  document.cookie = `${TOKEN_COOKIE}=${encodeURIComponent(value)}; Max-Age=2592000; Path=/; SameSite=Lax`;
+}
+
+function clearCookieToken() {
+  if (!canUseDocument()) return;
+  document.cookie = `${TOKEN_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax`;
+}
+
 async function token() {
-  return AsyncStorage.getItem(TOKEN_KEY);
+  try {
+    const stored = await AsyncStorage.getItem(TOKEN_KEY);
+    if (stored) return stored;
+  } catch {
+    // Some embedded/mobile webviews disable localStorage. Keep auth usable with the cookie fallback below.
+  }
+  return readCookieToken();
+}
+
+async function saveToken(value: string) {
+  writeCookieToken(value);
+  try {
+    await AsyncStorage.setItem(TOKEN_KEY, value);
+  } catch {
+    // Cookie fallback has already persisted the session for webviews without localStorage.
+  }
+}
+
+async function clearToken() {
+  clearCookieToken();
+  try {
+    await AsyncStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Nothing else to clear when localStorage is unavailable.
+  }
 }
 
 export class ApexApiError extends Error {
@@ -58,19 +103,19 @@ export const cloudflareApi = {
   request,
   async signUp(email: string, password: string, inviteCode?:string) {
     const session = await request<CloudflareSession>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, inviteCode }) });
-    await AsyncStorage.setItem(TOKEN_KEY, session.token);
+    await saveToken(session.token);
     return session;
   },
   async signIn(email: string, password: string) {
     const session = await request<CloudflareSession>('/api/auth/signin', { method: 'POST', body: JSON.stringify({ email, password }) });
-    await AsyncStorage.setItem(TOKEN_KEY, session.token);
+    await saveToken(session.token);
     return session;
   },
   async session() {
     try { return await request<{ user: CloudflareSession['user'] }>('/api/session'); } catch { return null; }
   },
   async signOut() {
-    try { await request('/api/auth/signout', { method: 'POST' }); } finally { await AsyncStorage.removeItem(TOKEN_KEY); }
+    try { await request('/api/auth/signout', { method: 'POST' }); } finally { await clearToken(); }
   },
   async upload(uri: string, mediaType: 'photo' | 'video') {
     const file = await (await fetch(uri)).blob();
