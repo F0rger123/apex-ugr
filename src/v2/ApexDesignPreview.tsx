@@ -32,7 +32,7 @@ import { useContentStore } from './live/contentStore';
 import {useWorldStore,DeadDrop,RoadReport,Territory,MapReward,GhostReplay,SafeHouse} from './live/worldStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useMessageStore } from '../stores/messageStore';
-import { cloudflareApi, hasCloudflareBackend } from '../config/cloudflareApi';
+import { apexApiBaseUrl, apexApiEnvironment, apexBuildCommit, cloudflareApi, hasCloudflareBackend } from '../config/cloudflareApi';
 import {playEngineSound,playInterfaceSound,setInterfaceAudioEnabled} from '../utils/soundSynthesizer';
 import {Phase3HudEvents,Phase3LeadersScreen,Phase3MeetsScreen,Phase3ProfileScreen,Phase3RaceScreen} from './phase3/Phase3Screens';
 import {
@@ -104,11 +104,22 @@ const muted = '#929B95';
 const surface = 'rgba(4, 8, 5, 0.86)';
 const border = 'rgba(255, 255, 255, 0.16)';
 const { width: screenWidth } = Dimensions.get('window');
-const ANDROID_DOWNLOAD_URL='https://apex-ugr.pages.dev/api/download/android';
-const APP_VERSION='1.5.2';
-const ANDROID_VERSION_CODE=17;
+const ANDROID_DOWNLOAD_URL=process.env.EXPO_PUBLIC_ANDROID_DOWNLOAD_URL || 'https://apex-ugr.pages.dev/api/download/android';
+const APP_VERSION='1.5.3';
+const ANDROID_VERSION_CODE=18;
 const SCRAMBLE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%&';
 const useNativeAnimations=Platform.OS!=='web';
+const mapDiagnostics={
+  componentMounts:0,
+  renderCount:0,
+  sourceChangeCount:0,
+  followModeChanges:0,
+  routeUpdateCount:0,
+  gpsSampleCount:0,
+  lastMapSource:'initial',
+  lastFollowMode:'unknown',
+  lastRouteUpdate:'none',
+};
 
 let NativeMap: any = null;
 let NativeMarker: any = null;
@@ -122,13 +133,13 @@ if (Platform.OS !== 'web') {
   NativePolyline = maps.Polyline;
 }
 
-type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'parts' | 'meets' | 'messages' | 'leaderboard' | 'profile' | 'access' | 'settings' | 'bounty' | 'world' | 'season' | 'crews' | 'achievements';
+type TabKey = 'command' | 'radar' | 'feed' | 'garage' | 'more' | 'race' | 'vault' | 'shop' | 'parts' | 'meets' | 'messages' | 'leaderboard' | 'profile' | 'access' | 'settings' | 'diagnostics' | 'bounty' | 'world' | 'season' | 'crews' | 'achievements';
 type IconType = any;
 
 const tabPaths:Record<TabKey,string>={
   command:'/app/command',radar:'/app/map',feed:'/app/feed',garage:'/app/garage',more:'/app/more',
   race:'/app/competition/races',vault:'/app/rewards/vault',shop:'/app/shop',parts:'/app/garage/parts',meets:'/app/events/meets',
-  messages:'/app/social/messages',leaderboard:'/app/competition/leaderboards',profile:'/app/profile',access:'/app/settings/access',settings:'/app/settings',bounty:'/app/map/bounty',world:'/app/map/world',season:'/app/season',crews:'/app/social/crews',achievements:'/app/profile/achievements',
+  messages:'/app/social/messages',leaderboard:'/app/competition/leaderboards',profile:'/app/profile',access:'/app/settings/access',settings:'/app/settings',diagnostics:'/app/settings/diagnostics',bounty:'/app/map/bounty',world:'/app/map/world',season:'/app/season',crews:'/app/social/crews',achievements:'/app/profile/achievements',
 };
 const pathTabs=Object.entries(tabPaths).reduce<Record<string,TabKey>>((routes,[tab,path])=>({...routes,[path]:tab as TabKey}),{});
 pathTabs['/app/radar']='radar';
@@ -524,7 +535,15 @@ function RadarMap({
   const lastCameraLocation=useRef<{latitude:number;longitude:number}|null>(null);
   const webViewport=useRef<{latitude:number;longitude:number;zoom:number}|null>(null);
   const followLocationRef=useRef(Boolean(followLocation));
+  const lastMapSource=useRef('');
   followLocationRef.current=Boolean(followLocation);
+  mapDiagnostics.renderCount+=1;
+  const sourceSignature=`${mode}:${drivers.length}:${events.length}:${routeCoordinates.length}:${routeStops.length}:${rewards.length}:${drops.length}:${reports.length}:${safeHouses.length}:${location?.latitude.toFixed(5)||'none'}:${location?.longitude.toFixed(5)||'none'}`;
+  useEffect(()=>{mapDiagnostics.componentMounts+=1;},[]);
+  useEffect(()=>{if(lastMapSource.current&&lastMapSource.current!==sourceSignature)mapDiagnostics.sourceChangeCount+=1;lastMapSource.current=sourceSignature;mapDiagnostics.lastMapSource=sourceSignature;},[sourceSignature]);
+  useEffect(()=>{mapDiagnostics.followModeChanges+=1;mapDiagnostics.lastFollowMode=followLocation?'locked':fitAll?'fit-all':'free';},[followLocation,fitAll,followRevision]);
+  useEffect(()=>{mapDiagnostics.routeUpdateCount+=1;mapDiagnostics.lastRouteUpdate=routeCoordinates.length>1?`${routeCoordinates.length} points / ${routeStops.length} stops`:'none';},[routeCoordinates.length,routeStops.length]);
+  useEffect(()=>{if(location)mapDiagnostics.gpsSampleCount+=1;},[location?.latitude,location?.longitude]);
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const listener = (event: MessageEvent) => {
@@ -903,6 +922,55 @@ function ShopScreen() {
   );
 }
 
+function DiagnosticsScreen(){
+  const profile=useContentStore(state=>state.profile);
+  const location=useLiveNetworkStore(state=>state.location);
+  const isDriving=useLiveNetworkStore(state=>state.isDriving);
+  const networkStatus=useLiveNetworkStore(state=>state.networkStatus);
+  const maxSpeedKph=useLiveNetworkStore(state=>state.maxSpeedKph);
+  const route=useLiveNetworkStore(state=>state.route);
+  const [permission,setPermission]=useState('unknown');
+  const [health,setHealth]=useState<any|null>(null);
+  const [latency,setLatency]=useState<number|null>(null);
+  const [status,setStatus]=useState('CHECKING');
+  const load=async()=>{
+    const started=Date.now();
+    try{
+      const result=await cloudflareApi.request<any>('/api/health');
+      setLatency(Date.now()-started);
+      setHealth(result);
+      setStatus('HEALTH OK');
+    }catch(error){
+      setLatency(null);
+      setStatus(error instanceof Error?error.message:'HEALTH FAILED');
+    }
+  };
+  useEffect(()=>{void Location.getForegroundPermissionsAsync().then(result=>setPermission(result.status)).catch(()=>setPermission('unknown'));void load();const timer=setInterval(()=>void load(),15000);return()=>clearInterval(timer);},[]);
+  const diagnostics={
+    app:{version:APP_VERSION,versionCode:ANDROID_VERSION_CODE,commit:apexBuildCommit||'local',apiEnvironment:apexApiEnvironment,apiBaseUrl:apexApiBaseUrl||'same-origin'},
+    backend:{health:health?.status||'unknown',d1:health?.d1||'unknown',r2:health?.r2||'unknown',branch:health?.branch||null,latencyMs:latency},
+    gps:{permission,active:isDriving,latitude:location?.latitude??null,longitude:location?.longitude??null,accuracyMeters:location?.accuracy??null,sampleAgeMs:location?Date.now()-location.timestamp:null,rawSpeedKph:location?.speedKph??0,smoothedSpeedKph:maxSpeedKph,heading:location?.heading??0},
+    map:{...mapDiagnostics,mapMode:'see active map control',routeActive:Boolean(route),routeStops:route?.stops?.length||0,routePoints:route?.coordinates?.length||0},
+    network:{status:networkStatus,online:Platform.OS==='web'?(globalThis as any).navigator?.onLine!==false:true,apiLatencyMs:latency},
+    media:{lastUploadStatus:'reported by social uploader',videoRangeSupport:'covered by PR23 HTTP QA'},
+  };
+  const row=(label:string,value:any)=><View style={styles.healthRow}><Text style={styles.identityLabel}>{label}</Text><Text selectable style={styles.commandMeta}>{String(value ?? '—')}</Text></View>;
+  const copy=async()=>{
+    const redacted={...diagnostics,gps:{...diagnostics.gps,latitude:'REDACTED',longitude:'REDACTED'}};
+    const text=JSON.stringify(redacted,null,2);
+    try{await (globalThis as any).navigator?.clipboard?.writeText(text);}catch{}
+    Alert.alert('Diagnostics copied',text);
+  };
+  if(!profile?.isDeveloper)return <ScrollView contentContainerStyle={styles.screenContent}><GlassPanel style={styles.emptyState}><LockKeyhole size={30} color={muted}/><Text style={styles.emptyTitle}>DEVELOPER ACCESS REQUIRED</Text></GlassPanel></ScrollView>;
+  return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
+    <View style={styles.raceHeader}><View><Text style={styles.eyebrow}>QA ONLY</Text><Text style={styles.feedTitle}>DIAGNOSTICS</Text><Text style={styles.moreCopy}>Exact GPS is shown only on this device. Copy redacts coordinates.</Text></View><Activity size={26} color={accent}/></View>
+    <SectionTitle label="BUILD + BACKEND"/><GlassPanel>{row('APP',`${APP_VERSION} (${ANDROID_VERSION_CODE})`)}<View style={styles.identityDivider}/>{row('COMMIT',apexBuildCommit||'local')}<View style={styles.identityDivider}/>{row('API ENV',apexApiEnvironment)}<View style={styles.identityDivider}/>{row('API BASE',apexApiBaseUrl||'same-origin')}<View style={styles.identityDivider}/>{row('HEALTH',status)}<View style={styles.identityDivider}/>{row('D1',health?.d1||'unknown')}<View style={styles.identityDivider}/>{row('R2',health?.r2||'unknown')}<View style={styles.identityDivider}/>{row('LATENCY',latency===null?'—':`${latency} ms`)}</GlassPanel>
+    <SectionTitle label="GPS"/><GlassPanel>{row('PERMISSION',permission)}<View style={styles.identityDivider}/>{row('DRIVE MODE',isDriving?'ACTIVE':'OFF')}<View style={styles.identityDivider}/>{row('LAT',location?.latitude?.toFixed(6))}<View style={styles.identityDivider}/>{row('LON',location?.longitude?.toFixed(6))}<View style={styles.identityDivider}/>{row('ACCURACY',location?.accuracy?`${Math.round(location.accuracy)} m`:'—')}<View style={styles.identityDivider}/>{row('SAMPLE AGE',location?`${Date.now()-location.timestamp} ms`:'—')}<View style={styles.identityDivider}/>{row('RAW SPEED',`${(location?.speedKph||0).toFixed(1)} kph`)}<View style={styles.identityDivider}/>{row('TOP SPEED SAMPLE',`${maxSpeedKph.toFixed(1)} kph`)}<View style={styles.identityDivider}/>{row('HEADING',`${Math.round(location?.heading||0)}°`)}</GlassPanel>
+    <SectionTitle label="MAP"/><GlassPanel>{row('MOUNTS',mapDiagnostics.componentMounts)}<View style={styles.identityDivider}/>{row('RENDERS',mapDiagnostics.renderCount)}<View style={styles.identityDivider}/>{row('SOURCE CHANGES',mapDiagnostics.sourceChangeCount)}<View style={styles.identityDivider}/>{row('FOLLOW CHANGES',mapDiagnostics.followModeChanges)}<View style={styles.identityDivider}/>{row('ROUTE UPDATES',mapDiagnostics.routeUpdateCount)}<View style={styles.identityDivider}/>{row('GPS SAMPLES',mapDiagnostics.gpsSampleCount)}<View style={styles.identityDivider}/>{row('LAST FOLLOW',mapDiagnostics.lastFollowMode)}<View style={styles.identityDivider}/>{row('LAST ROUTE',mapDiagnostics.lastRouteUpdate)}</GlassPanel>
+    <GlassButton label="COPY DIAGNOSTICS" icon={Save} onPress={()=>void copy()} active/>
+  </ScrollView>;
+}
+
 function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const networkStatus = useLiveNetworkStore(state => state.networkStatus);
   const location = useLiveNetworkStore(state => state.location);
@@ -918,6 +986,7 @@ function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
     { tab: 'shop', label: 'GHOST SHOP', meta: 'Spend GC on digital cosmetics', icon: ShoppingBag }, { tab: 'parts', label: 'VEHICLE PARTS', meta: 'Live inventory matched to your build', icon: PackageCheck }, { tab: 'leaderboard', label: 'RANKINGS', meta: 'Season tiers and records', icon: Trophy },
     { tab: 'feed', label: 'SOCIAL', meta: 'Vertical feed, follows and posts', icon: Users }, { tab: 'messages', label: 'COMMS', meta: 'Groups and direct messages', icon: MessagesSquare },
     {tab:'access',label:isDeveloper?'ACCESS CONTROL':'INVITE NETWORK',meta:isDeveloper?'Codes, limits, new pilots':'Issue codes to trusted pilots',icon:LockKeyhole},
+    ...(isDeveloper?[{tab:'diagnostics' as TabKey,label:'QA DIAGNOSTICS',meta:'Build, GPS, API, map counters',icon:Activity}]:[]),
   ];
   return <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}><View style={styles.moreHeader}><Text style={styles.eyebrow}>PILOT SYSTEMS</Text><Text style={styles.feedTitle}>ACCESS GRID</Text><Text style={styles.moreCopy}>All network tools. One encrypted identity.</Text></View><View style={styles.moduleGrid}>{modules.map(module => { const Icon = module.icon; return <Pressable key={module.tab} onPress={() => onTab(module.tab)} style={({ pressed }) => [styles.moduleCard, pressed && styles.pressed]}><View style={styles.moduleIcon}><Icon size={23} color={accent} /></View><Text style={styles.moduleTitle}>{module.label}</Text><Text style={styles.moduleMeta}>{module.meta}</Text><ChevronRight size={17} color={muted} style={styles.moduleChevron} /></Pressable>; })}</View><SectionTitle label="NETWORK HEALTH" /><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>GPS PROOF</Text><Text style={location ? styles.healthGood : styles.healthOffline}>{location ? 'LOCKED' : 'NOT GRANTED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>ENCRYPTED COMMS</Text><Text style={userId ? styles.healthGood : styles.healthOffline}>{userId ? 'LIVE' : 'SIGN IN REQUIRED'}</Text></View><View style={styles.identityDivider} /><View style={styles.healthRow}><Text style={styles.identityLabel}>LIVE NETWORK</Text><Text style={networkStatus === 'live' ? styles.healthGood : styles.healthOffline}>{networkStatus.replace('_', ' ').toUpperCase()}</Text></View></GlassPanel></ScrollView>;
 }
@@ -1687,6 +1756,7 @@ export function ApexDesignPreview() {
     if (tab === 'profile') return <Phase3ProfileScreen driverId={selectedProfileId} onClose={selectedProfileId?()=>{setSelectedProfileId(null);setTab('leaderboard');}:undefined}/>;
     if (tab === 'access') return <DeveloperAccessScreen />;
     if (tab === 'settings') return <SettingsScreen />;
+    if (tab === 'diagnostics') return <DiagnosticsScreen />;
     if (tab === 'bounty') return <BountyScreen onTab={setTab}/>;
     if (tab === 'world') return <WorldScreen onTab={setTab}/>;
     if (tab === 'season') return <SeasonHubScreen onTab={setTab}/>;

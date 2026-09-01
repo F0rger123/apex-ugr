@@ -3,6 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const TOKEN_KEY = 'apex.cloudflare.session';
 const TOKEN_COOKIE = 'apex_cloudflare_session';
 const configuredBase = process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || '';
+export const apexApiBaseUrl = configuredBase;
+export const apexApiEnvironment = process.env.EXPO_PUBLIC_API_ENV || (configuredBase.includes('apex-ugr-pr23-qa') ? 'QA' : configuredBase ? 'PROD' : 'SAME_ORIGIN');
+export const apexBuildCommit = process.env.EXPO_PUBLIC_COMMIT_SHA || '';
 
 export type CloudflareSession = {
   token: string;

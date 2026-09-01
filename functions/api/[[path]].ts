@@ -25,6 +25,12 @@ interface Env {
   EBAY_DELETION_VERIFICATION_TOKEN?: string;
   EBAY_DELETION_ENDPOINT?: string;
   RELEASE_UPLOAD_TOKEN?: string;
+  APEX_ENVIRONMENT?: string;
+  APEX_D1_NAME?: string;
+  APEX_R2_BUCKET?: string;
+  CF_PAGES_BRANCH?: string;
+  CF_PAGES_COMMIT_SHA?: string;
+  CF_PAGES_URL?: string;
 }
 
 type UserRow = {
@@ -657,7 +663,17 @@ async function vehicleCatalog(year: string | null, make: string | null) {
 async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === "OPTIONS") return new Response(null, { headers: cors });
-  if (path === "health") return json({ status: "live", backend: "cloudflare", storage: "d1+r2" });
+  if (path === "health") return json({
+    status: "live",
+    backend: "cloudflare",
+    storage: "d1+r2",
+    environment: env.APEX_ENVIRONMENT || (env.CF_PAGES_URL?.includes("apex-ugr-pr23-qa") ? "QA" : "PROD"),
+    d1: env.APEX_D1_NAME || "DB",
+    r2: env.APEX_R2_BUCKET || "MEDIA",
+    branch: env.CF_PAGES_BRANCH || null,
+    commit: env.CF_PAGES_COMMIT_SHA || null,
+    pagesUrl: env.CF_PAGES_URL || null,
+  });
   if (path === "download/android" && (method === "GET" || method === "HEAD")) {
     const rangeHeader = request.headers.get("range");
     const release = await currentAndroidRelease(env);
