@@ -107,6 +107,7 @@ const { width: screenWidth } = Dimensions.get('window');
 const ANDROID_DOWNLOAD_URL=process.env.EXPO_PUBLIC_ANDROID_DOWNLOAD_URL || 'https://apex-ugr.pages.dev/api/download/android';
 const APP_VERSION='1.5.3';
 const ANDROID_VERSION_CODE=18;
+const IS_QA_BUILD=apexApiEnvironment.toUpperCase()==='QA';
 const SCRAMBLE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%&';
 const useNativeAnimations=Platform.OS!=='web';
 const mapDiagnostics={
@@ -252,6 +253,7 @@ function VaporStory(){
 }
 
 function AndroidDownloadButton(){
+  if(IS_QA_BUILD)return <View style={styles.androidDownloadDisabled}><View style={styles.androidDownloadIcon}><PackageCheck size={19} color={accent}/></View><View style={{flex:1}}><Text style={styles.androidDownloadTitle}>QA BUILD</Text><Text style={styles.androidDownloadMeta}>PUBLIC UPDATE CHECK DISABLED</Text></View></View>;
   const download=()=>{
     if(Platform.OS==='web'&&typeof document!=='undefined'){
       const link=document.createElement('a');link.href=ANDROID_DOWNLOAD_URL;link.download='apex-ugr.apk';link.rel='noopener';document.body.appendChild(link);link.click();link.remove();return;
@@ -259,6 +261,11 @@ function AndroidDownloadButton(){
     void Linking.openURL(ANDROID_DOWNLOAD_URL);
   };
   return <Pressable onPress={download} style={styles.androidDownload}><View style={styles.androidDownloadIcon}><PackageCheck size={19} color={paper}/></View><View style={{flex:1}}><Text style={styles.androidDownloadTitle}>DOWNLOAD ANDROID APK</Text><Text style={styles.androidDownloadMeta}>LATEST VERIFIED RELEASE · STABLE LINK</Text></View><ChevronRight size={17} color={muted}/></Pressable>;
+}
+
+function QaBuildBadge(){
+  if(!IS_QA_BUILD)return null;
+  return <View pointerEvents="none" style={styles.qaBuildBadge}><Text style={styles.qaBuildBadgeText}>PR23 QA</Text></View>;
 }
 
 function PlayTransition({carName,onComplete}:{carName:string;onComplete:()=>void}){
@@ -1769,11 +1776,12 @@ export function ApexDesignPreview() {
 
   if(!booted)return <SafeAreaView style={styles.app}><AtmosphereBackdrop/><View style={styles.bootScreen}><View style={styles.bootLock}><LockKeyhole size={74} color={paper} strokeWidth={1.1}/></View><ApexLogo/><Text style={styles.bootLabel}>ESTABLISHING PRIVATE CHANNEL</Text></View></SafeAreaView>;
   if(!userId)return <SafeAreaView style={styles.app}>{inviteCode?<AtmosphereBackdrop/>:<AccessPortal onUnlock={code=>{setInviteCode(code);setAuthMode('signup');setAuthOpen(true);}} onSignIn={()=>{setInviteCode(null);setAuthMode('signin');setAuthOpen(true);}}/>}{authOpen?<AuthPanel key={`${authMode}-${inviteCode||'owner'}`} onClose={()=>{setAuthOpen(false);setInviteCode(null);}} onOpen={setTab} initialMode={authMode} inviteCode={inviteCode}/>:null}</SafeAreaView>;
-  if(!gameStarted)return <SafeAreaView style={styles.app}><GameLobby onEnter={next=>{setTab(next);setGameStarted(true);}}/></SafeAreaView>;
+  if(!gameStarted)return <SafeAreaView style={styles.app}><GameLobby onEnter={next=>{setTab(next);setGameStarted(true);}}/><QaBuildBadge/></SafeAreaView>;
 
   return (
     <SafeAreaView style={styles.app}>
       <AtmosphereBackdrop />
+      <QaBuildBadge/>
       <View style={styles.header}>
         <View style={styles.brandLockup}>
           <ApexLogo />
@@ -2632,9 +2640,12 @@ const styles = StyleSheet.create({
   existingAccess: { color: '#C2C7C3', fontSize: 7, fontWeight: '900', textAlign: 'center', paddingTop: 14, letterSpacing: .8 },
   existingAccessHit: { borderRadius: 8 },
   androidDownload: { minHeight: 52, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,.24)', backgroundColor: 'rgba(255,255,255,.055)', paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  androidDownloadDisabled: { minHeight: 52, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(167,229,154,.30)', backgroundColor: 'rgba(167,229,154,.06)', paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 9, opacity: .9 },
   androidDownloadIcon: { width: 34, height: 34, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(167,229,154,.32)', backgroundColor: 'rgba(167,229,154,.08)', alignItems: 'center', justifyContent: 'center' },
   androidDownloadTitle: { color: paper, fontSize: 8, fontWeight: '900' },
   androidDownloadMeta: { color: muted, fontSize: 6, fontWeight: '800', marginTop: 3 },
+  qaBuildBadge: { position: 'absolute', right: 12, bottom: 92, zIndex: 80, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(167,229,154,.48)', backgroundColor: 'rgba(2,7,4,.76)', paddingHorizontal: 10, paddingVertical: 5, shadowColor: accent, shadowOpacity: .22, shadowRadius: 12 },
+  qaBuildBadgeText: { color: accent, fontSize: 8, fontWeight: '900', letterSpacing: 1.1 },
   unlockFlash: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.04)' },
   unlockBar: { position: 'absolute', left: 0, right: 0, height: 1, top: '50%', backgroundColor: '#FFFFFF', shadowColor: '#FFFFFF', shadowOpacity: 1, shadowRadius: 18 },
   unlockStamp: { color: paper, borderWidth: 1, borderColor: 'rgba(255,255,255,.62)', backgroundColor: 'rgba(0,0,0,.76)', paddingHorizontal: 18, paddingVertical: 10, fontSize: 9, fontWeight: '900', letterSpacing: 1.8 },

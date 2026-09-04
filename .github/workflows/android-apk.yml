@@ -63,6 +63,7 @@ jobs:
       - name: Quality gate
         run: |
           npm run type-check
+          npm run test:qa-safety
           npm run build
           npx wrangler pages functions build functions --outdir .wrangler/functions-build
           node scripts/navigationRegression.mjs

@@ -59,7 +59,36 @@ const cors = {
 const DEVELOPER_EMAIL = "drummerforger@gmail.com";
 const CURRENT_SAFETY_DISCLAIMER_VERSION = "2026-08-private-venue-v1";
 const ROOT_ACCESS_CODE_HASH = "99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718";
+const PRODUCTION_D1_NAME = "apex-ugr-db";
+const PRODUCTION_R2_BUCKET = "apex-ugr-media";
+const QA_D1_NAME = "apex-ugr-pr23-qa";
+const QA_R2_BUCKET = "apex-ugr-pr23-qa-media";
 type AndroidReleaseMetadata = ReturnType<typeof validateAndroidReleaseMetadata>;
+
+function runtimeEnvironment(env: Env) {
+  return (env.APEX_ENVIRONMENT || (env.CF_PAGES_URL?.includes("apex-ugr-pr23-qa") ? "QA" : "PROD")).toUpperCase();
+}
+
+function bindingReport(env: Env) {
+  return {
+    environment: runtimeEnvironment(env),
+    d1: env.APEX_D1_NAME || "DB",
+    r2: env.APEX_R2_BUCKET || "MEDIA",
+    branch: env.CF_PAGES_BRANCH || null,
+    commit: env.CF_PAGES_COMMIT_SHA || null,
+    pagesUrl: env.CF_PAGES_URL || null,
+  };
+}
+
+function qaBindingProblem(env: Env) {
+  const report = bindingReport(env);
+  if (report.environment !== "QA") return null;
+  if (report.d1 === PRODUCTION_D1_NAME) return `QA runtime is bound to Production D1 (${PRODUCTION_D1_NAME}).`;
+  if (report.r2 === PRODUCTION_R2_BUCKET) return `QA runtime is bound to Production R2 (${PRODUCTION_R2_BUCKET}).`;
+  if (report.d1 !== QA_D1_NAME) return `QA runtime D1 name is not the expected isolated database (${QA_D1_NAME}).`;
+  if (report.r2 !== QA_R2_BUCKET) return `QA runtime R2 bucket is not the expected isolated bucket (${QA_R2_BUCKET}).`;
+  return null;
+}
 
 async function currentAndroidRelease(env: Env) {
   const pointer = await env.MEDIA.get(ANDROID_LATEST_POINTER_KEY);
@@ -663,18 +692,19 @@ async function vehicleCatalog(year: string | null, make: string | null) {
 async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === "OPTIONS") return new Response(null, { headers: cors });
+  const bindings = bindingReport(env);
+  const qaProblem = qaBindingProblem(env);
   if (path === "health") return json({
     status: "live",
     backend: "cloudflare",
     storage: "d1+r2",
-    environment: env.APEX_ENVIRONMENT || (env.CF_PAGES_URL?.includes("apex-ugr-pr23-qa") ? "QA" : "PROD"),
-    d1: env.APEX_D1_NAME || "DB",
-    r2: env.APEX_R2_BUCKET || "MEDIA",
-    branch: env.CF_PAGES_BRANCH || null,
-    commit: env.CF_PAGES_COMMIT_SHA || null,
-    pagesUrl: env.CF_PAGES_URL || null,
+    ...bindings,
+    bindingStatus: qaProblem ? "blocked" : "ok",
+    bindingError: qaProblem,
   });
+  if (qaProblem) return json({ error: "QA binding safety check failed.", code: "QA_BINDING_MISMATCH" }, 500);
   if (path === "download/android" && (method === "GET" || method === "HEAD")) {
+    if (bindings.environment === "QA") return json({ error: "Public Android download is disabled in QA builds.", code: "QA_DOWNLOAD_DISABLED" }, 403);
     const rangeHeader = request.headers.get("range");
     const release = await currentAndroidRelease(env);
     const object = await env.MEDIA.get(release.objectKey, rangeHeader ? { range: request.headers } : undefined);

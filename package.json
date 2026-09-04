@@ -18,7 +18,8 @@
     "test:phase4": "node scripts/phase4Regression.mjs",
     "test:bounty4": "node scripts/phase4BountyHttpRegression.mjs",
     "test:migration4": "node scripts/phase4MigrationRehearsal.mjs",
-    "test:pr23": "node scripts/pr23Regression.mjs",
+    "test:qa-safety": "node scripts/qaSafetyRegression.mjs",
+    "test:pr23": "node scripts/pr23Regression.mjs && node scripts/qaSafetyRegression.mjs",
     "test:pr23:http": "node scripts/pr23HttpIntegration.mjs",
     "qa:http:reset": "node scripts/qaHttpReset.mjs"
   },
