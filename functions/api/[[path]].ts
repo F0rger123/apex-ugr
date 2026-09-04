@@ -70,10 +70,12 @@ function runtimeEnvironment(env: Env) {
 }
 
 function bindingReport(env: Env) {
+  const environment = runtimeEnvironment(env);
+  const isolatedQaProject = Boolean(env.CF_PAGES_URL?.includes("apex-ugr-pr23-qa"));
   return {
-    environment: runtimeEnvironment(env),
-    d1: env.APEX_D1_NAME || "DB",
-    r2: env.APEX_R2_BUCKET || "MEDIA",
+    environment,
+    d1: env.APEX_D1_NAME || (environment === "QA" && isolatedQaProject ? QA_D1_NAME : "DB"),
+    r2: env.APEX_R2_BUCKET || (environment === "QA" && isolatedQaProject ? QA_R2_BUCKET : "MEDIA"),
     branch: env.CF_PAGES_BRANCH || null,
     commit: env.CF_PAGES_COMMIT_SHA || null,
     pagesUrl: env.CF_PAGES_URL || null,
