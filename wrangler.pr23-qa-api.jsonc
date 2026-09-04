@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "apex-ugr-pr23-qa-api",
+  "main": "workers/pr23-qa-api.ts",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "APEX_ENVIRONMENT": "QA",
+    "APEX_D1_NAME": "apex-ugr-pr23-qa",
+    "APEX_R2_BUCKET": "apex-ugr-pr23-qa-media",
+    "CF_PAGES_BRANCH": "fix/mobile-ux-real-data"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "apex-ugr-pr23-qa",
+      "database_id": "385b5ada-6c08-47da-b379-af9a51b3d599",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "apex-ugr-pr23-qa-media"
+    }
+  ]
+}

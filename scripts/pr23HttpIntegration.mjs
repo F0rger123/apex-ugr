@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 const base = process.env.APEX_QA_URL || "http://127.0.0.1:8791/api";
 const password = "Phase3-QA-Password!";
+const qaPasswords = [password, "Invite-QA-Password!"];
 
 async function call(path, { token, method = "GET", body, headers = {} } = {}) {
   const response = await fetch(`${base}/${path}`, {
@@ -22,9 +23,11 @@ async function session() {
   const signup = await call("auth/signup", { method: "POST", body: { email: "drummerforger@gmail.com", password } });
   if (signup.status === 201) return signup.payload;
   assert.equal(signup.status, 409);
-  const signin = await call("auth/signin", { method: "POST", body: { email: "drummerforger@gmail.com", password } });
-  assert.equal(signin.status, 200);
-  return signin.payload;
+  for (const candidate of qaPasswords) {
+    const signin = await call("auth/signin", { method: "POST", body: { email: "drummerforger@gmail.com", password: candidate } });
+    if (signin.status === 200) return signin.payload;
+  }
+  assert.fail("Existing QA owner account could not be signed in with known QA test passwords.");
 }
 
 const owner = await session();
