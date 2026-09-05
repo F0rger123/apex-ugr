@@ -11,18 +11,29 @@ async function api(path, token, options = {}) {
   return { status: response.status, payload: await response.json() };
 }
 
-let signIn;
-for (const password of qaPasswords) {
-  signIn = await api("auth/signin", null, { method: "POST", body: JSON.stringify({ email: "drummerforger@gmail.com", password }) });
-  if (signIn.status === 200) break;
-}
-if (signIn?.status !== 200) {
+async function ownerSession() {
+  let signIn;
+  for (const password of qaPasswords) {
+    signIn = await api("auth/signin", null, { method: "POST", body: JSON.stringify({ email: "drummerforger@gmail.com", password }) });
+    if (signIn.status === 200) return signIn;
+  }
   const signup = await api("auth/signup", null, { method: "POST", body: JSON.stringify({ email: "drummerforger@gmail.com", password: qaPasswords[0] }) });
   assert.equal(signup.status, 201);
-  signIn = signup;
+  return signup;
 }
-assert.ok(signIn?.payload?.token);
-const token = signIn.payload.token;
+
+const owner = await ownerSession();
+const invite = await api("invites", owner.payload.token, { method: "POST", body: JSON.stringify({ label: "PHASE 4 BOUNTY TIMER QA", maxUses: 1 }) });
+assert.equal(invite.status, 201);
+
+const qaEmail = `phase4-bounty-${Date.now()}@example.test`;
+const signup = await api("auth/signup", null, {
+  method: "POST",
+  body: JSON.stringify({ email: qaEmail, password: qaPasswords[0], inviteCode: invite.payload.code }),
+});
+assert.equal(signup.status, 201);
+assert.ok(signup.payload.token);
+const token = signup.payload.token;
 await api("bounty/settings", token, { method: "PUT", body: JSON.stringify({ bountyModeEnabled: true, agreed: true }) });
 await api("location", token, { method: "POST", body: JSON.stringify({ latitude: 40, longitude: -75, accuracy: 5, sampleAgeMs: 100, driveMode: true, shareMinutes: 15 }) });
 const created = await api("bounty/trigger", token, { method: "POST", body: JSON.stringify({ mode: "venue", venueName: "PHASE 4 TIMER QA", starLevel: 1 }) });
