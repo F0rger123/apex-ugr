@@ -10,6 +10,11 @@ on:
         required: true
         default: false
         type: boolean
+      qa_api_base_url:
+        description: QA API base URL for a non-promoting branch APK
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -31,8 +36,17 @@ jobs:
       AWS_DEFAULT_REGION: auto
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       R2_BUCKET: apex-ugr-media
+      EXPO_PUBLIC_API_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.qa_api_base_url || '' }}
+      EXPO_PUBLIC_API_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.qa_api_base_url != '' && 'QA' || 'PROD' }}
+      EXPO_PUBLIC_COMMIT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate QA build target
+        if: github.ref != 'refs/heads/main'
+        run: |
+          test -n "$EXPO_PUBLIC_API_BASE_URL"
+          echo "$EXPO_PUBLIC_API_BASE_URL" | grep -E "apex-ugr-pr23-qa\\.pages\\.dev|apex-ugr-pr23-qa-api\\.drummerforger\\.workers\\.dev"
 
       - uses: actions/setup-node@v4
         with:
@@ -49,6 +63,7 @@ jobs:
       - name: Quality gate
         run: |
           npm run type-check
+          npm run test:qa-safety
           npm run build
           npx wrangler pages functions build functions --outdir .wrangler/functions-build
           node scripts/navigationRegression.mjs
@@ -119,6 +134,7 @@ jobs:
             "$APP_VERSION" "$VERSION_CODE" "$SHA256" "$SIZE" "$SIGNER_FINGERPRINT" "$UPLOADED_AT" "$OBJECT_KEY"
 
       - name: Upload immutable APK directly to R2
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.promote == true)
         env:
           OBJECT_KEY: ${{ steps.release.outputs.object_key }}
           SHA256: ${{ steps.release.outputs.sha256 }}
@@ -172,7 +188,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: apex-ugr-android-${{ github.sha }}
+          name: ${{ github.ref == 'refs/heads/main' && 'apex-ugr-android-production' || 'apex-ugr-android-qa' }}-${{ github.sha }}
           path: |
             apex-ugr.apk
             apex-ugr.apk.sha256

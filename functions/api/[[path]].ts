@@ -25,6 +25,12 @@ interface Env {
   EBAY_DELETION_VERIFICATION_TOKEN?: string;
   EBAY_DELETION_ENDPOINT?: string;
   RELEASE_UPLOAD_TOKEN?: string;
+  APEX_ENVIRONMENT?: string;
+  APEX_D1_NAME?: string;
+  APEX_R2_BUCKET?: string;
+  CF_PAGES_BRANCH?: string;
+  CF_PAGES_COMMIT_SHA?: string;
+  CF_PAGES_URL?: string;
 }
 
 type UserRow = {
@@ -51,8 +57,40 @@ const cors = {
 };
 
 const DEVELOPER_EMAIL = "drummerforger@gmail.com";
+const CURRENT_SAFETY_DISCLAIMER_VERSION = "2026-08-private-venue-v1";
 const ROOT_ACCESS_CODE_HASH = "99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718";
+const PRODUCTION_D1_NAME = "apex-ugr-db";
+const PRODUCTION_R2_BUCKET = "apex-ugr-media";
+const QA_D1_NAME = "apex-ugr-pr23-qa";
+const QA_R2_BUCKET = "apex-ugr-pr23-qa-media";
 type AndroidReleaseMetadata = ReturnType<typeof validateAndroidReleaseMetadata>;
+
+function runtimeEnvironment(env: Env) {
+  return (env.APEX_ENVIRONMENT || (env.CF_PAGES_URL?.includes("apex-ugr-pr23-qa") ? "QA" : "PROD")).toUpperCase();
+}
+
+function bindingReport(env: Env) {
+  const environment = runtimeEnvironment(env);
+  const isolatedQaProject = Boolean(env.CF_PAGES_URL?.includes("apex-ugr-pr23-qa"));
+  return {
+    environment,
+    d1: env.APEX_D1_NAME || (environment === "QA" && isolatedQaProject ? QA_D1_NAME : "DB"),
+    r2: env.APEX_R2_BUCKET || (environment === "QA" && isolatedQaProject ? QA_R2_BUCKET : "MEDIA"),
+    branch: env.CF_PAGES_BRANCH || null,
+    commit: env.CF_PAGES_COMMIT_SHA || null,
+    pagesUrl: env.CF_PAGES_URL || null,
+  };
+}
+
+function qaBindingProblem(env: Env) {
+  const report = bindingReport(env);
+  if (report.environment !== "QA") return null;
+  if (report.d1 === PRODUCTION_D1_NAME) return `QA runtime is bound to Production D1 (${PRODUCTION_D1_NAME}).`;
+  if (report.r2 === PRODUCTION_R2_BUCKET) return `QA runtime is bound to Production R2 (${PRODUCTION_R2_BUCKET}).`;
+  if (report.d1 !== QA_D1_NAME) return `QA runtime D1 name is not the expected isolated database (${QA_D1_NAME}).`;
+  if (report.r2 !== QA_R2_BUCKET) return `QA runtime R2 bucket is not the expected isolated bucket (${QA_R2_BUCKET}).`;
+  return null;
+}
 
 async function currentAndroidRelease(env: Env) {
   const pointer = await env.MEDIA.get(ANDROID_LATEST_POINTER_KEY);
@@ -656,8 +694,19 @@ async function vehicleCatalog(year: string | null, make: string | null) {
 async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === "OPTIONS") return new Response(null, { headers: cors });
-  if (path === "health") return json({ status: "live", backend: "cloudflare", storage: "d1+r2" });
+  const bindings = bindingReport(env);
+  const qaProblem = qaBindingProblem(env);
+  if (path === "health") return json({
+    status: "live",
+    backend: "cloudflare",
+    storage: "d1+r2",
+    ...bindings,
+    bindingStatus: qaProblem ? "blocked" : "ok",
+    bindingError: qaProblem,
+  });
+  if (qaProblem) return json({ error: "QA binding safety check failed.", code: "QA_BINDING_MISMATCH" }, 500);
   if (path === "download/android" && (method === "GET" || method === "HEAD")) {
+    if (bindings.environment === "QA") return json({ error: "Public Android download is disabled in QA builds.", code: "QA_DOWNLOAD_DISABLED" }, 403);
     const rangeHeader = request.headers.get("range");
     const release = await currentAndroidRelease(env);
     const object = await env.MEDIA.get(release.objectKey, rangeHeader ? { range: request.headers } : undefined);
@@ -1164,15 +1213,26 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === "vehicles" && method === "POST") {
     const body = await request.json<Record<string, string | number>>();
     if (!Number.isInteger(Number(body.year)) || !body.make || !body.model) return json({ error: "Year, make, and model are required." }, 400);
+    const rawVehicleType = body.vehicleType === undefined || body.vehicleType === null || body.vehicleType === "" ? "CAR" : String(body.vehicleType).toUpperCase();
+    if (!["CAR", "MOTORCYCLE"].includes(rawVehicleType)) return json({ error: "Vehicle type must be CAR or MOTORCYCLE." }, 400);
+    const vehicleType = rawVehicleType as "CAR" | "MOTORCYCLE";
     const id = crypto.randomUUID();
     const existing = await env.DB.prepare("SELECT COUNT(*) count FROM vehicles WHERE user_id=?").bind(user.id).first<{ count: number }>();
     await env.DB.prepare(
-      `INSERT INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,photo_url,is_active)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,photo_url,is_active,vehicle_type,displacement_cc)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
-      .bind(id, user.id, body.nickname || `${body.make} ${body.model}`, Number(body.year), body.make, body.model, body.trim || null, body.engine || null, body.drivetrain || null, Number(body.horsepower) || 0, body.color || null, body.photoUrl || null, existing?.count ? 0 : 1)
+      .bind(id, user.id, body.nickname || `${body.make} ${body.model}`, Number(body.year), body.make, body.model, body.trim || null, body.engine || null, body.drivetrain || null, Number(body.horsepower) || 0, body.color || null, body.photoUrl || null, existing?.count ? 0 : 1, vehicleType, Number(body.displacementCc) || null)
       .run();
     return json({ id }, 201);
+  }
+  if (path === "disclaimer" && method === "GET") {
+    const acceptance = await env.DB.prepare("SELECT accepted_at FROM user_disclaimer_acceptances WHERE user_id=? AND disclaimer_version=?").bind(user.id, CURRENT_SAFETY_DISCLAIMER_VERSION).first<{ accepted_at: string }>();
+    return json({ version: CURRENT_SAFETY_DISCLAIMER_VERSION, accepted: Boolean(acceptance), acceptedAt: acceptance?.accepted_at || null });
+  }
+  if (path === "disclaimer/accept" && method === "POST") {
+    await env.DB.prepare("INSERT OR IGNORE INTO user_disclaimer_acceptances(user_id,disclaimer_version) VALUES(?,?)").bind(user.id, CURRENT_SAFETY_DISCLAIMER_VERSION).run();
+    return json({ version: CURRENT_SAFETY_DISCLAIMER_VERSION, accepted: true });
   }
   const activateVehicle = path.match(/^vehicles\/([^/]+)\/active$/);
   if (activateVehicle && method === "POST") {
@@ -3646,7 +3706,7 @@ async function handle(request: Request, env: Env, path: string) {
     if (!ownedVehicle) return json({ error: "Vehicle was not found in your garage." }, 404);
 
     if (method === "GET") {
-      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? AND user_id = ? ORDER BY created_at DESC`).bind(vehicleId, user.id).all();
+      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? AND user_id = ? ORDER BY installed ASC, sort_order ASC, created_at DESC`).bind(vehicleId, user.id).all();
       return json({ wishlist: rows.results });
     }
 
@@ -3657,15 +3717,16 @@ async function handle(request: Request, env: Env, path: string) {
       const id = body.id || crypto.randomUUID();
       await env.DB.prepare(
         `
-        INSERT INTO mod_wishlist (id, vehicle_id, user_id, part, brand, category, price, url, priority, notes, purchased, installed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO mod_wishlist (id, vehicle_id, user_id, part, brand, category, price, url, priority, notes, purchased, installed, installed_at, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           part = excluded.part, brand = excluded.brand, category = excluded.category,
           price = excluded.price, url = excluded.url, priority = excluded.priority,
-          notes = excluded.notes, purchased = excluded.purchased, installed = excluded.installed
+          notes = excluded.notes, purchased = excluded.purchased, installed = excluded.installed,
+          installed_at = excluded.installed_at, sort_order = excluded.sort_order
       `,
       )
-        .bind(id, vehicleId, user.id, body.part, body.brand || "", body.category || "Other", Number(body.price) || 0, body.url || "", body.priority || "MEDIUM", body.notes || "", body.purchased ? 1 : 0, body.installed ? 1 : 0)
+        .bind(id, vehicleId, user.id, body.part, body.brand || "", body.category || "Other", Number(body.price) || 0, body.url || "", body.priority || "MEDIUM", body.notes || "", body.purchased ? 1 : 0, body.installed ? 1 : 0, body.installed ? (body.installedAt || new Date().toISOString()) : null, Math.max(0, Number(body.sortOrder) || 0))
         .run();
 
       return json({ success: true, id });

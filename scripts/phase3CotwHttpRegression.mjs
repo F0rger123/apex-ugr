@@ -5,10 +5,11 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const root = resolve(import.meta.dirname, ".."),
-  state = resolve(root, process.env.APEX_QA_STATE || ".phase3qa"),
+  state = resolve(root, process.env.APEX_QA_STATE || "tmp/pr23-http-qa"),
   wrangler = resolve(root, "node_modules", ".bin", process.platform === "win32" ? "wrangler.cmd" : "wrangler"),
   scratch = mkdtempSync(join(tmpdir(), "apex-cotw-")),
   base = process.env.APEX_QA_URL || "http://127.0.0.1:8791/api";
+const qaPasswords = ["Phase3-QA-Password!", "Invite-QA-Password!"];
 
 function sql(source) {
   const file = join(scratch, `${crypto.randomUUID()}.sql`);
@@ -47,8 +48,12 @@ async function fetchRetry(url, options) {
 try {
   const fixtureId = `phase3-cotw-${Date.now()}`;
   const fixtureCategory = `BEST_BUILD_${Date.now()}`;
-  const signIn = await fetchRetry(`${base}/auth/signin`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "drummerforger@gmail.com", password: "Phase3-QA-Password!" }) });
-  assert.equal(signIn.status, 200);
+  let signIn;
+  for (const password of qaPasswords) {
+    signIn = await fetchRetry(`${base}/auth/signin`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "drummerforger@gmail.com", password }) });
+    if (signIn.status === 200) break;
+  }
+  assert.equal(signIn?.status, 200);
   const { token } = await signIn.json();
   sql(`INSERT OR IGNORE INTO car_of_the_week_submissions(id,week_identifier,category,user_id,vehicle_id,year_make_model,media_urls_json,description,votes_count)
     SELECT '${fixtureId}','2020-W01','${fixtureCategory}',u.id,v.id,'2024 Nissan GT-R','["/api/media/phase3-fixture.png"]','QA fixture',12
