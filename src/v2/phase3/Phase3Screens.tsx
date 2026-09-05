@@ -57,6 +57,7 @@ import {
 import { cloudflareApi } from "../../config/cloudflareApi";
 import { useContentStore } from "../live/contentStore";
 import { useLiveNetworkStore } from "../live/liveNetworkStore";
+import { formatDistance, formatSpeed, speedFromKph, unitLabel, type SpeedUnit } from "../utils/units";
 
 const accent = "#A7E59A",
   paper = "#F7F9F7",
@@ -233,13 +234,14 @@ export function Phase3LeadersScreen({
     }, 15000);
     return () => clearInterval(timer);
   }, []);
+  const unit = useLiveNetworkStore((state) => state.unit);
   const metric = (row: any) =>
     board === "zero_sixty" || board === "sixty_130"
       ? `${Number(row.metric).toFixed(2)} SEC`
       : board === "top_speed"
-        ? `${Math.round(Number(row.metric))} KPH`
+        ? formatSpeed(Number(row.metric), unit)
         : board === "miles"
-          ? `${Number(row.metric).toFixed(1)} MI`
+          ? formatDistance(Number(row.metric) / 0.621371, unit)
           : Number(row.metric).toLocaleString();
   return (
     <ScrollView
@@ -375,6 +377,7 @@ export function Phase3ProfileScreen({
     [qrOpen, setQrOpen] = useState(false),
     [cameraOpen, setCameraOpen] = useState(false);
   const vehicles = useContentStore((state) => state.vehicles);
+  const unit = useLiveNetworkStore((state) => state.unit);
   const load = async () => {
     try {
       setData(
@@ -500,7 +503,7 @@ export function Phase3ProfileScreen({
             <Metric value={s.losses} label="LOSSES" />
             <Metric value={`${s.winRate}%`} label="WIN RATE" />
             <Metric
-              value={s.topSpeedKph ? `${Math.round(s.topSpeedKph)} KPH` : "—"}
+              value={s.topSpeedKph ? formatSpeed(s.topSpeedKph, unit) : "—"}
               label="TOP SPEED"
             />
             <Metric
@@ -572,7 +575,7 @@ export function Phase3ProfileScreen({
                   </Text>
                   <Text style={styles.meta}>
                     {record.confidence_label} CONFIDENCE ·{" "}
-                    {Math.round(Number(record.top_speed_kph || 0))} KPH ·{" "}
+                    {formatSpeed(Number(record.top_speed_kph || 0), unit)} ·{" "}
                     {new Date(record.created_at).toLocaleDateString()}
                   </Text>
                 </View>
@@ -1020,6 +1023,7 @@ function PerformanceShareCard({
   vehicle,
   runType,
   result,
+  unit,
 }: {
   cardRef: React.RefObject<View>;
   alias: string;
@@ -1027,6 +1031,7 @@ function PerformanceShareCard({
   vehicle: any;
   runType: string;
   result: any;
+  unit: SpeedUnit;
 }) {
   const points = tracePoints(result.route || []);
   return (
@@ -1052,8 +1057,8 @@ function PerformanceShareCard({
           <Text style={styles.shareMetricLabel}>{runType} // SEC</Text>
         </View>
         <View>
-          <Text style={styles.shareMetric}>{Math.round(result.topSpeedKph)}</Text>
-          <Text style={styles.shareMetricLabel}>TOP SPEED // KPH</Text>
+          <Text style={styles.shareMetric}>{Math.round(speedFromKph(result.topSpeedKph, unit))}</Text>
+          <Text style={styles.shareMetricLabel}>TOP SPEED // {unitLabel(unit)}</Text>
         </View>
       </View>
       <View style={styles.shareTrace}>
@@ -1085,6 +1090,7 @@ export function Phase3RaceScreen({
   const vehicles = useContentStore((state) => state.vehicles),
     activeVehicleId = useContentStore((state) => state.activeVehicleId),
     localProfile = useContentStore((state) => state.profile);
+  const unit = useLiveNetworkStore((state) => state.unit);
   const [mode, setMode] = useState<"SOLO" | "ROUTE + RELAY">("SOLO"),
     [runType, setRunType] = useState("0-60"),
     [safe, setSafe] = useState(false),
@@ -1295,11 +1301,11 @@ export function Phase3RaceScreen({
     context.fillStyle = "#F7F9F7";
     context.font = "700 112px sans-serif";
     context.fillText(result.seconds.toFixed(3), 90, 610);
-    context.fillText(String(Math.round(result.topSpeedKph)), 620, 610);
+    context.fillText(String(Math.round(speedFromKph(result.topSpeedKph, unit))), 620, 610);
     context.fillStyle = "#A7E59A";
     context.font = "600 24px monospace";
     context.fillText(`${runType} // SEC`, 94, 655);
-    context.fillText("TOP SPEED // KPH", 624, 655);
+    context.fillText(`TOP SPEED // ${unitLabel(unit)}`, 624, 655);
     const valid = (result.route || []).filter(
       (sample: any) =>
         Number.isFinite(Number(sample.latitude)) &&
@@ -1409,9 +1415,9 @@ export function Phase3RaceScreen({
               {state} // {runType}
             </Text>
             <Animated.Text style={styles.speedValue}>
-              {speed.toFixed(0)}
+              {speedFromKph(speed, unit).toFixed(0)}
             </Animated.Text>
-            <Text style={styles.speedUnit}>KPH</Text>
+            <Text style={styles.speedUnit}>{unitLabel(unit)}</Text>
             <View style={styles.gpsRow}>
               <Text style={styles.meta}>
                 GPS ACCURACY //{" "}
@@ -1486,7 +1492,7 @@ export function Phase3RaceScreen({
                     label={runType}
                   />
                   <Metric
-                    value={`${Math.round(result.topSpeedKph)} KPH`}
+                    value={formatSpeed(result.topSpeedKph, unit)}
                     label="TOP SPEED"
                   />
                   <Metric
@@ -1503,6 +1509,7 @@ export function Phase3RaceScreen({
                 vehicle={activeVehicle}
                 runType={runType}
                 result={result}
+                unit={unit}
               />
               <View style={styles.actionRow}>
                 <Action
@@ -1533,7 +1540,7 @@ export function Phase3RaceScreen({
                 </View>
                 <View style={styles.metricGrid}>
                   <Metric
-                    value={`${Number(ghostSample?.speedKph || 0).toFixed(0)} KPH`}
+                    value={formatSpeed(Number(ghostSample?.speedKph || 0), unit)}
                     label="PB GHOST SPEED"
                   />
                   <Metric

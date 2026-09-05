@@ -6,8 +6,8 @@ import {
 } from "../functions/lib/android-release-core.mjs";
 
 const release = {
-  version: "1.5.3",
-  versionCode: 18,
+  version: "1.5.4",
+  versionCode: 19,
   commit: "96d98a85c4ac81b74b7560231484c796228d6a0f",
   sha256: "a".repeat(64),
   size: 105_916_330,
@@ -16,7 +16,7 @@ const release = {
 };
 release.objectKey = immutableAndroidReleaseKey(release);
 
-assert.equal(release.objectKey, `android/releases/1.5.3/18/${"a".repeat(64)}/apex-ugr.apk`);
+assert.equal(release.objectKey, `android/releases/1.5.4/19/${"a".repeat(64)}/apex-ugr.apk`);
 assert.equal(validateAndroidReleaseMetadata(release).objectKey, release.objectKey);
 assert.equal(ANDROID_LATEST_POINTER_KEY, "android/releases/latest.json");
 assert.throws(() => validateAndroidReleaseMetadata({ ...release, objectKey: "releases/apex-ugr-latest.apk" }), /not immutable/);
