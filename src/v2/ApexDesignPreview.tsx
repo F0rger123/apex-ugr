@@ -32,6 +32,7 @@ import { useContentStore } from './live/contentStore';
 import {useWorldStore,DeadDrop,RoadReport,Territory,MapReward,GhostReplay,SafeHouse} from './live/worldStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useMessageStore } from '../stores/messageStore';
+import { DeviceDiagnosticsPanel } from './DeviceDiagnosticsPanel';
 import { cloudflareApi, hasCloudflareBackend } from '../config/cloudflareApi';
 import {playEngineSound,playInterfaceSound,setInterfaceAudioEnabled} from '../utils/soundSynthesizer';
 import {Phase3HudEvents,Phase3LeadersScreen,Phase3MeetsScreen,Phase3ProfileScreen,Phase3RaceScreen} from './phase3/Phase3Screens';
@@ -982,6 +983,7 @@ function SettingsScreen(){
     <SectionTitle label="GARAGE + MOD SYNC"/><GlassPanel>{toggle('SYNC MOD PLANNER','mod_sync_enabled')}{divider}{toggle('PART PRICE ALERTS','mod_price_alerts_enabled')}</GlassPanel>
     <SectionTitle label="PRIVACY"/><GlassPanel>{toggle('PROFILE VISIBLE','profile_visibility')}{divider}{toggle('VEHICLES VISIBLE','vehicle_visibility')}{divider}{toggle('APEX ID VISIBLE','apex_id_visibility')}{divider}{toggle('MEET ATTENDANCE VISIBLE','meet_attendance_visibility')}{divider}{toggle('LOCATION SHARING','location_visibility','Live location still expires automatically.')}{divider}<View style={styles.healthRow}><View style={styles.commandCopy}><Text style={styles.commandTitle}>BOUNTY PARTICIPATION</Text><Text style={styles.commandMeta}>OPT-IN · APPROXIMATE SIGNALS · AUTHORIZED VENUES</Text></View><Switch value={bounty} onValueChange={setBounty} trackColor={{false:'#252A26',true:'rgba(167,229,154,.46)'}} thumbColor={bounty?accent:'#D5D9D5'}/></View></GlassPanel>
     <SectionTitle label="ACCOUNT"/><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>APEX ID</Text><Text style={styles.healthGood}>{apexId}</Text></View>{divider}<GlassButton label="LOCK YOURSELF OUT" icon={LockKeyhole} onPress={()=>void signOut()}/></GlassPanel>
+    <SectionTitle label="DEVICE QA" action="LOCAL ONLY"/><DeviceDiagnosticsPanel/>
     <SectionTitle label="ABOUT"/><GlassPanel><View style={styles.healthRow}><Text style={styles.identityLabel}>APP</Text><Text style={styles.commandMeta}>{APP_VERSION}</Text></View>{divider}<View style={styles.healthRow}><Text style={styles.identityLabel}>ANDROID BUILD</Text><Text style={styles.commandMeta}>{ANDROID_VERSION_CODE}</Text></View>{divider}<AndroidDownloadButton/></GlassPanel>
     {status?<Text style={status.includes('SECURED')?styles.healthGood:styles.networkError}>{status}</Text>:null}<GlassButton label={busy?'SAVING':'SAVE SETTINGS'} icon={Check} onPress={()=>void save()} active/>
   </ScrollView>;
