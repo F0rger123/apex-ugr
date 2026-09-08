@@ -54,8 +54,9 @@ async function main() {
 
   const exhaustedVerification = await call("invite/verify", { method: "POST", body: { code: invite.payload.code } });
   const blockedThird = await createUser(`invite-third-${suffix}@example.test`, invite.payload.code);
-  assert.equal(exhaustedVerification.status, 404);
-  assert.equal(blockedThird.status, 403);
+  assert.equal(exhaustedVerification.status, 409);
+  assert.equal(exhaustedVerification.payload.reason, "INVITE_MAX_USE");
+  assert.equal(blockedThird.status, 409);
 
   const ownerCodes = await call("invites", { token: ownerToken });
   const savedInvite = ownerCodes.payload.codes.find((entry) => entry.id === invite.payload.id);
@@ -75,7 +76,31 @@ async function main() {
   const disabled = await call(`invites/${childInvite.payload.id}/toggle`, { token: first.payload.token, method: "POST" });
   assert.equal(disabled.status, 200);
   const disabledVerification = await call("invite/verify", { method: "POST", body: { code: childInvite.payload.code } });
-  assert.equal(disabledVerification.status, 404);
+  assert.equal(disabledVerification.status, 403);
+  assert.equal(disabledVerification.payload.reason, "INVITE_DISABLED");
+
+  const expiredInvite = await call("invites", {
+    token: ownerToken,
+    method: "POST",
+    body: { label: "EXPIRED QA", maxUses: 1, expiresAt: new Date(Date.now() - 60_000).toISOString() },
+  });
+  assert.equal(expiredInvite.status, 201);
+  const expiredVerification = await call("invite/verify", { method: "POST", body: { code: expiredInvite.payload.code } });
+  assert.equal(expiredVerification.status, 410);
+  assert.equal(expiredVerification.payload.reason, "INVITE_EXPIRED");
+
+  const oneTimeInvite = await call("invites", {
+    token: ownerToken,
+    method: "POST",
+    body: { label: "ONE TIME QA", maxUses: 1, burnAfterUse: true },
+  });
+  assert.equal(oneTimeInvite.status, 201);
+  const concurrent = await Promise.all([
+    createUser(`invite-race-a-${suffix}@example.test`, oneTimeInvite.payload.code),
+    createUser(`invite-race-b-${suffix}@example.test`, oneTimeInvite.payload.code),
+  ]);
+  assert.equal(concurrent.filter(result => result.status === 201).length, 1);
+  assert.equal(concurrent.filter(result => [403, 409].includes(result.status)).length, 1);
 
   console.log(JSON.stringify({
     status: "pass",
@@ -84,6 +109,8 @@ async function main() {
     memberSharing: "verified",
     redemptionVisibility: "verified",
     disabledCode: "rejected",
+    expiredCode: "distinct",
+    concurrency: "single-redemption",
   }));
 }
 

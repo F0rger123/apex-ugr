@@ -25,6 +25,12 @@ interface Env {
   EBAY_DELETION_VERIFICATION_TOKEN?: string;
   EBAY_DELETION_ENDPOINT?: string;
   RELEASE_UPLOAD_TOKEN?: string;
+  APEX_ENVIRONMENT?: string;
+  APEX_D1_NAME?: string;
+  APEX_R2_BUCKET?: string;
+  CF_PAGES_BRANCH?: string;
+  CF_PAGES_COMMIT_SHA?: string;
+  CF_PAGES_URL?: string;
 }
 
 type UserRow = {
@@ -51,8 +57,40 @@ const cors = {
 };
 
 const DEVELOPER_EMAIL = "drummerforger@gmail.com";
+const CURRENT_SAFETY_DISCLAIMER_VERSION = "2026-08-private-venue-v1";
 const ROOT_ACCESS_CODE_HASH = "99058ecddbda00f3f64ad04188dd0e941f1902e7266c8e2cf13ab9a9aa5ca718";
+const PRODUCTION_D1_NAME = "apex-ugr-db";
+const PRODUCTION_R2_BUCKET = "apex-ugr-media";
+const QA_D1_NAME = "apex-ugr-pr23-qa";
+const QA_R2_BUCKET = "apex-ugr-pr23-qa-media";
 type AndroidReleaseMetadata = ReturnType<typeof validateAndroidReleaseMetadata>;
+
+function runtimeEnvironment(env: Env) {
+  return (env.APEX_ENVIRONMENT || (env.CF_PAGES_URL?.includes("apex-ugr-pr23-qa") ? "QA" : "PROD")).toUpperCase();
+}
+
+function bindingReport(env: Env) {
+  const environment = runtimeEnvironment(env);
+  const isolatedQaProject = Boolean(env.CF_PAGES_URL?.includes("apex-ugr-pr23-qa"));
+  return {
+    environment,
+    d1: env.APEX_D1_NAME || (environment === "QA" && isolatedQaProject ? QA_D1_NAME : "DB"),
+    r2: env.APEX_R2_BUCKET || (environment === "QA" && isolatedQaProject ? QA_R2_BUCKET : "MEDIA"),
+    branch: env.CF_PAGES_BRANCH || null,
+    commit: env.CF_PAGES_COMMIT_SHA || null,
+    pagesUrl: env.CF_PAGES_URL || null,
+  };
+}
+
+function qaBindingProblem(env: Env) {
+  const report = bindingReport(env);
+  if (report.environment !== "QA") return null;
+  if (report.d1 === PRODUCTION_D1_NAME) return `QA runtime is bound to Production D1 (${PRODUCTION_D1_NAME}).`;
+  if (report.r2 === PRODUCTION_R2_BUCKET) return `QA runtime is bound to Production R2 (${PRODUCTION_R2_BUCKET}).`;
+  if (report.d1 !== QA_D1_NAME) return `QA runtime D1 name is not the expected isolated database (${QA_D1_NAME}).`;
+  if (report.r2 !== QA_R2_BUCKET) return `QA runtime R2 bucket is not the expected isolated bucket (${QA_R2_BUCKET}).`;
+  return null;
+}
 
 async function currentAndroidRelease(env: Env) {
   const pointer = await env.MEDIA.get(ANDROID_LATEST_POINTER_KEY);
@@ -96,6 +134,25 @@ async function createUniqueInviteCode(env: Env) {
     (await env.DB.prepare("SELECT 1 found FROM invite_codes WHERE REPLACE(code,'-','')=?").bind(code).first())
   ) code = createInviteCode();
   return code;
+}
+
+async function inviteCodeState(env: Env, rawCode: string) {
+  const code = normalizeInviteCode(rawCode);
+  if (!code) return { ok: false as const, status: 404, code, reason: "INVITE_INVALID", error: "Access code was not found." };
+  if (await isRootAccessCode(code))
+    return {
+      ok: true as const,
+      code,
+      invite: { id: "root", label: "APEX ROOT ACCESS", max_uses: 9999, use_count: 0, expires_at: null, is_active: 1, burn_after_use: 0 },
+    };
+  const invite = await env.DB.prepare(`SELECT id,label,max_uses,use_count,expires_at,is_active,burn_after_use FROM invite_codes WHERE REPLACE(code,'-','')=?`)
+    .bind(code)
+    .first<{ id: string; label: string; max_uses: number; use_count: number; expires_at: string | null; is_active: number; burn_after_use: number }>();
+  if (!invite) return { ok: false as const, status: 404, code, reason: "INVITE_INVALID", error: "Access code was not found." };
+  if (!invite.is_active) return { ok: false as const, status: 403, code, reason: "INVITE_DISABLED", error: "Access code is disabled." };
+  if (invite.expires_at && Date.parse(invite.expires_at) <= Date.now()) return { ok: false as const, status: 410, code, reason: "INVITE_EXPIRED", error: "Access code has expired." };
+  if (Number(invite.use_count) >= Number(invite.max_uses)) return { ok: false as const, status: 409, code, reason: "INVITE_MAX_USE", error: "Access code has reached its limit." };
+  return { ok: true as const, code, invite };
 }
 
 let ebayAccessToken: { value: string; expiresAt: number } | null = null;
@@ -656,8 +713,19 @@ async function vehicleCatalog(year: string | null, make: string | null) {
 async function handle(request: Request, env: Env, path: string) {
   const method = request.method;
   if (method === "OPTIONS") return new Response(null, { headers: cors });
-  if (path === "health") return json({ status: "live", backend: "cloudflare", storage: "d1+r2" });
+  const bindings = bindingReport(env);
+  const qaProblem = qaBindingProblem(env);
+  if (path === "health") return json({
+    status: "live",
+    backend: "cloudflare",
+    storage: "d1+r2",
+    ...bindings,
+    bindingStatus: qaProblem ? "blocked" : "ok",
+    bindingError: qaProblem,
+  });
+  if (qaProblem) return json({ error: "QA binding safety check failed.", code: "QA_BINDING_MISMATCH" }, 500);
   if (path === "download/android" && (method === "GET" || method === "HEAD")) {
+    if (bindings.environment === "QA") return json({ error: "Public Android download is disabled in QA builds.", code: "QA_DOWNLOAD_DISABLED" }, 403);
     const rangeHeader = request.headers.get("range");
     const release = await currentAndroidRelease(env);
     const object = await env.MEDIA.get(release.objectKey, rangeHeader ? { range: request.headers } : undefined);
@@ -775,21 +843,9 @@ async function handle(request: Request, env: Env, path: string) {
 
   if (path === "invite/verify" && method === "POST") {
     const body = await request.json<{ code?: string }>();
-    const code = normalizeInviteCode(body.code || "");
-    if (await isRootAccessCode(code))
-      return json({
-        valid: true,
-        label: "APEX ROOT ACCESS",
-        remaining: 9999,
-        expiresAt: null,
-      });
-    const invite = await env.DB.prepare(`SELECT label,max_uses,use_count,expires_at FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code, new Date().toISOString()).first<{
-      label: string;
-      max_uses: number;
-      use_count: number;
-      expires_at: string | null;
-    }>();
-    if (!invite) return json({ error: "Access code is invalid, expired, or fully redeemed." }, 404);
+    const state = await inviteCodeState(env, body.code || "");
+    if (!state.ok) return json({ error: state.error, reason: state.reason }, state.status);
+    const invite = state.invite;
     return json({
       valid: true,
       label: invite.label,
@@ -834,12 +890,12 @@ async function handle(request: Request, env: Env, path: string) {
           error: "An account already exists for that email. Sign in instead or use another email.",
         },
         409,
-      );
+    );
     let invite: { id: string; burn_after_use: number } | null = null;
     if (email !== DEVELOPER_EMAIL && !(await isRootAccessCode(body.inviteCode || ""))) {
-      const code = normalizeInviteCode(body.inviteCode || "");
-      invite = await env.DB.prepare(`SELECT id,burn_after_use FROM invite_codes WHERE REPLACE(code,'-','')=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(code, new Date().toISOString()).first<{ id: string; burn_after_use: number }>();
-      if (!invite) return json({ error: "A valid private access code is required." }, 403);
+      const state = await inviteCodeState(env, body.inviteCode || "");
+      if (!state.ok) return json({ error: state.error, reason: state.reason }, state.status === 404 ? 403 : state.status);
+      invite = { id: state.invite.id, burn_after_use: Number(state.invite.burn_after_use || 0) };
       const reserved = await env.DB.prepare(`UPDATE invite_codes SET use_count=use_count+1 WHERE id=? AND is_active=1 AND use_count<max_uses AND (expires_at IS NULL OR expires_at>?)`).bind(invite.id, new Date().toISOString()).run();
       if (!reserved.meta.changes) return json({ error: "This access code has reached its limit." }, 409);
     }
@@ -1164,15 +1220,26 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === "vehicles" && method === "POST") {
     const body = await request.json<Record<string, string | number>>();
     if (!Number.isInteger(Number(body.year)) || !body.make || !body.model) return json({ error: "Year, make, and model are required." }, 400);
+    const rawVehicleType = body.vehicleType === undefined || body.vehicleType === null || body.vehicleType === "" ? "CAR" : String(body.vehicleType).toUpperCase();
+    if (!["CAR", "MOTORCYCLE"].includes(rawVehicleType)) return json({ error: "Vehicle type must be CAR or MOTORCYCLE." }, 400);
+    const vehicleType = rawVehicleType as "CAR" | "MOTORCYCLE";
     const id = crypto.randomUUID();
     const existing = await env.DB.prepare("SELECT COUNT(*) count FROM vehicles WHERE user_id=?").bind(user.id).first<{ count: number }>();
     await env.DB.prepare(
-      `INSERT INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,photo_url,is_active)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO vehicles(id,user_id,nickname,year,make,model,trim,engine,drivetrain,horsepower,color,photo_url,is_active,vehicle_type,displacement_cc)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
-      .bind(id, user.id, body.nickname || `${body.make} ${body.model}`, Number(body.year), body.make, body.model, body.trim || null, body.engine || null, body.drivetrain || null, Number(body.horsepower) || 0, body.color || null, body.photoUrl || null, existing?.count ? 0 : 1)
+      .bind(id, user.id, body.nickname || `${body.make} ${body.model}`, Number(body.year), body.make, body.model, body.trim || null, body.engine || null, body.drivetrain || null, Number(body.horsepower) || 0, body.color || null, body.photoUrl || null, existing?.count ? 0 : 1, vehicleType, Number(body.displacementCc) || null)
       .run();
     return json({ id }, 201);
+  }
+  if (path === "disclaimer" && method === "GET") {
+    const acceptance = await env.DB.prepare("SELECT accepted_at FROM user_disclaimer_acceptances WHERE user_id=? AND disclaimer_version=?").bind(user.id, CURRENT_SAFETY_DISCLAIMER_VERSION).first<{ accepted_at: string }>();
+    return json({ version: CURRENT_SAFETY_DISCLAIMER_VERSION, accepted: Boolean(acceptance), acceptedAt: acceptance?.accepted_at || null });
+  }
+  if (path === "disclaimer/accept" && method === "POST") {
+    await env.DB.prepare("INSERT OR IGNORE INTO user_disclaimer_acceptances(user_id,disclaimer_version) VALUES(?,?)").bind(user.id, CURRENT_SAFETY_DISCLAIMER_VERSION).run();
+    return json({ version: CURRENT_SAFETY_DISCLAIMER_VERSION, accepted: true });
   }
   const activateVehicle = path.match(/^vehicles\/([^/]+)\/active$/);
   if (activateVehicle && method === "POST") {
@@ -1215,10 +1282,12 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === "location" && method === "POST") {
     const body = await request.json<Record<string, number | string | boolean | null>>();
     if (!Number.isFinite(Number(body.latitude)) || !Number.isFinite(Number(body.longitude))) return json({ error: "Valid latitude and longitude are required." }, 400);
+    const accuracyM = Number(body.accuracy),
+      sampleAgeMs = Number(body.sampleAgeMs);
+    if (!Number.isFinite(sampleAgeMs) || sampleAgeMs < 0 || sampleAgeMs > 60_000 || (Number.isFinite(accuracyM) && accuracyM > 120))
+      return json({ error: "A fresher, more precise GPS fix is required." }, 422);
     if (body.driveMode) {
-      const accuracy = Number(body.accuracy),
-        sampleAgeMs = Number(body.sampleAgeMs);
-      if (!Number.isFinite(accuracy) || accuracy <= 0 || accuracy > 65 || !Number.isFinite(sampleAgeMs) || sampleAgeMs < 0 || sampleAgeMs > 10_000)
+      if (!Number.isFinite(accuracyM) || accuracyM <= 0 || accuracyM > 65 || sampleAgeMs > 10_000)
         return json({ error: "Driver Mode requires a fresh, precise GPS fix." }, 422);
     }
     const shareMinutes = Math.min(120, Math.max(5, Math.floor(Number(body.shareMinutes) || 15)));
@@ -1229,7 +1298,7 @@ async function handle(request: Request, env: Env, path: string) {
       `INSERT INTO driver_locations(user_id,vehicle_id,latitude,longitude,accuracy_m,altitude_m,speed_kph,heading,drive_mode,cruise_id,expires_at,updated_at)
       VALUES(?,COALESCE(?,(SELECT id FROM vehicles WHERE user_id=? AND is_active=1 LIMIT 1)),?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=excluded.vehicle_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,altitude_m=excluded.altitude_m,speed_kph=excluded.speed_kph,heading=excluded.heading,drive_mode=excluded.drive_mode,cruise_id=excluded.cruise_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP`,
     )
-      .bind(user.id, body.vehicleId || null, user.id, Number(body.latitude), Number(body.longitude), body.accuracy ?? null, body.altitude ?? null, body.speedKph || 0, body.heading || 0, body.driveMode ? 1 : 0, body.cruiseId || null, expires)
+      .bind(user.id, body.vehicleId || null, user.id, Number(body.latitude), Number(body.longitude), Number.isFinite(accuracyM) ? accuracyM : null, body.altitude ?? null, body.speedKph || 0, body.heading || 0, body.driveMode ? 1 : 0, body.cruiseId || null, expires)
       .run();
     if (body.driveMode && typeof body.driveSessionId === "string" && body.driveSessionId.length >= 8) {
       await env.DB.prepare(`INSERT INTO drive_trace_points(user_id,session_id,latitude,longitude,speed_kph,heading) SELECT ?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM drive_trace_points WHERE user_id=? AND session_id=? AND captured_at>datetime('now','-4 seconds'))`)
@@ -1243,8 +1312,18 @@ async function handle(request: Request, env: Env, path: string) {
       longitude = Number(body.longitude),
       cellLat = Math.round(latitude * 500),
       cellLng = Math.round(longitude * 500);
-    const discovery = await env.DB.prepare("INSERT OR IGNORE INTO map_discoveries(user_id,cell_lat,cell_lng,latitude,longitude) VALUES(?,?,?,?,?)").bind(user.id, cellLat, cellLng, latitude, longitude).run();
-    if (discovery.meta.changes) await env.DB.prepare("UPDATE users SET heat=MIN(100,heat+2),heat_updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(user.id).run();
+    const discoveryStatements = [];
+    for (let latOffset = -1; latOffset <= 1; latOffset++) {
+      for (let lngOffset = -1; lngOffset <= 1; lngOffset++) {
+        const nextCellLat = cellLat + latOffset,
+          nextCellLng = cellLng + lngOffset;
+        discoveryStatements.push(
+          env.DB.prepare("INSERT OR IGNORE INTO map_discoveries(user_id,cell_lat,cell_lng,latitude,longitude) VALUES(?,?,?,?,?)").bind(user.id, nextCellLat, nextCellLng, nextCellLat / 500, nextCellLng / 500),
+        );
+      }
+    }
+    const discoveries = await env.DB.batch(discoveryStatements);
+    if (discoveries.some((result) => result.meta.changes)) await env.DB.prepare("UPDATE users SET heat=MIN(100,heat+2),heat_updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(user.id).run();
     const nearbyDrops = await env.DB.prepare(`SELECT d.* FROM dead_drops d LEFT JOIN dead_drop_claims c ON c.drop_id=d.id AND c.user_id=? WHERE d.is_active=1 AND c.drop_id IS NULL`).bind(user.id).all<Record<string, unknown>>();
     const reachedDrops = nearbyDrops.results.filter((drop) => distanceMeters(latitude, longitude, Number(drop.latitude), Number(drop.longitude)) <= Number(drop.radius_m));
     const claimed: Record<string, unknown>[] = [];
@@ -1258,7 +1337,7 @@ async function handle(request: Request, env: Env, path: string) {
       }
     }
     const activeRewardCount = await env.DB.prepare(`SELECT COUNT(*) count FROM map_rewards r LEFT JOIN map_reward_claims c ON c.reward_id=r.id AND c.user_id=? WHERE r.owner_id=? AND r.expires_at>? AND c.reward_id IS NULL`).bind(user.id, user.id, new Date().toISOString()).first<{ count: number }>();
-    const rewardsToSpawn = (activeRewardCount?.count || 0) === 0 ? 8 : 0;
+    const rewardsToSpawn = (activeRewardCount?.count || 0) === 0 ? 18 : 0;
     if (rewardsToSpawn) {
       const rewardStatements = [],
         regionLat = Math.round(latitude * 4) / 4,
@@ -3646,7 +3725,7 @@ async function handle(request: Request, env: Env, path: string) {
     if (!ownedVehicle) return json({ error: "Vehicle was not found in your garage." }, 404);
 
     if (method === "GET") {
-      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? AND user_id = ? ORDER BY created_at DESC`).bind(vehicleId, user.id).all();
+      const rows = await env.DB.prepare(`SELECT * FROM mod_wishlist WHERE vehicle_id = ? AND user_id = ? ORDER BY installed ASC, sort_order ASC, created_at DESC`).bind(vehicleId, user.id).all();
       return json({ wishlist: rows.results });
     }
 
@@ -3657,15 +3736,16 @@ async function handle(request: Request, env: Env, path: string) {
       const id = body.id || crypto.randomUUID();
       await env.DB.prepare(
         `
-        INSERT INTO mod_wishlist (id, vehicle_id, user_id, part, brand, category, price, url, priority, notes, purchased, installed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO mod_wishlist (id, vehicle_id, user_id, part, brand, category, price, url, priority, notes, purchased, installed, installed_at, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           part = excluded.part, brand = excluded.brand, category = excluded.category,
           price = excluded.price, url = excluded.url, priority = excluded.priority,
-          notes = excluded.notes, purchased = excluded.purchased, installed = excluded.installed
+          notes = excluded.notes, purchased = excluded.purchased, installed = excluded.installed,
+          installed_at = excluded.installed_at, sort_order = excluded.sort_order
       `,
       )
-        .bind(id, vehicleId, user.id, body.part, body.brand || "", body.category || "Other", Number(body.price) || 0, body.url || "", body.priority || "MEDIUM", body.notes || "", body.purchased ? 1 : 0, body.installed ? 1 : 0)
+        .bind(id, vehicleId, user.id, body.part, body.brand || "", body.category || "Other", Number(body.price) || 0, body.url || "", body.priority || "MEDIUM", body.notes || "", body.purchased ? 1 : 0, body.installed ? 1 : 0, body.installed ? (body.installedAt || new Date().toISOString()) : null, Math.max(0, Number(body.sortOrder) || 0))
         .run();
 
       return json({ success: true, id });

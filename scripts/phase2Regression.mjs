@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   BOUNTY_DEFAULTS, CANONICAL_RARITIES, RANK_CURVE, bountyWindow, captureProgress, deterministicIndex,
   frequencyForProgress, hunterWaveForStar, nextSerial, npcPosition, rankForRep, rankTrialEligible, rewardForStar,
   signalForDistance, starForElapsed,
 } from '../functions/lib/phase2-core.mjs';
+
+const root = resolve(import.meta.dirname, '..');
+const phase2Api = readFileSync(resolve(root, 'functions/lib/phase2-api.mjs'), 'utf8');
+assert.match(phase2Api, /const NPC_POOL/);
+assert.match(phase2Api, /NPC \$\{targetNpc\.archetype\}/);
+assert.match(phase2Api, /NPC \$\{npc\.archetype\}/);
+assert.match(phase2Api, /2022 Yamaha MT-10/);
 
 const window = bountyWindow(Date.UTC(2026, 7, 22, 7, 24, 13));
 assert.equal(new Date(window.startMs).toISOString(), '2026-08-22T06:00:00.000Z');

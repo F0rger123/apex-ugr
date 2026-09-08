@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 const base = process.env.APEX_QA_URL || "http://127.0.0.1:8791/api";
+const qaPasswords = ["Phase3-QA-Password!", "Invite-QA-Password!"];
 
 async function call(path, { token, method = "GET", body } = {}) {
   const response = await fetch(`${base}/${path}`, {
@@ -17,13 +18,14 @@ async function call(path, { token, method = "GET", body } = {}) {
 
 async function main() {
   const suffix = Date.now();
-  const developer = await call("auth/signup", {
-    method: "POST",
-    body: { email: "drummerforger@gmail.com", password: "Phase3-QA-Password!" },
-  });
-  const devSession = developer.status === 409
-    ? await call("auth/signin", { method: "POST", body: { email: "drummerforger@gmail.com", password: "Phase3-QA-Password!" } })
-    : developer;
+  const developer = await call("auth/signup", { method: "POST", body: { email: "drummerforger@gmail.com", password: qaPasswords[0] } });
+  let devSession = developer;
+  if (developer.status === 409) {
+    for (const password of qaPasswords) {
+      devSession = await call("auth/signin", { method: "POST", body: { email: "drummerforger@gmail.com", password } });
+      if (devSession.status === 200) break;
+    }
+  }
   assert.equal(devSession.status, 201 === developer.status ? 201 : 200);
   const devToken = devSession.payload.token;
   const devId = devSession.payload.user.id;
