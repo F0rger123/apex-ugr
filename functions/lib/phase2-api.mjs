@@ -51,6 +51,23 @@ function destinationPoint(latitude, longitude, distanceMeters, bearingDegrees) {
   return { latitude: lat2 * 180 / Math.PI, longitude: lng2 * 180 / Math.PI };
 }
 
+const NPC_POOL = Object.freeze([
+  { callsign: 'GHOST ZERO', archetype: 'RUNNER', vehicle: '1999 Nissan Skyline GT-R', color: 'Midnight Purple', speed: 58, reward: 1.2 },
+  { callsign: 'VOIDSHIFT', archetype: 'GHOST', vehicle: '2006 Mitsubishi Lancer Evolution IX', color: 'Graphite', speed: 54, reward: 1.05 },
+  { callsign: 'NIGHTWIRE', archetype: 'SPRINTER', vehicle: '2020 Toyota Supra', color: 'Black', speed: 62, reward: 1.15 },
+  { callsign: 'IRON VEIL', archetype: 'HEAVY', vehicle: '2018 Dodge Challenger Hellcat', color: 'White', speed: 49, reward: 1.25 },
+  { callsign: 'LOW SIGNAL', archetype: 'SCOUT', vehicle: '2023 BMW M2', color: 'Brooklyn Grey', speed: 52, reward: 1 },
+  { callsign: 'BLACKOUT', archetype: 'NIGHT DRIVER', vehicle: '2017 Audi RS3', color: 'Nardo Grey', speed: 55, reward: 1.1 },
+  { callsign: 'DEADLINE', archetype: 'VETERAN', vehicle: '2015 Porsche 911 Turbo S', color: 'Basalt Black', speed: 60, reward: 1.35 },
+  { callsign: 'HALO CUT', archetype: 'SPRINTER', vehicle: '2022 Yamaha MT-10', color: 'Cyan Storm', speed: 57, reward: 1.05 },
+  { callsign: 'GLASS RUN', archetype: 'SCOUT', vehicle: '2021 Kawasaki Ninja ZX-10R', color: 'Lime Black', speed: 61, reward: 1.15 },
+  { callsign: 'CIPHER', archetype: 'GHOST', vehicle: '2016 Mercedes-AMG C63 S', color: 'Obsidian', speed: 53, reward: 1.08 },
+]);
+
+function npcProfile(seed, offset = 0) {
+  return NPC_POOL[deterministicIndex(`${seed}:${offset}`, NPC_POOL.length)];
+}
+
 async function roadRoute(anchor, seed) {
   const bearing = deterministicIndex(seed, 360);
   const a = destinationPoint(anchor.latitude, anchor.longitude, 4500, bearing);
@@ -103,10 +120,11 @@ async function ensureEvent(env, requestingUserId) {
     const useHuman = humans.length >= Number(cfg.minimumHumans || 2);
     const selected = useHuman ? humans[deterministicIndex(window.key, humans.length)] : null;
     const actorId = `${window.key}-target`;
+    const targetNpc = npcProfile(window.key, 0);
     const route = selected ? [] : await roadRoute(anchor, `${window.key}-target`);
     await env.DB.batch([
       env.DB.prepare(`INSERT OR IGNORE INTO bounty_actors(id,event_id,actor_type,role,user_id,display_name,vehicle_label,status,route_json,route_started_at,speed_kph,latitude,longitude,location_updated_at)
-        VALUES(?,?,?,'target',?,?,?,?,?,?,52,?,?,?)`).bind(actorId, window.key, selected ? 'human' : 'npc', selected?.id || null, selected?.username || 'GHOST ZERO', selected ? [selected.year, selected.make, selected.model].filter(Boolean).join(' ') || 'VEHICLE UNKNOWN' : 'NPC // BLACK COUPE', 'active', JSON.stringify(route), startsAtFor(event), Number(anchor.latitude), Number(anchor.longitude), new Date(now).toISOString()),
+        VALUES(?,?,?,'target',?,?,?,?,?,?,?,?,?,?)`).bind(actorId, window.key, selected ? 'human' : 'npc', selected?.id || null, selected?.username || targetNpc.callsign, selected ? [selected.year, selected.make, selected.model].filter(Boolean).join(' ') || 'VEHICLE UNKNOWN' : `NPC ${targetNpc.archetype} // ${targetNpc.color} ${targetNpc.vehicle}`, 'active', JSON.stringify(route), startsAtFor(event), selected ? 52 : targetNpc.speed, Number(anchor.latitude), Number(anchor.longitude), new Date(now).toISOString()),
       env.DB.prepare('UPDATE bounty_world_events SET target_actor_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND target_actor_id IS NULL').bind(actorId, window.key),
     ]);
     await ensureNpcHunters(env, event, route, anchor, hunterWaveForStar(1, cfg.hunterWaves), now);
@@ -129,10 +147,11 @@ async function ensureNpcHunters(env, event, targetRoute, anchor, desired, now) {
   for (let index = 0; index < missing; index++) {
     const ordinal = Number(current?.count || 0) + index + 1;
     const id = `${event.id}-npc-h${ordinal}`;
+    const npc = npcProfile(event.id, ordinal);
     let route = targetRoute;
     if (!route?.length) route = await roadRoute(anchor, id);
     await env.DB.prepare(`INSERT OR IGNORE INTO bounty_actors(id,event_id,actor_type,role,display_name,vehicle_label,status,route_json,route_started_at,speed_kph,latitude,longitude,location_updated_at)
-      VALUES(?,?,'npc','hunter',?,?,'active',?,?,?,?,?,?)`).bind(id, event.id, `SPECTER ${String(ordinal).padStart(2, '0')}`, 'NPC // INTERCEPTOR', JSON.stringify(route), new Date(parseTime(event.starts_at) + ordinal * 45000).toISOString(), 48 + ordinal * 1.5, Number(anchor.latitude), Number(anchor.longitude), new Date(now).toISOString()).run();
+      VALUES(?,?,'npc','hunter',?,?,'active',?,?,?,?,?,?)`).bind(id, event.id, `${npc.callsign} ${String(ordinal).padStart(2, '0')}`, `NPC ${npc.archetype} // ${npc.color} ${npc.vehicle}`, JSON.stringify(route), new Date(parseTime(event.starts_at) + ordinal * 45000).toISOString(), npc.speed + Math.min(8, ordinal * 0.8), Number(anchor.latitude), Number(anchor.longitude), new Date(now).toISOString()).run();
   }
 }
 

@@ -38,6 +38,8 @@ assert.match(liveStore, /AsyncStorage\.setItem\(UNIT_KEY,next\)/);
 
 assert.match(liveStore, /const LOCATION_MAX_AGE_MS=15\*60_000/);
 assert.match(liveStore, /const REVEAL_ORIGIN_MAX_AGE_MS=24\*60\*60_000/);
+assert.match(liveStore, /const LIVE_LOCATION_MAX_AGE_MS=30_000/);
+assert.match(liveStore, /function shouldAcceptMovement/);
 assert.match(liveStore, /isFreshCoordinate\(parsed,LOCATION_MAX_AGE_MS\)/);
 assert.match(liveStore, /isFreshCoordinate\(parsed,REVEAL_ORIGIN_MAX_AGE_MS\)/);
 assert.match(liveStore, /AsyncStorage\.removeItem\(LOCATION_KEY\)/);
@@ -47,5 +49,13 @@ assert.match(app, /lastFollowRevisionRef/);
 assert.match(app, /const firstLock=lastFollowRevisionRef\.current!==followRevision/);
 assert.match(app, /firstLock\?\{center:\{latitude:location\.latitude,longitude:location\.longitude\},pitch:42,heading:location\.heading\|\|0,zoom:16\}:\{center:\{latitude:location\.latitude,longitude:location\.longitude\},heading:location\.heading\|\|0\}/);
 assert.doesNotMatch(app, /animateCamera\(\{center:\{latitude:location\.latitude,longitude:location\.longitude\},zoom:17/);
+assert.match(app, /projectedFogOverlay/);
+assert.match(app, /map\.createPane\('fogPane'\)/);
+assert.match(app, /L\.imageOverlay\(url,bounds,\{pane:'fogPane'/);
+assert.doesNotMatch(app, /document\.body\.appendChild\(canvas\)/);
+assert.match(app, /sourceSignature=`\$\{mode\}:\$\{drivers\.length\}:\$\{events\.length\}:\$\{routeCoordinates\.length\}:\$\{routeStops\.length\}:\$\{rewards\.length\}:\$\{drops\.length\}:\$\{reports\.length\}:\$\{safeHouses\.length\}:\$\{discoveries\.length\}`/);
+assert.match(app, /require\('\.\/assets\/apex-lock-reference\.png'\)/);
+assert.match(app, /photoLockGlow/);
+assert.match(app, /photoKeypad/);
 
 console.log("Physical Android QA source regressions passed.");
