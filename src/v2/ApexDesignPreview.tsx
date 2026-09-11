@@ -601,7 +601,15 @@ function RadarMap({
     return (
       <View style={styles.mapFrame}>
         {React.createElement('iframe', {
-          key: `${mode}-${followRevision}-${fitAll}-${revealOrigin?.latitude.toFixed(4)||'none'}-${discoveries.length}-${rewards.length}-${drops.length}`,
+          // Only `mode` (street/satellite) actually needs a fresh browsing
+          // context -- it swaps the tile provider and CSS filter baked into
+          // <head>. Every other value here (discoveries, rewards, drops,
+          // follow/fit state, reveal origin) is already re-baked into
+          // `srcDoc` on every render; keying on their counts was forcing
+          // React to destroy and recreate the whole iframe -- a full Leaflet
+          // re-init and tile refetch -- on ordinary GPS/fog/network updates
+          // instead of just updating the existing element's content.
+          key: mode,
           srcDoc: mapDocument.replace('</body>',worldOverlay.replace('t.unlocked?.16:.28','t.unlocked?0.16:0.28')+canvasFogOverlay+smoothFogOverlay+driveTraceOverlay+rewardReplayOverlay+routeFitOverlay+'</body>'),
           title: 'Apex Map',
           style: { width: '100%', height: '100%', border: 0 },
