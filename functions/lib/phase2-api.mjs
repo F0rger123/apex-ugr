@@ -633,8 +633,17 @@ export async function handlePhase2({ request, env, user, path, method }) {
       ownershipUpdates.push(statements.length);
       statements.push(env.DB.prepare('UPDATE cosmetic_instances SET owner_user_id=? WHERE id=? AND owner_user_id=?').bind(user.id, item.instance_id, item.from_user_id));
       statements.push(env.DB.prepare(`INSERT OR IGNORE INTO ghost_inventory(user_id,item_id,acquired_source,purchase_price_gc) VALUES(?,?,'trade',0)`).bind(user.id, item.item_id));
-      statements.push(env.DB.prepare('DELETE FROM ghost_equipped_items WHERE user_id=? AND item_id=?').bind(item.from_user_id, item.item_id));
-      statements.push(env.DB.prepare('DELETE FROM ghost_inventory WHERE user_id=? AND item_id=?').bind(item.from_user_id, item.item_id));
+      // ghost_inventory/ghost_equipped_items are one row per (user,item TYPE),
+      // but a tradeable item can have multiple serialized instances
+      // (cosmetic_instances) -- only clear the sender's ownership/equip row
+      // once they no longer hold ANY instance of this item, otherwise trading
+      // away one copy would wrongly wipe out a still-owned second copy. The
+      // NOT EXISTS also makes this correct even if the ownership UPDATE above
+      // no-opped (e.g. a concurrent trade already moved this instance): it
+      // reflects the sender's real current holdings, not just this request's
+      // outcome.
+      statements.push(env.DB.prepare('DELETE FROM ghost_equipped_items WHERE user_id=? AND item_id=? AND NOT EXISTS(SELECT 1 FROM cosmetic_instances WHERE owner_user_id=? AND item_id=?)').bind(item.from_user_id, item.item_id, item.from_user_id, item.item_id));
+      statements.push(env.DB.prepare('DELETE FROM ghost_inventory WHERE user_id=? AND item_id=? AND NOT EXISTS(SELECT 1 FROM cosmetic_instances WHERE owner_user_id=? AND item_id=?)').bind(item.from_user_id, item.item_id, item.from_user_id, item.item_id));
     }
     statements.push(env.DB.prepare('DELETE FROM cosmetic_trade_items WHERE trade_id=?').bind(tradeId));
     const results = await env.DB.batch(statements);
