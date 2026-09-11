@@ -1075,7 +1075,7 @@ function FeedVideo({uri,active,muted}:{uri:string;active:boolean;muted:boolean})
   const seek=async(value:number)=>{await video.current?.setPositionAsync(value);};
   const time=(value:number)=>`${Math.floor(value/60000)}:${String(Math.floor((value%60000)/1000)).padStart(2,'0')}`;
   return <View style={StyleSheet.absoluteFill}>
-    <Video ref={video} source={{uri}} style={StyleSheet.absoluteFill} resizeMode={ResizeMode.COVER} shouldPlay={active} isLooping={false} isMuted={muted} progressUpdateIntervalMillis={250} onPlaybackStatusUpdate={update}/>
+    <Video ref={video} source={{uri}} style={StyleSheet.absoluteFill} pointerEvents="none" resizeMode={ResizeMode.COVER} shouldPlay={active} isLooping={false} isMuted={muted} progressUpdateIntervalMillis={250} onPlaybackStatusUpdate={update}/>
     <View style={styles.feedVideoControls}>
       <Pressable accessibilityLabel={status.playing?'Pause video':'Play video'} onPress={()=>void toggle()} style={styles.feedVideoButton}>{status.finished?<RotateCcw size={18} color={paper}/>:status.playing?<Pause size={18} color={paper}/>:<Play size={18} color={paper}/>}</Pressable>
       <Slider accessibilityLabel="Video position" style={styles.feedVideoSlider} minimumValue={0} maximumValue={Math.max(1,status.duration)} value={Math.min(status.position,Math.max(1,status.duration))} minimumTrackTintColor={accent} maximumTrackTintColor="rgba(255,255,255,.32)" thumbTintColor={paper} onSlidingComplete={value=>void seek(value)}/>
@@ -1264,7 +1264,7 @@ function UtilityScreen({ kind }: { kind: 'meets' | 'messages' | 'leaderboard' })
 function CatalogField({label,value,options,onChange,placeholder}: {label:string;value:string;options:string[];onChange:(value:string)=>void;placeholder?:string}) {
   const [focused,setFocused]=useState(false);
   const matches=options.filter(option=>!value.trim()||option.toLowerCase().includes(value.toLowerCase())).slice(0,7);
-  return <View style={styles.catalogField}><Text style={styles.identityLabel}>{label}</Text><TextInput value={value} onFocus={()=>setFocused(true)} onChangeText={onChange} placeholder={placeholder||label} placeholderTextColor={muted} style={styles.authInput}/>{focused&&matches.length?<View style={styles.catalogOptions}>{matches.map(option=><Pressable key={option} onPress={()=>{onChange(option);setFocused(false);}} style={styles.catalogOption}><Text style={styles.catalogOptionText}>{option.toUpperCase()}</Text><ChevronRight size={13} color={accent}/></Pressable>)}</View>:null}</View>;
+  return <View style={styles.catalogField}><Text style={styles.identityLabel}>{label}</Text><TextInput value={value} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>setFocused(false),150)} onChangeText={onChange} placeholder={placeholder||label} placeholderTextColor={muted} style={styles.authInput}/>{focused&&matches.length?<View style={styles.catalogOptions}>{matches.map(option=><Pressable key={option} onPress={()=>{onChange(option);setFocused(false);}} style={styles.catalogOption}><Text style={styles.catalogOptionText}>{option.toUpperCase()}</Text><ChevronRight size={13} color={accent}/></Pressable>)}</View>:null}</View>;
 }
 
 const vehicleAngleLabels={front:'FRONT',rear:'REAR',driver:'DRIVER SIDE',passenger:'PASSENGER SIDE'} as const;
@@ -1293,7 +1293,6 @@ function GarageScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const colorOptions=[{name:'Black',hex:'#090B0A'},{name:'White',hex:'#F4F5F2'},{name:'Pearl White',hex:'#E8ECE6'},{name:'Silver',hex:'#AEB4B2'},{name:'Gunmetal',hex:'#515857'},{name:'Gray',hex:'#747A78'},{name:'Red',hex:'#B5242D'},{name:'Burgundy',hex:'#641E2B'},{name:'Blue',hex:'#245EB5'},{name:'Navy',hex:'#142A52'},{name:'Green',hex:'#276143'},{name:'British Racing Green',hex:'#173D2A'},{name:'Yellow',hex:'#E4C62F'},{name:'Orange',hex:'#D36A25'},{name:'Purple',hex:'#633C88'},{name:'Bronze',hex:'#8C6844'},{name:'Gold',hex:'#B69A4D'},{name:'Tan',hex:'#B69E7D'},{name:'Pink',hex:'#D78BA7'},{name:'Custom',hex:'transparent'}];
   const car = vehicles.find(vehicle => vehicle.id === activeVehicleId);
   const updateVehicle = (key: keyof typeof vehicleDraft, value: string) => setVehicleDraft(current => ({ ...current, [key]: value }));
-  useEffect(()=>{void cloudflareApi.request<{makes:string[]}>('/api/vehicle-catalog').then(data=>setMakes(data.makes||[])).catch(()=>undefined);},[]);
   useEffect(()=>{if(!vehicleDraft.make)return;const timer=setTimeout(()=>void cloudflareApi.request<{models:string[]}>(`/api/vehicle-catalog?year=${encodeURIComponent(vehicleDraft.year)}&make=${encodeURIComponent(vehicleDraft.make)}`).then(data=>setModels(data.models||[])).catch(()=>setModels([])),250);return()=>clearTimeout(timer);},[vehicleDraft.make,vehicleDraft.year]);
   const loadMods=async()=>{if(!activeVehicleId){setMods([]);return;}try{const data=await cloudflareApi.request<{wishlist:any[]}>(`/api/vehicles/${activeVehicleId}/wishlist`);setMods(data.wishlist||[]);setModStatus('SYNCED ACROSS DEVICES');}catch(error){setModStatus(error instanceof Error?error.message:'MOD SYNC UNAVAILABLE');}};
   useEffect(()=>{void loadMods();},[activeVehicleId]);
