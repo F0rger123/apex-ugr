@@ -909,13 +909,20 @@ async function handle(request: Request, env: Env, path: string) {
 
   if (path === "push/register" && method === "POST") {
     const body = await request.json<{ token?: string; platform?: string }>();
-    const token = String(body.token || "").trim();
+    const token = String(body.token || "").trim().slice(0, 400);
     if (!token) return json({ error: "A push token is required." }, 400);
     await env.DB.prepare(
       `INSERT INTO push_tokens(user_id, token, platform, updated_at) VALUES(?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT(user_id, token) DO UPDATE SET platform=excluded.platform, updated_at=CURRENT_TIMESTAMP`,
     )
       .bind(user.id, token, String(body.platform || "unknown").slice(0, 20))
+      .run();
+    // Cap devices per user rather than letting registrations grow unbounded;
+    // evict the stalest tokens first (a real device re-registers on next boot).
+    await env.DB.prepare(
+      `DELETE FROM push_tokens WHERE user_id=? AND token NOT IN (SELECT token FROM push_tokens WHERE user_id=? ORDER BY updated_at DESC LIMIT 8)`,
+    )
+      .bind(user.id, user.id)
       .run();
     return json({ registered: true });
   }
