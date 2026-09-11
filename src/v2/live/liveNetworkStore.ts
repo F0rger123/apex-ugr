@@ -83,8 +83,22 @@ export const useLiveNetworkStore=create<LiveNetworkState>((set,get)=>({
       set(state=>{const last=state.driveTrace[state.driveTrace.length-1];const trace=last&&Math.abs(last.latitude-next.latitude)<.00001&&Math.abs(last.longitude-next.longitude)<.00001?state.driveTrace:[...state.driveTrace,{latitude:next.latitude,longitude:next.longitude}].slice(-1200);return{location:next,distanceKm:state.distanceKm+Math.min(distance,.5),maxSpeedKph:Math.max(state.maxSpeedKph,next.speedKph),networkStatus:state._userId?'live':'gps_locked',driveTrace:trace};});
       void AsyncStorage.setItem(LOCATION_KEY,JSON.stringify(next));
       void get().updateNavigation(next);
-      if(Date.now()>shareExpiresAt){get()._watch?.remove();set({_watch:null,isDriving:false,shareExpiresAt:null,networkStatus:'gps_locked'});if(get()._userId)void cloudflareApi.request('/api/location',{method:'DELETE'});return;}
-      if(get()._userId&&Date.now()-get()._lastPublishAt>=5000){set({_lastPublishAt:Date.now()});void publish(next,true,get().shareMinutes,shareExpiresAt,driveSessionId,get().activeCruiseId).catch(error=>set({error:error instanceof Error?error.message:'Live position failed'}));}
+      // LOCATION VISIBILITY (shareMinutes) is a rolling "how long am I visible
+      // to other players if I go quiet" TTL, not a hard cap on Drive Mode
+      // itself. This used to compare against the `shareExpiresAt` captured
+      // once when Drive Mode started and never advanced again, so any drive
+      // longer than that window (15 minutes by default) silently flipped
+      // isDriving to false mid-drive -- with no prompt -- even though GPS
+      // was still actively ticking and the user never touched the toggle.
+      // Bounty/race server checks gate on this same expiry, so that also
+      // silently broke "Active Driver Mode is required" for a driver who
+      // never stopped driving. Recompute the deadline every tick instead so
+      // it only actually lapses if location updates genuinely stop.
+      if(get()._userId&&Date.now()-get()._lastPublishAt>=5000){
+        const rollingExpiresAt=Date.now()+get().shareMinutes*60_000;
+        set({_lastPublishAt:Date.now(),shareExpiresAt:rollingExpiresAt});
+        void publish(next,true,get().shareMinutes,rollingExpiresAt,driveSessionId,get().activeCruiseId).catch(error=>set({error:error instanceof Error?error.message:'Live position failed'}));
+      }
     });set({_watch:watch});
   },
   stopDrive:async()=>{
