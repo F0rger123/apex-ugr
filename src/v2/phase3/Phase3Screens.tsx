@@ -224,7 +224,8 @@ export function Phase3LeadersScreen({
     [scope, setScope] = useState("global"),
     [data, setData] = useState<any[]>([]),
     [loading, setLoading] = useState(true),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [seasonHistory, setSeasonHistory] = useState<any[]>([]);
   const featured = useRef(0);
   const load = async () => {
     setLoading(true);
@@ -243,6 +244,16 @@ export function Phase3LeadersScreen({
   useEffect(() => {
     void load();
   }, [board, scope]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const payload = await cloudflareApi.request<{ history: any[] }>("/api/seasons/history");
+        setSeasonHistory(payload.history || []);
+      } catch {
+        /* Season history is supplemental; a failure here shouldn't block the leaderboard. */
+      }
+    })();
+  }, []);
   useEffect(() => {
     const timer = setInterval(() => {
       featured.current = (featured.current + 1) % 6;
@@ -359,13 +370,33 @@ export function Phase3LeadersScreen({
         />
       )}
       <Header eyebrow="HALL OF FAME" title="STREET LEGENDS" />
-      <Panel>
-        <Text style={styles.copy}>
-          Long-term legends are derived from rank, verified performance,
-          community activity, Bounty outcomes, and exploration. No fabricated
-          placements are inserted.
-        </Text>
-      </Panel>
+      {seasonHistory.length ? (
+        seasonHistory.map((season) => (
+          <Panel key={season.id}>
+            <Text style={styles.cardTitle}>{String(season.name).toUpperCase()}</Text>
+            <Text style={styles.meta}>
+              CLOSED {new Date(season.ends_at).toLocaleDateString()} · {Number(season.reward_credits).toLocaleString()} ACR POOL
+            </Text>
+            {(season.standings || []).slice(0, 5).map((row: any) => (
+              <Pressable key={row.user_id} onPress={() => onProfile(row.user_id)} style={styles.leaderRow}>
+                <Text style={[styles.place, row.rank === 1 && { color: accent }]}>{String(row.rank).padStart(2, "0")}</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={styles.cardTitle}>{String(row.username).toUpperCase()}</Text>
+                </View>
+                <Text style={styles.boardValue}>{Number(row.points).toLocaleString()}</Text>
+              </Pressable>
+            ))}
+          </Panel>
+        ))
+      ) : (
+        <Panel>
+          <Text style={styles.copy}>
+            Long-term legends are derived from rank, verified performance,
+            community activity, Bounty outcomes, and exploration. No fabricated
+            placements are inserted. This board fills in as seasons close.
+          </Text>
+        </Panel>
+      )}
     </ScrollView>
   );
 }

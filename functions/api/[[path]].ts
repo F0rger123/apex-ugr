@@ -1799,6 +1799,37 @@ async function handle(request: Request, env: Env, path: string) {
     return json({ rankings: rows.results });
   }
 
+  if (path === "seasons/history" && method === "GET") {
+    // Lazily close and archive any season whose window has passed -- same
+    // pattern as the Bounty World scheduler: no cron worker here, so this
+    // runs on read. Purely additive: snapshots season_entries.points (a
+    // season-scoped counter) into an immutable archive row per rank. Never
+    // touches users.points/reputation.
+    const due = await env.DB.prepare("SELECT id FROM seasons WHERE ends_at<? AND status<>'completed'").bind(new Date().toISOString()).all<{ id: string }>();
+    for (const season of due.results || []) {
+      const already = await env.DB.prepare("SELECT 1 found FROM season_leaderboard_archive WHERE season_id=? LIMIT 1").bind(season.id).first();
+      if (!already) {
+        const standings = await env.DB.prepare(
+          `SELECT e.user_id,u.username,e.points FROM season_entries e JOIN users u ON u.id=e.user_id WHERE e.season_id=? ORDER BY e.points DESC,e.user_id LIMIT 20`,
+        )
+          .bind(season.id)
+          .all<{ user_id: string; username: string; points: number }>();
+        const writes = (standings.results || []).map((row, index) =>
+          env.DB.prepare("INSERT OR IGNORE INTO season_leaderboard_archive(season_id,rank,user_id,username,points) VALUES(?,?,?,?,?)").bind(season.id, index + 1, row.user_id, row.username, row.points),
+        );
+        if (writes.length) await env.DB.batch(writes);
+      }
+      await env.DB.prepare("UPDATE seasons SET status='completed' WHERE id=? AND status<>'completed'").bind(season.id).run();
+    }
+    const seasons = await env.DB.prepare("SELECT id,name,starts_at,ends_at,reward_credits FROM seasons WHERE status='completed' ORDER BY ends_at DESC LIMIT 20").all<any>();
+    const history = [];
+    for (const season of seasons.results || []) {
+      const standings = await env.DB.prepare("SELECT rank,user_id,username,points FROM season_leaderboard_archive WHERE season_id=? ORDER BY rank").bind(season.id).all();
+      history.push({ ...season, standings: standings.results });
+    }
+    return json({ history });
+  }
+
   if (path === "races" && method === "POST") {
     const body = await request.json<{
       opponentIds?: string[];
