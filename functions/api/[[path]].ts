@@ -1944,8 +1944,24 @@ async function handle(request: Request, env: Env, path: string) {
         await env.DB.prepare("UPDATE race_contracts SET status='credit_failed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId).run();
         return json({ error: "A pilot no longer has enough credits for this wager." }, 409);
       }
-      const statements = ids.map((id) => env.DB.prepare("UPDATE users SET credits=credits-? WHERE id=?").bind(wager, id));
-      ids.forEach((id) => statements.push(env.DB.prepare("INSERT INTO race_entries(race_id,user_id,status) VALUES(?,?,'joined') ON CONFLICT(race_id,user_id) DO NOTHING").bind(raceId, id)));
+      // The check above and this deduction aren't the same atomic operation,
+      // so a balance can still change in between (e.g. a shop purchase
+      // lands first). Guard each deduction with its own balance check rather
+      // than trusting the pre-check, and refund anyone whose deduction did
+      // land if any other participant's didn't -- otherwise credits could
+      // go negative, or some pilots pay into a wager that never actually
+      // gets scheduled for everyone.
+      const deductions = ids.map((id) => env.DB.prepare("UPDATE users SET credits=credits-? WHERE id=? AND credits>=?").bind(wager, id, wager));
+      const deductionResults = await env.DB.batch(deductions);
+      const allDeducted = deductionResults.every((result) => result.meta.changes);
+      if (!allDeducted) {
+        const refunds = ids
+          .map((id, index) => (deductionResults[index].meta.changes ? env.DB.prepare("UPDATE users SET credits=credits+? WHERE id=?").bind(wager, id) : null))
+          .filter((statement): statement is NonNullable<typeof statement> => statement !== null);
+        await env.DB.batch([...refunds, env.DB.prepare("UPDATE race_contracts SET status='credit_failed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(raceId)]);
+        return json({ error: "A pilot no longer has enough credits for this wager." }, 409);
+      }
+      const statements = ids.map((id) => env.DB.prepare("INSERT INTO race_entries(race_id,user_id,status) VALUES(?,?,'joined') ON CONFLICT(race_id,user_id) DO NOTHING").bind(raceId, id));
       statements.push(env.DB.prepare("UPDATE race_contracts SET status='scheduled',prize_pool=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(wager * ids.length, raceId));
       await env.DB.batch(statements);
       return json({ status: "scheduled" });
