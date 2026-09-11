@@ -51,12 +51,28 @@ function destinationPoint(latitude, longitude, distanceMeters, bearingDegrees) {
   return { latitude: lat2 * 180 / Math.PI, longitude: lng2 * 180 / Math.PI };
 }
 
+function synthesizeRoute(waypoints, stepMeters = 150) {
+  const points = [];
+  for (let index = 0; index < waypoints.length - 1; index++) {
+    const start = waypoints[index], end = waypoints[index + 1];
+    const segmentMeters = meters(start, end);
+    const steps = Math.max(1, Math.round(segmentMeters / stepMeters));
+    for (let step = 0; step < steps; step++) {
+      const fraction = step / steps;
+      points.push({ latitude: start.latitude + (end.latitude - start.latitude) * fraction, longitude: start.longitude + (end.longitude - start.longitude) * fraction });
+    }
+  }
+  points.push(waypoints[waypoints.length - 1]);
+  return points;
+}
+
 async function roadRoute(anchor, seed) {
   const bearing = deterministicIndex(seed, 360);
   const a = destinationPoint(anchor.latitude, anchor.longitude, 4500, bearing);
   const b = destinationPoint(anchor.latitude, anchor.longitude, 6500, (bearing + 95) % 360);
   const c = destinationPoint(anchor.latitude, anchor.longitude, 4000, (bearing + 205) % 360);
-  const path = [anchor, a, b, c, anchor].map(point => `${point.longitude},${point.latitude}`).join(';');
+  const waypoints = [anchor, a, b, c, anchor];
+  const path = waypoints.map(point => `${point.longitude},${point.latitude}`).join(';');
   for (const provider of ['https://router.project-osrm.org', 'https://routing.openstreetmap.de/routed-car']) {
     try {
       const request = await fetch(`${provider}/route/v1/driving/${path}?overview=full&geometries=geojson`, { headers: { 'User-Agent': 'ApexUGR/2.0' } });
@@ -65,7 +81,9 @@ async function roadRoute(anchor, seed) {
       if (request.ok && Array.isArray(coordinates) && coordinates.length > 4) return coordinates.map(([longitude, latitude]) => ({ latitude, longitude }));
     } catch { /* Try the next road router. */ }
   }
-  throw new Error('Road routing is unavailable for the Bounty NPC network.');
+  // Both live road routers are unreachable. Degrade to a straight-leg loop
+  // around the anchor rather than failing the whole Bounty event request.
+  return synthesizeRoute(waypoints);
 }
 
 async function ensureEvent(env, requestingUserId) {
