@@ -63,6 +63,23 @@ const accent = "#A7E59A",
   muted = "#929B95",
   border = "rgba(255,255,255,.14)",
   panel = "rgba(5,9,6,.9)";
+// Same rarity palette used by the Ghost Vault shop (ApexDesignPreview.tsx) --
+// equipped frames/banners were rendering identically regardless of which
+// item was equipped; this differentiates them by the app's existing rarity
+// tiers rather than inventing new per-item colors.
+function rarityColor(rarity?: string) {
+  return (
+    ({ COMMON: "#C9D0CB", UNCOMMON: "#A8E6A1", RARE: "#73C7FF", EPIC: "#C8A2FF", LEGENDARY: "#FFE28A", GHOST: "#76FFE2", CLASSIFIED: "#FFFFFF" } as Record<string, string>)[
+      String(rarity || "COMMON").toUpperCase()
+    ] || accent
+  );
+}
+function hexToRgba(hex: string, alpha: number) {
+  const value = hex.replace("#", "");
+  const bigint = Number.parseInt(value.length === 3 ? value.split("").map((c) => c + c).join("") : value, 16);
+  const r = (bigint >> 16) & 255, g = (bigint >> 8) & 255, b = bigint & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
 const boards = [
   ["rep", "REP"],
   ["rank", "RANK"],
@@ -415,13 +432,22 @@ export function Phase3ProfileScreen({
       <LinearGradient
         colors={
           banner
-            ? ["rgba(25,58,36,.9)", "rgba(3,6,4,.98)"]
+            ? [hexToRgba(rarityColor(banner.rarity), 0.28), "rgba(3,6,4,.98)"]
             : ["rgba(34,38,35,.9)", "rgba(3,5,4,.98)"]
         }
         style={styles.profileHero}
       >
         <View
-          style={[styles.profileAvatar, frame && styles.profileAvatarEquipped]}
+          style={[
+            styles.profileAvatar,
+            frame && {
+              borderWidth: 3,
+              borderColor: rarityColor(frame.rarity),
+              shadowColor: rarityColor(frame.rarity),
+              shadowOpacity: 0.5,
+              shadowRadius: 12,
+            },
+          ]}
         >
           {p.avatar_url ? (
             <Image source={{ uri: p.avatar_url }} style={styles.profilePhoto} />
@@ -2310,13 +2336,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-  },
-  profileAvatarEquipped: {
-    borderWidth: 3,
-    borderColor: accent,
-    shadowColor: accent,
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
   },
   profilePhoto: { width: "100%", height: "100%" },
   profileInitial: { color: paper, fontSize: 30, fontWeight: "900" },
