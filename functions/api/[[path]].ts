@@ -906,6 +906,26 @@ async function handle(request: Request, env: Env, path: string) {
   if (path.startsWith("ghost-shop/")) return json({ error: "Use the canonical Ghost Vault endpoint." }, 410);
 
   if (path === "session" && method === "GET") return json({ user: publicUser(user) });
+
+  if (path === "push/register" && method === "POST") {
+    const body = await request.json<{ token?: string; platform?: string }>();
+    const token = String(body.token || "").trim();
+    if (!token) return json({ error: "A push token is required." }, 400);
+    await env.DB.prepare(
+      `INSERT INTO push_tokens(user_id, token, platform, updated_at) VALUES(?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id, token) DO UPDATE SET platform=excluded.platform, updated_at=CURRENT_TIMESTAMP`,
+    )
+      .bind(user.id, token, String(body.platform || "unknown").slice(0, 20))
+      .run();
+    return json({ registered: true });
+  }
+
+  if (path === "push/register" && method === "DELETE") {
+    const body = await request.json<{ token?: string }>().catch(() => ({}) as { token?: string });
+    if (body.token) await env.DB.prepare("DELETE FROM push_tokens WHERE user_id=? AND token=?").bind(user.id, body.token).run();
+    else await env.DB.prepare("DELETE FROM push_tokens WHERE user_id=?").bind(user.id).run();
+    return json({ unregistered: true });
+  }
   if (path === "profile" && method === "PUT") {
     const body = await request.json<{ displayName?: string }>();
     const displayName = body.displayName?.trim();
@@ -2558,8 +2578,21 @@ async function handle(request: Request, env: Env, path: string) {
         agreementVersion: settings.agreement_version,
         agreedAt: settings.agreed_at,
         cooldownUntil: settings.cooldown_until,
+        preferredMode: settings.preferred_mode === "venue" ? "venue" : "world",
       },
     });
+  }
+
+  if (path === "bounty/mode" && method === "PUT") {
+    const body = await request.json<{ mode?: string }>();
+    const mode = body.mode === "venue" ? "venue" : "world";
+    await env.DB.prepare(
+      `INSERT INTO bounty_user_settings(user_id, preferred_mode, updated_at) VALUES(?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id) DO UPDATE SET preferred_mode=excluded.preferred_mode, updated_at=CURRENT_TIMESTAMP`,
+    )
+      .bind(user.id, mode)
+      .run();
+    return json({ success: true, preferredMode: mode });
   }
 
   if (path === "bounty/settings" && method === "PUT") {

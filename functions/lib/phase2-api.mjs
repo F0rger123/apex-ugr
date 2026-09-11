@@ -3,6 +3,7 @@ import {
   frequencyForProgress, hunterWaveForStar, nextSerial, npcPosition, rewardForStar, signalForDistance,
   starForElapsed, rankTrialEligible,
 } from './phase2-core.mjs';
+import { sendPushToAll, sendPushToUsers } from './push.mjs';
 
 const headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
 const response = (body, status = 200) => new Response(JSON.stringify(body), { status, headers });
@@ -105,6 +106,7 @@ async function ensureEvent(env, requestingUserId) {
           VALUES(?,'bounty_started','BOUNTY EVENT LIVE // ALL PILOTS NOTIFIED',?,?)`)
           .bind(crypto.randomUUID(), `bounty-start:${window.key}`, endsAt),
       ]);
+      await sendPushToAll(env, { title: 'BOUNTY EVENT LIVE', body: 'A two-hour Bounty window is active. Join, hunt, run, or watch from Radar.', data: { type: 'bounty_world_started', eventId: window.key } });
     }
     event = await env.DB.prepare('SELECT * FROM bounty_world_events WHERE id=?').bind(window.key).first();
   }
@@ -171,6 +173,7 @@ async function advanceEvent(env, event, cfg) {
       }
       await env.DB.prepare(`UPDATE bounty_actors SET status='escaped' WHERE id=?`).bind(event.target_actor_id).run();
       await broadcast(env, 'bounty_escape', target?.user_id, `${target?.display_name || 'GHOST ZERO'} SURVIVED ${'★'.repeat(Number(event.star_level))}`, event.id);
+      if (target?.user_id) await sendPushToUsers(env, [target.user_id], { title: 'YOU SURVIVED THE BOUNTY', body: `+${event.reward_gc} GC // ${'★'.repeat(Number(event.star_level))}`, data: { type: 'bounty_world_escape', eventId: event.id } });
     }
     return env.DB.prepare('SELECT * FROM bounty_world_events WHERE id=?').bind(event.id).first();
   }
@@ -181,6 +184,8 @@ async function advanceEvent(env, event, cfg) {
     const target = await env.DB.prepare('SELECT latitude,longitude,route_json FROM bounty_actors WHERE id=?').bind(event.target_actor_id).first();
     await ensureNpcHunters(env, event, parseJson(target?.route_json, []), target || { latitude: 39.9526, longitude: -75.1652 }, hunterWaveForStar(star, cfg.hunterWaves), now);
     await broadcast(env, 'bounty_escalation', null, `BOUNTY ESCALATED // ${'★'.repeat(star)} // ${reward} GC`, `${event.id}:${star}`);
+    const activeHunters = await env.DB.prepare(`SELECT user_id FROM bounty_actors WHERE event_id=? AND role='hunter' AND actor_type='human' AND status='active'`).bind(event.id).all();
+    await sendPushToUsers(env, (activeHunters.results || []).map(row => row.user_id), { title: 'BOUNTY ESCALATED', body: `${'★'.repeat(star)} // ${reward} GC`, data: { type: 'bounty_world_escalation', eventId: event.id, star } });
   }
   await updateActorPositions(env, event.id, now);
   return env.DB.prepare('SELECT * FROM bounty_world_events WHERE id=?').bind(event.id).first();
@@ -333,6 +338,15 @@ async function eventPayload(env, user, event, cfg, window) {
   const nearest = targetPressure[0];
   const heat = nearest ? signalForDistance(nearest.distance).heat : 0;
   const blackout = Number(event.star_level) >= 4 && (Math.floor((Date.now() - parseTime(event.starts_at)) / 1000) % Math.max(60, Number(cfg.starIntervalSeconds))) < Number(cfg.blackoutDurationSeconds);
+  // Hunters can see how many other hunters are active and roughly where they
+  // are relative to themselves (bucketed signal, never a raw stranger GPS fix).
+  const activeHunters = hunters.filter(actor => actor.status === 'active');
+  const peerHunters = selfActor?.role === 'hunter' && selfActor?.latitude != null
+    ? activeHunters.filter(actor => actor.id !== selfActor.id && actor.latitude != null).map(actor => ({
+        id: actor.id, actorType: actor.actor_type, displayName: actor.display_name,
+        ...signalForDistance(meters(selfActor, actor)), direction: directionBetween(selfActor, actor),
+      }))
+    : [];
   return {
     serverNow: new Date().toISOString(),
     nextAt: new Date(window.nextMs).toISOString(),
@@ -343,6 +357,7 @@ async function eventPayload(env, user, event, cfg, window) {
       role: selfActor?.role || null, offer: offer?.status || null, target: publicActor(target, target?.actor_type === 'npc' || selfActor?.role === 'target'),
       hunters: hunters.map(actor => publicActor(actor, actor.actor_type === 'npc' && selfActor?.role === 'target')),
       hunterSignal, heat, blackout,
+      hunterCount: activeHunters.length, peerHunters,
       nearestHunter: selfActor?.role === 'target' && nearest ? { direction: directionBetween(target, nearest.hunter), ...signalForDistance(nearest.distance) } : null,
     },
   };
@@ -440,6 +455,42 @@ export async function handlePhase2({ request, env, user, path, method }) {
     return response(await eventPayload(env, user, event, cfg, window));
   }
 
+  const bountySpectate = path.match(/^bounty\/world\/([^/]+)\/spectate$/);
+  if (bountySpectate && method === 'GET') {
+    const eventId = bountySpectate[1];
+    const event = await env.DB.prepare('SELECT * FROM bounty_world_events WHERE id=?').bind(eventId).first();
+    if (!event) return response({ error: 'Bounty event was not found.' }, 404);
+    // Spectators never receive any actor's exact coordinates, participant or
+    // not -- only event-level state and headline counts.
+    const hunterCount = await env.DB.prepare(`SELECT COUNT(*) count FROM bounty_actors WHERE event_id=? AND role='hunter' AND status='active'`).bind(eventId).first();
+    return response({
+      event: {
+        id: event.id, status: event.status, startsAt: event.starts_at, endsAt: event.ends_at,
+        starLevel: Number(event.star_level), rewardGc: Number(event.reward_gc), rewardRep: Number(event.reward_rep),
+        remainingSeconds: Math.max(0, Math.ceil((parseTime(event.ends_at) - Date.now()) / 1000)),
+        hunterCount: Number(hunterCount?.count || 0),
+      },
+    });
+  }
+
+  if (path === 'bounty/history' && method === 'GET') {
+    const [worldAsTarget, worldAsHunter, venue] = await Promise.all([
+      env.DB.prepare(`SELECT e.id,e.status,e.star_level,e.reward_gc,e.reward_rep,e.starts_at,e.completed_at FROM bounty_world_events e
+        JOIN bounty_actors a ON a.event_id=e.id WHERE a.user_id=? AND a.role='target' AND e.completed_at IS NOT NULL
+        ORDER BY e.completed_at DESC LIMIT 25`).bind(user.id).all(),
+      env.DB.prepare(`SELECT e.id,e.status,e.star_level,e.reward_gc,e.reward_rep,e.starts_at,e.completed_at FROM bounty_world_events e
+        JOIN bounty_actors a ON a.event_id=e.id WHERE a.user_id=? AND a.role='hunter' AND e.claimed_by_actor_id=a.id
+        ORDER BY e.completed_at DESC LIMIT 25`).bind(user.id).all(),
+      env.DB.prepare(`SELECT id,status,stars,total_reward_gc,consented_at,ended_at FROM venue_bounty_sessions WHERE host_user_id=? AND status<>'active' ORDER BY ended_at DESC LIMIT 25`).bind(user.id).all(),
+    ]);
+    const entries = [
+      ...(worldAsTarget.results || []).map(row => ({ mode: 'world', role: 'target', id: row.id, status: row.status, starLevel: row.star_level, rewardGc: row.reward_gc, rewardRep: row.reward_rep, startedAt: row.starts_at, completedAt: row.completed_at })),
+      ...(worldAsHunter.results || []).map(row => ({ mode: 'world', role: 'hunter', id: row.id, status: row.status, starLevel: row.star_level, rewardGc: row.reward_gc, rewardRep: row.reward_rep, startedAt: row.starts_at, completedAt: row.completed_at })),
+      ...(venue.results || []).map(row => ({ mode: 'venue', role: 'target', id: row.id, status: row.status, starLevel: row.stars, rewardGc: row.total_reward_gc, rewardRep: null, startedAt: row.consented_at, completedAt: row.ended_at })),
+    ].sort((a, b) => Date.parse(b.completedAt || b.startedAt || 0) - Date.parse(a.completedAt || a.startedAt || 0));
+    return response({ entries });
+  }
+
   const bountyAction = path.match(/^bounty\/world\/([^/]+)\/(accept|decline|pulse|capture)$/);
   if (bountyAction && method === 'POST') {
     const [, eventId, action] = bountyAction;
@@ -491,6 +542,8 @@ export async function handlePhase2({ request, env, user, path, method }) {
       ...(Number(event.star_level) === 5 ? [env.DB.prepare(`INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'five-star-hunter')`).bind(user.id)] : []),
     ]);
     await broadcast(env, 'bounty_capture', user.id, `${user.username} CAPTURED ${target.display_name} // ${'★'.repeat(Number(event.star_level))}`, eventId);
+    await sendPushToUsers(env, [user.id], { title: 'BOUNTY CLAIMED', body: `+${event.reward_gc} GC // ${'★'.repeat(Number(event.star_level))}`, data: { type: 'bounty_world_claim', eventId } });
+    if (target.user_id) await sendPushToUsers(env, [target.user_id], { title: 'YOU WERE CAUGHT', body: `${user.username} closed in and ended your run.`, data: { type: 'bounty_world_captured', eventId } });
     return response({ captured: true, rewardGc: event.reward_gc, rewardRep: event.reward_rep, reward });
   }
 
