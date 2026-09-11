@@ -748,8 +748,10 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const rsvpEvent = async () => {
     if (!selectedEvent) return;
     try {
-      const result = await cloudflareApi.request<{ active: boolean; attendees: number }>(`/api/events/${selectedEvent.id}/rsvp`, { method: 'POST' });
+      const result = await cloudflareApi.request<{ active: boolean; status: string | null; attendees: number; waitlisted: number }>(`/api/events/${selectedEvent.id}/rsvp`, { method: 'POST' });
       setSelectedEvent({ ...selectedEvent, attendees: result.attendees });
+      if (result.status === 'waitlisted') Alert.alert('Meet is full', `You're on the waitlist (${result.waitlisted} waiting). You'll be confirmed automatically if a spot opens.`);
+      else if (result.status === 'confirmed') playInterfaceSound('unlock');
     } catch (error) {
       Alert.alert('RSVP failed', error instanceof Error ? error.message : 'Could not update RSVP.');
     }

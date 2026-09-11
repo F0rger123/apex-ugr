@@ -2078,14 +2078,35 @@ async function handle(request: Request, env: Env, path: string) {
 
   const eventRsvp = path.match(/^events\/([^/]+)\/rsvp$/);
   if (eventRsvp && method === "POST") {
-    const current = await env.DB.prepare("SELECT 1 found FROM event_rsvps WHERE event_id=? AND user_id=?").bind(eventRsvp[1], user.id).first();
-    if (current) await env.DB.prepare("DELETE FROM event_rsvps WHERE event_id=? AND user_id=?").bind(eventRsvp[1], user.id).run();
-    else await env.DB.prepare("INSERT INTO event_rsvps(event_id,user_id) VALUES(?,?)").bind(eventRsvp[1], user.id).run();
-    const count = await env.DB.prepare("SELECT COUNT(*) count FROM event_rsvps WHERE event_id=?").bind(eventRsvp[1]).first<{ count: number }>();
-    await env.DB.prepare("UPDATE events SET attendees=? WHERE id=?")
-      .bind(count?.count || 0, eventRsvp[1])
-      .run();
-    return json({ active: !current, attendees: count?.count || 0 });
+    const eventId = eventRsvp[1];
+    const event = await env.DB.prepare("SELECT max_attendees FROM events WHERE id=?").bind(eventId).first<{ max_attendees: number | null }>();
+    if (!event) return json({ error: "Meet not found." }, 404);
+    const current = await env.DB.prepare("SELECT status FROM event_rsvps WHERE event_id=? AND user_id=?").bind(eventId, user.id).first<{ status: string }>();
+    let promoted: string | null = null;
+    if (current) {
+      await env.DB.prepare("DELETE FROM event_rsvps WHERE event_id=? AND user_id=?").bind(eventId, user.id).run();
+      if (current.status === "confirmed" && event.max_attendees) {
+        const next = await env.DB.prepare("SELECT user_id FROM event_rsvps WHERE event_id=? AND status='waitlisted' ORDER BY created_at LIMIT 1").bind(eventId).first<{ user_id: string }>();
+        if (next) {
+          await env.DB.batch([
+            env.DB.prepare("UPDATE event_rsvps SET status='confirmed' WHERE event_id=? AND user_id=?").bind(eventId, next.user_id),
+            env.DB.prepare("INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,'meet_rsvp','A SPOT OPENED UP',?,?)").bind(crypto.randomUUID(), next.user_id, "You're off the waitlist and confirmed for this meet.", JSON.stringify({ eventId })),
+          ]);
+          promoted = next.user_id;
+        }
+      }
+    } else {
+      const confirmedCount = await env.DB.prepare("SELECT COUNT(*) count FROM event_rsvps WHERE event_id=? AND status='confirmed'").bind(eventId).first<{ count: number }>();
+      const atCapacity = Boolean(event.max_attendees) && Number(confirmedCount?.count || 0) >= Number(event.max_attendees);
+      await env.DB.prepare("INSERT INTO event_rsvps(event_id,user_id,status) VALUES(?,?,?)").bind(eventId, user.id, atCapacity ? "waitlisted" : "confirmed").run();
+    }
+    const [confirmed, waitlisted] = await Promise.all([
+      env.DB.prepare("SELECT COUNT(*) count FROM event_rsvps WHERE event_id=? AND status='confirmed'").bind(eventId).first<{ count: number }>(),
+      env.DB.prepare("SELECT COUNT(*) count FROM event_rsvps WHERE event_id=? AND status='waitlisted'").bind(eventId).first<{ count: number }>(),
+    ]);
+    await env.DB.prepare("UPDATE events SET attendees=? WHERE id=?").bind(confirmed?.count || 0, eventId).run();
+    const mine = await env.DB.prepare("SELECT status FROM event_rsvps WHERE event_id=? AND user_id=?").bind(eventId, user.id).first<{ status: string }>();
+    return json({ active: Boolean(mine), status: mine?.status || null, attendees: confirmed?.count || 0, waitlisted: waitlisted?.count || 0, promotedUserId: promoted });
   }
   if (path === "events" && method === "POST") {
     const body = await request.json<{
@@ -2098,6 +2119,7 @@ async function handle(request: Request, env: Env, path: string) {
       locations?: Array<{ label?: string; address?: string }>;
       allowShowCars?: boolean;
       allowSponsors?: boolean;
+      maxAttendees?: number;
     }>();
     if (!body.title?.trim() || !body.startsAt || !body.locations?.[0]?.address?.trim()) return json({ error: "Title, start time, and at least one location are required." }, 400);
     const requested = body.locations.slice(0, 5);
@@ -2119,7 +2141,8 @@ async function handle(request: Request, env: Env, path: string) {
     }
     const first = located[0],
       id = crypto.randomUUID();
-    const statements = [env.DB.prepare(`INSERT INTO events(id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, user.id, body.title.trim().slice(0, 100), first.name, first.latitude, first.longitude, Math.max(50, Math.min(2000, Number(body.radiusM) || 250)), body.startsAt, body.endsAt || null, body.description?.trim().slice(0, 2000) || "", body.rules?.trim().slice(0, 1500) || "", body.allowShowCars === false ? 0 : 1, body.allowSponsors === false ? 0 : 1), env.DB.prepare("INSERT INTO event_registrations(event_id,user_id,role) VALUES(?,?,'host')").bind(id, user.id)];
+    const maxAttendees = Number.isFinite(body.maxAttendees) && Number(body.maxAttendees) > 0 ? Math.floor(Number(body.maxAttendees)) : null;
+    const statements = [env.DB.prepare(`INSERT INTO events(id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors,max_attendees) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, user.id, body.title.trim().slice(0, 100), first.name, first.latitude, first.longitude, Math.max(50, Math.min(2000, Number(body.radiusM) || 250)), body.startsAt, body.endsAt || null, body.description?.trim().slice(0, 2000) || "", body.rules?.trim().slice(0, 1500) || "", body.allowShowCars === false ? 0 : 1, body.allowSponsors === false ? 0 : 1, maxAttendees), env.DB.prepare("INSERT INTO event_registrations(event_id,user_id,role) VALUES(?,?,'host')").bind(id, user.id)];
     located.forEach((point, index) => statements.push(env.DB.prepare("INSERT INTO event_locations(id,event_id,label,location_name,latitude,longitude,stop_order) VALUES(?,?,?,?,?,?,?)").bind(crypto.randomUUID(), id, point.label, point.name, point.latitude, point.longitude, index)));
     await env.DB.batch(statements);
     return json({ id, locations: located }, 201);
