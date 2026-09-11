@@ -2126,8 +2126,10 @@ async function handle(request: Request, env: Env, path: string) {
       allowShowCars?: boolean;
       allowSponsors?: boolean;
       maxAttendees?: number;
+      recurrence?: string;
     }>();
     if (!body.title?.trim() || !body.startsAt || !body.locations?.[0]?.address?.trim()) return json({ error: "Title, start time, and at least one location are required." }, 400);
+    const recurrence = ["weekly", "biweekly"].includes(body.recurrence || "") ? String(body.recurrence) : "none";
     const requested = body.locations.slice(0, 5);
     const located: Array<{
       label: string;
@@ -2148,7 +2150,7 @@ async function handle(request: Request, env: Env, path: string) {
     const first = located[0],
       id = crypto.randomUUID();
     const maxAttendees = Number.isFinite(body.maxAttendees) && Number(body.maxAttendees) > 0 ? Math.floor(Number(body.maxAttendees)) : null;
-    const statements = [env.DB.prepare(`INSERT INTO events(id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors,max_attendees) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, user.id, body.title.trim().slice(0, 100), first.name, first.latitude, first.longitude, Math.max(50, Math.min(2000, Number(body.radiusM) || 250)), body.startsAt, body.endsAt || null, body.description?.trim().slice(0, 2000) || "", body.rules?.trim().slice(0, 1500) || "", body.allowShowCars === false ? 0 : 1, body.allowSponsors === false ? 0 : 1, maxAttendees), env.DB.prepare("INSERT INTO event_registrations(event_id,user_id,role) VALUES(?,?,'host')").bind(id, user.id)];
+    const statements = [env.DB.prepare(`INSERT INTO events(id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors,max_attendees,recurrence) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, user.id, body.title.trim().slice(0, 100), first.name, first.latitude, first.longitude, Math.max(50, Math.min(2000, Number(body.radiusM) || 250)), body.startsAt, body.endsAt || null, body.description?.trim().slice(0, 2000) || "", body.rules?.trim().slice(0, 1500) || "", body.allowShowCars === false ? 0 : 1, body.allowSponsors === false ? 0 : 1, maxAttendees, recurrence), env.DB.prepare("INSERT INTO event_registrations(event_id,user_id,role) VALUES(?,?,'host')").bind(id, user.id)];
     located.forEach((point, index) => statements.push(env.DB.prepare("INSERT INTO event_locations(id,event_id,label,location_name,latitude,longitude,stop_order) VALUES(?,?,?,?,?,?,?)").bind(crypto.randomUUID(), id, point.label, point.name, point.latitude, point.longitude, index)));
     await env.DB.batch(statements);
     return json({ id, locations: located }, 201);
@@ -3672,6 +3674,49 @@ async function handle(request: Request, env: Env, path: string) {
   // MEETS EXPANSION ENDPOINTS
   // =========================================================================
   if (path === "meets" && method === "GET") {
+    // Recurring meets generate their next occurrence lazily on read (same
+    // pattern as the Bounty World event scheduler) rather than via a
+    // background job -- Cloudflare Pages Functions has no cron worker here.
+    const due = await env.DB.prepare(
+      `SELECT id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors,max_attendees,recurrence,recurrence_root_id
+       FROM events WHERE recurrence<>'none' AND starts_at<?`,
+    )
+      .bind(new Date().toISOString())
+      .all<any>();
+    for (const occurrence of due.results || []) {
+      const rootId = occurrence.recurrence_root_id || occurrence.id;
+      const days = occurrence.recurrence === "weekly" ? 7 : occurrence.recurrence === "biweekly" ? 14 : null;
+      if (!days) continue;
+      const nextStartsAt = new Date(Date.parse(occurrence.starts_at) + days * 86400000);
+      if (nextStartsAt.getTime() > Date.now() + 86400000) continue; // Only roll forward once the current occurrence is at or past due.
+      const hasNewer = await env.DB.prepare("SELECT 1 found FROM events WHERE (id=? OR recurrence_root_id=?) AND starts_at>? LIMIT 1").bind(rootId, rootId, occurrence.starts_at).first();
+      if (hasNewer) continue;
+      const nextEndsAt = occurrence.ends_at ? new Date(Date.parse(occurrence.ends_at) + days * 86400000).toISOString() : null;
+      const nextId = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO events(id,host_id,title,location_name,latitude,longitude,radius_m,starts_at,ends_at,description,rules,allow_show_cars,allow_sponsors,max_attendees,recurrence,recurrence_root_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ).bind(
+          nextId,
+          occurrence.host_id,
+          occurrence.title,
+          occurrence.location_name,
+          occurrence.latitude,
+          occurrence.longitude,
+          occurrence.radius_m,
+          nextStartsAt.toISOString(),
+          nextEndsAt,
+          occurrence.description,
+          occurrence.rules,
+          occurrence.allow_show_cars,
+          occurrence.allow_sponsors,
+          occurrence.max_attendees,
+          occurrence.recurrence,
+          rootId,
+        ),
+        env.DB.prepare("INSERT INTO event_registrations(event_id,user_id,role) VALUES(?,?,'host')").bind(nextId, occurrence.host_id),
+      ]);
+    }
     const rows = await env.DB.prepare(
       `
       SELECT e.*, u.username host_name,
