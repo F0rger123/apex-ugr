@@ -1344,7 +1344,7 @@ async function handle(request: Request, env: Env, path: string) {
       env.DB.prepare(`SELECT DISTINCT d.latitude,d.longitude,d.discovered_at,u.username FROM map_discoveries d JOIN crew_members teammate ON teammate.user_id=d.user_id AND teammate.status='approved' JOIN crew_members mine ON mine.crew_id=teammate.crew_id AND mine.user_id=? AND mine.status='approved' JOIN users u ON u.id=d.user_id WHERE d.user_id<>? ORDER BY d.discovered_at DESC LIMIT 1200`).bind(user.id, user.id).all(),
       env.DB.prepare(`SELECT t.*,c.name crew_name,c.tag,EXISTS(SELECT 1 FROM territory_unlocks u WHERE u.territory_id=t.id AND u.user_id=?) unlocked FROM territories t JOIN crews c ON c.id=t.crew_id`).bind(user.id).all(),
       env.DB.prepare(`SELECT d.*,EXISTS(SELECT 1 FROM dead_drop_claims c WHERE c.drop_id=d.id AND c.user_id=?) claimed FROM dead_drops d WHERE d.is_active=1`).bind(user.id).all(),
-      env.DB.prepare(`SELECT r.*,u.username FROM road_reports r JOIN users u ON u.id=r.user_id WHERE r.is_active=1 ORDER BY r.created_at DESC LIMIT 500`).all(),
+      env.DB.prepare(`SELECT r.*,u.username,(SELECT COUNT(*) FROM road_report_confirmations c WHERE c.report_id=r.id) confirmations FROM road_reports r JOIN users u ON u.id=r.user_id WHERE r.is_active=1 AND (r.expires_at IS NULL OR r.expires_at>?) ORDER BY r.created_at DESC LIMIT 500`).bind(new Date().toISOString()).all(),
       env.DB.prepare(`SELECT c.*,m.status member_status,m.role member_role,(SELECT COUNT(*) FROM crew_members x WHERE x.crew_id=c.id AND x.status='approved') member_count FROM crews c LEFT JOIN crew_members m ON m.crew_id=c.id AND m.user_id=? ORDER BY member_count DESC`).bind(user.id).all(),
       env.DB.prepare(`SELECT s.*,e.points,CASE WHEN e.user_id IS NULL THEN 0 ELSE 1 END joined FROM seasons s LEFT JOIN season_entries e ON e.season_id=s.id AND e.user_id=? WHERE s.ends_at>? ORDER BY s.starts_at`).bind(user.id, new Date().toISOString()).all(),
       env.DB.prepare(`SELECT m.crew_id,m.user_id,m.created_at,u.username,u.avatar_url FROM crew_members m JOIN crews c ON c.id=m.crew_id AND c.owner_id=? JOIN users u ON u.id=m.user_id WHERE m.status='pending' ORDER BY m.created_at`).bind(user.id).all(),
@@ -1471,13 +1471,31 @@ async function handle(request: Request, env: Env, path: string) {
       note?: string;
       latitude?: number;
       longitude?: number;
+      headingDegrees?: number;
     }>();
-    if (!["fixed_camera", "hazard", "closure", "dangerous_road"].includes(body.type || "") || !Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) return json({ error: "Choose a supported safety report and valid map point." }, 400);
+    const REPORT_TYPES = ["fixed_camera", "hazard", "closure", "dangerous_road", "speed_trap", "police_sighting"];
+    if (!REPORT_TYPES.includes(body.type || "") || !Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) return json({ error: "Choose a supported safety report and valid map point." }, 400);
+    const recent = await env.DB.prepare("SELECT COUNT(*) count FROM road_reports WHERE user_id=? AND created_at>datetime('now','-1 hour')").bind(user.id).first<{ count: number }>();
+    if (Number(recent?.count || 0) >= 10) return json({ error: "Too many reports this hour. Try again later." }, 429);
     const id = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO road_reports(id,user_id,type,note,latitude,longitude) VALUES(?,?,?,?,?,?)")
-      .bind(id, user.id, body.type, body.note?.trim().slice(0, 240) || "", body.latitude, body.longitude)
+    // Transient sightings age out on their own; fixed infrastructure and
+    // road characteristics don't expire.
+    const ttlMinutes: Record<string, number | null> = { fixed_camera: null, dangerous_road: null, hazard: 360, closure: 360, speed_trap: 45, police_sighting: 20 };
+    const ttl = ttlMinutes[body.type as string];
+    const expiresAt = ttl ? new Date(Date.now() + ttl * 60000).toISOString() : null;
+    const heading = Number.isFinite(body.headingDegrees) ? ((Number(body.headingDegrees) % 360) + 360) % 360 : null;
+    await env.DB.prepare("INSERT INTO road_reports(id,user_id,type,note,latitude,longitude,heading_degrees,expires_at) VALUES(?,?,?,?,?,?,?,?)")
+      .bind(id, user.id, body.type, body.note?.trim().slice(0, 240) || "", body.latitude, body.longitude, heading, expiresAt)
       .run();
-    return json({ id }, 201);
+    return json({ id, expiresAt }, 201);
+  }
+  const reportConfirm = path.match(/^road-reports\/([^/]+)\/confirm$/);
+  if (reportConfirm && method === "POST") {
+    const report = await env.DB.prepare("SELECT id FROM road_reports WHERE id=? AND is_active=1").bind(reportConfirm[1]).first();
+    if (!report) return json({ error: "This report is no longer active." }, 404);
+    await env.DB.prepare("INSERT OR IGNORE INTO road_report_confirmations(report_id,user_id) VALUES(?,?)").bind(reportConfirm[1], user.id).run();
+    const count = await env.DB.prepare("SELECT COUNT(*) count FROM road_report_confirmations WHERE report_id=?").bind(reportConfirm[1]).first<{ count: number }>();
+    return json({ confirmations: Number(count?.count || 0) });
   }
   if (path === "crews" && method === "POST") {
     const body = await request.json<{ name?: string; tag?: string }>();
