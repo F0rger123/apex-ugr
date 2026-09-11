@@ -1344,7 +1344,7 @@ async function handle(request: Request, env: Env, path: string) {
       env.DB.prepare(`SELECT DISTINCT d.latitude,d.longitude,d.discovered_at,u.username FROM map_discoveries d JOIN crew_members teammate ON teammate.user_id=d.user_id AND teammate.status='approved' JOIN crew_members mine ON mine.crew_id=teammate.crew_id AND mine.user_id=? AND mine.status='approved' JOIN users u ON u.id=d.user_id WHERE d.user_id<>? ORDER BY d.discovered_at DESC LIMIT 1200`).bind(user.id, user.id).all(),
       env.DB.prepare(`SELECT t.*,c.name crew_name,c.tag,EXISTS(SELECT 1 FROM territory_unlocks u WHERE u.territory_id=t.id AND u.user_id=?) unlocked FROM territories t JOIN crews c ON c.id=t.crew_id`).bind(user.id).all(),
       env.DB.prepare(`SELECT d.*,EXISTS(SELECT 1 FROM dead_drop_claims c WHERE c.drop_id=d.id AND c.user_id=?) claimed FROM dead_drops d WHERE d.is_active=1`).bind(user.id).all(),
-      env.DB.prepare(`SELECT r.*,u.username,(SELECT COUNT(*) FROM road_report_confirmations c WHERE c.report_id=r.id) confirmations FROM road_reports r JOIN users u ON u.id=r.user_id WHERE r.is_active=1 AND (r.expires_at IS NULL OR r.expires_at>?) ORDER BY r.created_at DESC LIMIT 500`).bind(new Date().toISOString()).all(),
+      env.DB.prepare(`SELECT r.*,u.username,(SELECT COUNT(*) FROM road_report_confirmations c WHERE c.report_id=r.id) confirmations,(SELECT COUNT(*) FROM road_report_disputes d WHERE d.report_id=r.id) disputes FROM road_reports r JOIN users u ON u.id=r.user_id WHERE r.is_active=1 AND (r.expires_at IS NULL OR r.expires_at>?) ORDER BY r.created_at DESC LIMIT 500`).bind(new Date().toISOString()).all(),
       env.DB.prepare(`SELECT c.*,m.status member_status,m.role member_role,(SELECT COUNT(*) FROM crew_members x WHERE x.crew_id=c.id AND x.status='approved') member_count FROM crews c LEFT JOIN crew_members m ON m.crew_id=c.id AND m.user_id=? ORDER BY member_count DESC`).bind(user.id).all(),
       env.DB.prepare(`SELECT s.*,e.points,CASE WHEN e.user_id IS NULL THEN 0 ELSE 1 END joined FROM seasons s LEFT JOIN season_entries e ON e.season_id=s.id AND e.user_id=? WHERE s.ends_at>? ORDER BY s.starts_at`).bind(user.id, new Date().toISOString()).all(),
       env.DB.prepare(`SELECT m.crew_id,m.user_id,m.created_at,u.username,u.avatar_url FROM crew_members m JOIN crews c ON c.id=m.crew_id AND c.owner_id=? JOIN users u ON u.id=m.user_id WHERE m.status='pending' ORDER BY m.created_at`).bind(user.id).all(),
@@ -1493,9 +1493,33 @@ async function handle(request: Request, env: Env, path: string) {
   if (reportConfirm && method === "POST") {
     const report = await env.DB.prepare("SELECT id FROM road_reports WHERE id=? AND is_active=1").bind(reportConfirm[1]).first();
     if (!report) return json({ error: "This report is no longer active." }, 404);
-    await env.DB.prepare("INSERT OR IGNORE INTO road_report_confirmations(report_id,user_id) VALUES(?,?)").bind(reportConfirm[1], user.id).run();
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO road_report_confirmations(report_id,user_id) VALUES(?,?)").bind(reportConfirm[1], user.id),
+      env.DB.prepare("DELETE FROM road_report_disputes WHERE report_id=? AND user_id=?").bind(reportConfirm[1], user.id),
+    ]);
     const count = await env.DB.prepare("SELECT COUNT(*) count FROM road_report_confirmations WHERE report_id=?").bind(reportConfirm[1]).first<{ count: number }>();
     return json({ confirmations: Number(count?.count || 0) });
+  }
+  const reportDispute = path.match(/^road-reports\/([^/]+)\/dispute$/);
+  if (reportDispute && method === "POST") {
+    const reportId = reportDispute[1];
+    const report = await env.DB.prepare("SELECT id FROM road_reports WHERE id=? AND is_active=1").bind(reportId).first();
+    if (!report) return json({ error: "This report is no longer active." }, 404);
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO road_report_disputes(report_id,user_id) VALUES(?,?)").bind(reportId, user.id),
+      env.DB.prepare("DELETE FROM road_report_confirmations WHERE report_id=? AND user_id=?").bind(reportId, user.id),
+    ]);
+    const [disputes, confirmations] = await Promise.all([
+      env.DB.prepare("SELECT COUNT(*) count FROM road_report_disputes WHERE report_id=?").bind(reportId).first<{ count: number }>(),
+      env.DB.prepare("SELECT COUNT(*) count FROM road_report_confirmations WHERE report_id=?").bind(reportId).first<{ count: number }>(),
+    ]);
+    const disputeCount = Number(disputes?.count || 0), confirmCount = Number(confirmations?.count || 0);
+    let deactivated = false;
+    if (disputeCount >= 3 && disputeCount > confirmCount) {
+      const closed = await env.DB.prepare("UPDATE road_reports SET is_active=0 WHERE id=? AND is_active=1").bind(reportId).run();
+      deactivated = Boolean(closed.meta.changes);
+    }
+    return json({ disputes: disputeCount, confirmations: confirmCount, deactivated });
   }
   if (path === "crews" && method === "POST") {
     const body = await request.json<{ name?: string; tag?: string }>();
