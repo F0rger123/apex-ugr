@@ -887,8 +887,11 @@ function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
   const [feedMode,setFeedMode]=useState('FOR_YOU');
   const [postCategory,setPostCategory]=useState('BUILDS');
   const feedModes=['FOR_YOU','CREWS','BUILDS','MEETS','PERFORMANCE','GHOST'];
+  const [draftRestored,setDraftRestored]=useState(false);
   useEffect(()=>{if(userId)void loadFeed(feedMode);},[feedMode,userId]);
   useEffect(()=>{const post=posts[activeIndex];if(!post||viewedPostsRef.current.has(post.id))return;viewedPostsRef.current.add(post.id);void recordView(post.id);},[activeIndex,posts]);
+  useEffect(()=>{(async()=>{try{const saved=await AsyncStorage.getItem(DRAFT_POST_KEY);if(saved){const draft=JSON.parse(saved);if(draft.uri){setDraftUri(draft.uri);setDraftType(draft.type||'photo');setCaption(draft.caption||'');setPostCategory(draft.category||'BUILDS');}}}catch{/* A corrupt draft is simply discarded. */}finally{setDraftRestored(true);}})();},[]);
+  useEffect(()=>{if(!draftRestored)return;if(!draftUri){void AsyncStorage.removeItem(DRAFT_POST_KEY);return;}void AsyncStorage.setItem(DRAFT_POST_KEY,JSON.stringify({uri:draftUri,type:draftType,caption,category:postCategory}));},[draftRestored,draftUri,draftType,caption,postCategory]);
 
   const pickMedia = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: .88, allowsEditing: false });
@@ -897,20 +900,21 @@ function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
       setDraftType(result.assets[0].type === 'video' ? 'video' : 'photo');
     }
   };
+  const discardDraft = () => { setDraftUri(null); setCaption(''); void AsyncStorage.removeItem(DRAFT_POST_KEY); };
   const publish = async () => {
     if (!draftUri) return;
     if (await createPost(draftUri, caption, draftType, postCategory)) {
-      setComposerOpen(false); setDraftUri(null); setCaption('');
+      setComposerOpen(false); setDraftUri(null); setCaption(''); void AsyncStorage.removeItem(DRAFT_POST_KEY);
     }
   };
   return (
     <View style={styles.feedScreen}>
         <View style={[styles.feedFloatingHeader,screenWidth<520&&styles.feedFloatingHeaderCompact]}>
         <View><Text style={styles.eyebrow}>ENCRYPTED SOCIAL</Text><Text style={styles.feedTitle}>THE CURRENT</Text></View>
-        <View style={styles.feedHeaderActions}><GlassButton label="CREWS" icon={Users} compact onPress={()=>onTab('crews')}/><GlassButton label="COMMS" icon={MessagesSquare} compact onPress={()=>onTab('messages')}/><GlassButton label="POST" icon={Plus} compact onPress={() => setComposerOpen(value => !value)} active /></View>
+        <View style={styles.feedHeaderActions}><GlassButton label="CREWS" icon={Users} compact onPress={()=>onTab('crews')}/><GlassButton label="COMMS" icon={MessagesSquare} compact onPress={()=>onTab('messages')}/><GlassButton label={draftUri&&!composerOpen?'RESUME DRAFT':'POST'} icon={Plus} compact onPress={() => setComposerOpen(value => !value)} active /></View>
       </View>
       <ScrollView horizontal style={styles.feedModeScroll} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedModeRail}>{feedModes.map(mode=><Pressable key={mode} onPress={()=>setFeedMode(mode)} style={[styles.feedModeChip,feedMode===mode&&styles.feedModeChipActive]}><Text style={[styles.feedModeText,feedMode===mode&&styles.feedModeTextActive]}>{mode.replace('_',' ')}</Text></Pressable>)}</ScrollView>
-      {composerOpen ? <View style={styles.feedComposerOverlay}><GlassPanel style={styles.composerPanel} glow><Pressable onPress={pickMedia} style={styles.mediaPicker}>{draftUri ? <Image source={{ uri: draftUri }} style={styles.composerPreview} /> : <><Plus size={24} color={accent} /><Text style={styles.composerHint}>SELECT PHOTO OR VIDEO</Text></>}</Pressable><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedModeRail}>{['BUILDS','MEETS','PERFORMANCE','GHOST'].map(mode=><Pressable key={mode} onPress={()=>setPostCategory(mode)} style={[styles.feedModeChip,postCategory===mode&&styles.feedModeChipActive]}><Text style={[styles.feedModeText,postCategory===mode&&styles.feedModeTextActive]}>{mode}</Text></Pressable>)}</ScrollView><TextInput value={caption} onChangeText={setCaption} placeholder="Caption your run, build, or meet" placeholderTextColor={muted} style={styles.composerInput} multiline maxLength={1200} /><View style={styles.composerActions}><GlassButton label="CANCEL" icon={X} compact onPress={() => setComposerOpen(false)} /><GlassButton label={loading ? 'UPLOADING' : 'PUBLISH'} icon={Send} compact onPress={publish} active /></View></GlassPanel></View> : null}
+      {composerOpen ? <View style={styles.feedComposerOverlay}><GlassPanel style={styles.composerPanel} glow><Pressable onPress={pickMedia} style={styles.mediaPicker}>{draftUri ? <Image source={{ uri: draftUri }} style={styles.composerPreview} /> : <><Plus size={24} color={accent} /><Text style={styles.composerHint}>SELECT PHOTO OR VIDEO</Text></>}</Pressable><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedModeRail}>{['BUILDS','MEETS','PERFORMANCE','GHOST'].map(mode=><Pressable key={mode} onPress={()=>setPostCategory(mode)} style={[styles.feedModeChip,postCategory===mode&&styles.feedModeChipActive]}><Text style={[styles.feedModeText,postCategory===mode&&styles.feedModeTextActive]}>{mode}</Text></Pressable>)}</ScrollView><TextInput value={caption} onChangeText={setCaption} placeholder="Caption your run, build, or meet" placeholderTextColor={muted} style={styles.composerInput} multiline maxLength={1200} /><View style={styles.composerActions}><GlassButton label="CLOSE" icon={X} compact onPress={() => setComposerOpen(false)} />{draftUri?<GlassButton label="DISCARD" icon={X} compact onPress={discardDraft} />:null}<GlassButton label={loading ? 'UPLOADING' : 'PUBLISH'} icon={Send} compact onPress={publish} active /></View></GlassPanel></View> : null}
       {!userId ? <GlassPanel style={styles.emptyState}><LockKeyhole size={28} color={accent} /><Text style={styles.emptyTitle}>LIVE FEED REQUIRES SIGN-IN</Text></GlassPanel> : null}
       {error ? <Pressable onPress={()=>void loadFeed(feedMode)} style={styles.inlineError}><Text style={styles.networkError}>{error}</Text><Text style={styles.sectionAction}>RETRY</Text></Pressable> : null}
       {userId&&posts.length?<View style={styles.feedListViewport} onLayout={event=>{const height=Math.round(event.nativeEvent.layout.height);if(height>=420&&height!==feedPageHeight)setFeedPageHeight(height);}}><FlatList data={posts} keyExtractor={post=>post.id} showsVerticalScrollIndicator={false} pagingEnabled snapToInterval={feedPageHeight} decelerationRate="fast" initialNumToRender={2} maxToRenderPerBatch={2} windowSize={3} removeClippedSubviews={Platform.OS!=='web'} getItemLayout={(_,index)=>({length:feedPageHeight,offset:feedPageHeight*index,index})} onMomentumScrollEnd={event=>setActiveIndex(Math.round(event.nativeEvent.contentOffset.y/feedPageHeight))} renderItem={({item:post,index})=><View style={[styles.feedPage,{height:feedPageHeight}]}>
@@ -967,6 +971,7 @@ function MoreScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
 
 type ApexSettings={unit_preference:'MPH'|'KMH';meet_notif_radius_miles:number;meet_notifs_enabled:number;convoy_radio_enabled:number;season_notifs_enabled:number;public_performance_visibility:number;public_race_records:number;apex_id_visibility:number;cotw_notifs_enabled:number;mod_sync_enabled:number;mod_price_alerts_enabled:number};
 const LOCAL_SETTINGS_KEY='apex.local.settings';
+const DRAFT_POST_KEY='apex.feed.draft';
 
 function LegacySettingsScreen(){
   const [settings,setSettings]=useState<ApexSettings|null>(null);const [apexId,setApexId]=useState('');const [audio,setAudio]=useState(true);const [haptics,setHaptics]=useState(true);const [bounty,setBounty]=useState(false);const [busy,setBusy]=useState(false);const [status,setStatus]=useState('');
