@@ -309,6 +309,11 @@ async function synchronizeProgression(env, userId) {
   ];
   for (const [key, earned, value] of milestones) if (earned) await env.DB.prepare('INSERT OR IGNORE INTO driver_milestones(user_id,milestone_key,value_number) VALUES(?,?,?)').bind(userId, key, value).run();
   const qualifiedReferrals = Number(referrals?.count || 0);
+  // referralMilestones below has always advertised 350 GC at 1 qualified
+  // referral, but nothing granted it -- the other three milestones (3/5/10)
+  // paid out a cosmetic/badge; this one just displayed "achieved" with no
+  // actual reward.
+  if (qualifiedReferrals >= 1) await award(env, userId, 350, 0, 'REFERRAL MILESTONE', 'milestone-1', `referral:milestone-1:${userId}`);
   if (qualifiedReferrals >= 3) await grantCosmeticDrop(env, userId, 'banner-ghost-network', 'referral', 'milestone-3');
   if (qualifiedReferrals >= 5) await grantCosmeticDrop(env, userId, 'frame-ghost-signal', 'referral', 'milestone-5');
   if (qualifiedReferrals >= 10) await env.DB.prepare("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,'founding-recruiter')").bind(userId).run();
