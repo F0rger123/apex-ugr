@@ -1660,12 +1660,18 @@ async function handle(request: Request, env: Env, path: string) {
       (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id) comments,
       EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id=p.id AND l.user_id=?) liked,
       EXISTS(SELECT 1 FROM post_saves s WHERE s.post_id=p.id AND s.user_id=?) saved,
-      EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.following_id=p.user_id) following
+      EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.following_id=p.user_id) following,
+      CASE WHEN p.user_id=? THEN (SELECT COUNT(*) FROM post_views v WHERE v.post_id=p.id) ELSE NULL END view_count
       FROM posts p JOIN users u ON u.id=p.user_id WHERE 1=1 ${filter} ORDER BY p.created_at DESC LIMIT 50`,
     )
-      .bind(user.id, user.id, user.id, ...(filterBinding ? [filterBinding] : []))
+      .bind(user.id, user.id, user.id, user.id, ...(filterBinding ? [filterBinding] : []))
       .all();
     return json({ posts: posts.results });
+  }
+  const postView = path.match(/^posts\/([^/]+)\/view$/);
+  if (postView && method === "POST") {
+    await env.DB.prepare("INSERT OR IGNORE INTO post_views(post_id,user_id) VALUES(?,?)").bind(postView[1], user.id).run();
+    return json({ recorded: true });
   }
   if (path === "posts" && method === "POST") {
     const body = await request.json<{

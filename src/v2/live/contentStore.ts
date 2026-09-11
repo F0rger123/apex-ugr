@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { cloudflareApi } from '../../config/cloudflareApi';
 
-export type LivePost = { id:string; userId:string; alias:string; avatarUrl:string|null; mediaUrl:string; videoUrl:string|null; caption:string; category:string; likes:number; comments:number; liked:boolean; saved:boolean; following:boolean; createdAt:string };
+export type LivePost = { id:string; userId:string; alias:string; avatarUrl:string|null; mediaUrl:string; videoUrl:string|null; caption:string; category:string; likes:number; comments:number; liked:boolean; saved:boolean; following:boolean; createdAt:string; viewCount:number|null };
 export type LiveComment={id:string;body:string;createdAt:string;userId:string;alias:string;avatarUrl:string|null};
 export type Ranking = { id:string; alias:string; avatarUrl:string|null; tier:string; points:number; wins:number; losses:number; entered:number; topSpeed:number; reputation:number; credits:number };
 export type ActiveVehicle = { id:string; nickname:string; year:number; make:string; model:string; trim:string|null; engine:string; drivetrain:string; horsepower:number; color:string; photoUrl:string|null;digitalTwinUrl:string|null;digitalTwinStatus:string };
@@ -15,7 +15,7 @@ interface ContentState {
   profile:{alias:string;displayName:string;credits:number;points:number;tier:string;wins:number;entered:number;reputation:number;isDeveloper:boolean}|null;
   posts:LivePost[]; commentsByPost:Record<string,LiveComment[]>; rankings:Ranking[]; pilots:PilotDirectoryEntry[]; races:RaceContract[]; vehicles:ActiveVehicle[]; activeVehicleId:string|null; challengeTargetId:string|null; radarTargetId:string|null;
   products:ProviderProduct[]; providers:ProviderLink[]; loading:boolean; error:string|null;
-  initialize:()=>Promise<void>; loadFeed:(mode?:string)=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>; toggleFollow:(userId:string)=>Promise<void>;
+  initialize:()=>Promise<void>; loadFeed:(mode?:string)=>Promise<void>; recordView:(id:string)=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>; toggleFollow:(userId:string)=>Promise<void>;
   loadComments:(id:string)=>Promise<void>;addComment:(id:string,text:string)=>Promise<boolean>; createPost:(uri:string,caption:string,type:'photo'|'video',category?:string)=>Promise<boolean>; updateProfile:(displayName:string)=>Promise<boolean>;
   loadRankings:()=>Promise<void>; loadPilots:()=>Promise<void>; loadRaces:()=>Promise<void>; respondToRace:(id:string,action:'accept'|'decline'|'reschedule',startsAt?:string)=>Promise<string>; startRace:(id:string)=>Promise<string>; checkRace:(id:string,location:{latitude:number;longitude:number;accuracy:number|null;sampleAgeMs:number})=>Promise<string>; setChallengeTarget:(id:string|null)=>void; setRadarTarget:(id:string|null)=>void; loadVehicles:()=>Promise<void>; addVehicle:(vehicle:{nickname:string;year:number;make:string;model:string;trim:string;engine:string;drivetrain:string;horsepower:number;color:string},photoUri:string|null)=>Promise<boolean>; setActiveVehicle:(id:string)=>void; searchParts:(query:string)=>Promise<void>;
 }
@@ -33,9 +33,10 @@ export const useContentStore=create<ContentState>((set,get)=>({
     if(!get().userId)return;
     try{
       const data=await cloudflareApi.request<{posts:any[]}>(`/api/feed?mode=${encodeURIComponent(mode)}`);
-      set({posts:data.posts.map(row=>({id:row.id,userId:row.user_id,alias:row.username,avatarUrl:row.avatar_url||null,mediaUrl:row.media_url,videoUrl:row.media_type==='video'?row.media_url:null,caption:row.caption||'',category:row.feed_category||'FOR_YOU',likes:Number(row.likes||0),comments:Number(row.comments||0),liked:Boolean(row.liked),saved:Boolean(row.saved),following:Boolean(row.following),createdAt:row.created_at}))});
+      set({posts:data.posts.map(row=>({id:row.id,userId:row.user_id,alias:row.username,avatarUrl:row.avatar_url||null,mediaUrl:row.media_url,videoUrl:row.media_type==='video'?row.media_url:null,caption:row.caption||'',category:row.feed_category||'FOR_YOU',likes:Number(row.likes||0),comments:Number(row.comments||0),liked:Boolean(row.liked),saved:Boolean(row.saved),following:Boolean(row.following),createdAt:row.created_at,viewCount:row.view_count==null?null:Number(row.view_count)}))});
     }catch(error){set({error:error instanceof Error?error.message:'Feed failed'});}
   },
+  recordView:async id=>{try{await cloudflareApi.request(`/api/posts/${id}/view`,{method:'POST'});}catch{/* View tracking is supplemental; never surface this to the user. */}},
   toggleLike:async id=>{
     try{const data=await cloudflareApi.request<{active:boolean}>(`/api/posts/${id}/like`,{method:'POST'});set(state=>({posts:state.posts.map(post=>post.id===id?{...post,liked:data.active,likes:Math.max(0,post.likes+(data.active?1:-1))}:post)}));}catch(error){set({error:error instanceof Error?error.message:'Like failed'});}
   },
