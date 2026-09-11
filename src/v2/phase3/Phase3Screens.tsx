@@ -54,9 +54,11 @@ import {
   X,
   Zap,
 } from "lucide-react-native";
+import * as Haptics from "expo-haptics";
 import { cloudflareApi } from "../../config/cloudflareApi";
 import { useContentStore } from "../live/contentStore";
 import { useLiveNetworkStore } from "../live/liveNetworkStore";
+import { playInterfaceSound } from "../../utils/soundSynthesizer";
 
 const accent = "#A7E59A",
   paper = "#F7F9F7",
@@ -2030,6 +2032,8 @@ function ChestModal({ state, onClose }: { state: any; onClose: () => void }) {
     [reward, setReward] = useState<any | null>(null),
     [error, setError] = useState("");
   const pulse=useRef(new Animated.Value(0)).current;
+  const bump=useRef(new Animated.Value(1)).current;
+  const rewardIn=useRef(new Animated.Value(0)).current;
   useEffect(()=>{
     const loop=Animated.loop(Animated.sequence([
       Animated.timing(pulse,{toValue:1,duration:1300,useNativeDriver:true}),
@@ -2044,9 +2048,19 @@ function ChestModal({ state, onClose }: { state: any; onClose: () => void }) {
     "DISENGAGE LOCKS",
     "OPEN CHEST",
   ];
+  const bumpChest = () => {
+    bump.setValue(1);
+    Animated.sequence([
+      Animated.timing(bump,{toValue:1.08,duration:90,useNativeDriver:true}),
+      Animated.spring(bump,{toValue:1,friction:4,tension:120,useNativeDriver:true}),
+    ]).start();
+  };
   const tap = async () => {
     if (!state?.available) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    bumpChest();
     if (stage < 3) {
+      playInterfaceSound("select");
       setStage((value) => value + 1);
       return;
     }
@@ -2057,8 +2071,13 @@ function ChestModal({ state, onClose }: { state: any; onClose: () => void }) {
       );
       setReward(result.claim);
       setStage(4);
+      playInterfaceSound("reward");
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      rewardIn.setValue(0);
+      Animated.spring(rewardIn,{toValue:1,friction:5,tension:80,useNativeDriver:true}).start();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chest failed.");
+      playInterfaceSound("error");
     }
   };
   return (
@@ -2075,14 +2094,14 @@ function ChestModal({ state, onClose }: { state: any; onClose: () => void }) {
           </Pressable>
           <Text style={styles.eyebrow}>DAILY ENCRYPTED DROP</Text>
           <Text style={styles.title}>GHOST CHEST</Text>
-          <Animated.View style={{width:"100%",transform:[{scale:pulse.interpolate({inputRange:[0,1],outputRange:[1,1.025]})}],opacity:pulse.interpolate({inputRange:[0,1],outputRange:[.9,1]})}}>
+          <Animated.View style={{width:"100%",transform:[{scale:Animated.multiply(reward?1:pulse.interpolate({inputRange:[0,1],outputRange:[1,1.025]}),bump)}],opacity:pulse.interpolate({inputRange:[0,1],outputRange:[.9,1]})}}>
           <Pressable onPress={() => void tap()} style={[styles.chest,stage > 0 && styles.chestAwake,stage === 4 && styles.chestOpen]}>
             {reward ? (
-              <>
+              <Animated.View style={{alignItems:"center",gap:12,transform:[{scale:rewardIn.interpolate({inputRange:[0,1],outputRange:[.4,1]})}],opacity:rewardIn}}>
                 <Sparkles size={52} color={accent} />
                 <Text style={styles.featuredTitle}>{reward.rarity}</Text>
                 <Text style={styles.cardTitle}>+{reward.gcReward} GC</Text>
-              </>
+              </Animated.View>
             ) : (
               <>
                 <LockKeyhole
@@ -2641,8 +2660,8 @@ const styles = StyleSheet.create({
   },
   chestOpen: { backgroundColor: "rgba(15,35,20,.8)" },
   stageDots: { flexDirection: "row", gap: 7 },
-  stageDot: { width: 28, height: 3, backgroundColor: "rgba(255,255,255,.13)" },
-  stageDotActive: { backgroundColor: accent },
+  stageDot: { width: 28, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,.13)" },
+  stageDotActive: { backgroundColor: accent, shadowColor: accent, shadowOpacity: 0.6, shadowRadius: 4 },
   cotwImage: { height: 180, width: "100%", borderRadius: 6 },
   cotwVehicleRail: { gap: 8, paddingVertical: 4 },
   cotwVehicle: { width: 132, minHeight: 112, borderWidth: 1, borderColor: border, borderRadius: 7, padding: 8, gap: 5, backgroundColor: "rgba(255,255,255,.025)" },
