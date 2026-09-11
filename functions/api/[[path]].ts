@@ -1662,9 +1662,10 @@ async function handle(request: Request, env: Env, path: string) {
       EXISTS(SELECT 1 FROM post_saves s WHERE s.post_id=p.id AND s.user_id=?) saved,
       EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.following_id=p.user_id) following,
       CASE WHEN p.user_id=? THEN (SELECT COUNT(*) FROM post_views v WHERE v.post_id=p.id) ELSE NULL END view_count
-      FROM posts p JOIN users u ON u.id=p.user_id WHERE 1=1 ${filter} ORDER BY p.created_at DESC LIMIT 50`,
+      FROM posts p JOIN users u ON u.id=p.user_id
+      WHERE NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=? AND b.blocked_id=p.user_id) OR (b.blocker_id=p.user_id AND b.blocked_id=?)) ${filter} ORDER BY p.created_at DESC LIMIT 50`,
     )
-      .bind(user.id, user.id, user.id, user.id, ...(filterBinding ? [filterBinding] : []))
+      .bind(user.id, user.id, user.id, user.id, user.id, user.id, ...(filterBinding ? [filterBinding] : []))
       .all();
     return json({ posts: posts.results });
   }
@@ -1732,6 +1733,38 @@ async function handle(request: Request, env: Env, path: string) {
     if (current) await env.DB.prepare("DELETE FROM follows WHERE follower_id=? AND following_id=?").bind(user.id, targetId).run();
     else await env.DB.batch([env.DB.prepare("INSERT INTO follows(follower_id,following_id) VALUES(?,?)").bind(user.id, targetId), env.DB.prepare(`INSERT INTO notifications(id,user_id,type,title,body,data_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(), targetId, "new_follower", "NEW FOLLOWER", `${user.username} followed your build`, JSON.stringify({ userId: user.id }))]);
     return json({ following: !current });
+  }
+
+  const blockAction = path.match(/^users\/([^/]+)\/block$/);
+  if (blockAction && method === "POST") {
+    const targetId = blockAction[1];
+    if (targetId === user.id) return json({ error: "You cannot block yourself." }, 400);
+    const target = await env.DB.prepare("SELECT username FROM users WHERE id=?").bind(targetId).first<{ username: string }>();
+    if (!target) return json({ error: "Pilot not found." }, 404);
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO user_blocks(blocker_id,blocked_id) VALUES(?,?)").bind(user.id, targetId),
+      env.DB.prepare("DELETE FROM follows WHERE (follower_id=? AND following_id=?) OR (follower_id=? AND following_id=?)").bind(user.id, targetId, targetId, user.id),
+    ]);
+    return json({ blocked: true });
+  }
+  if (blockAction && method === "DELETE") {
+    await env.DB.prepare("DELETE FROM user_blocks WHERE blocker_id=? AND blocked_id=?").bind(user.id, blockAction[1]).run();
+    return json({ blocked: false });
+  }
+  if (path === "users/blocked" && method === "GET") {
+    const rows = await env.DB.prepare("SELECT u.id,u.username,u.avatar_url FROM user_blocks b JOIN users u ON u.id=b.blocked_id WHERE b.blocker_id=? ORDER BY b.created_at DESC").bind(user.id).all();
+    return json({ blocked: rows.results });
+  }
+
+  if (path === "reports" && method === "POST") {
+    const body = await request.json<{ targetType?: string; targetId?: string; reason?: string; note?: string }>();
+    if (!["post", "user", "comment"].includes(body.targetType || "") || !body.targetId?.trim() || !body.reason?.trim()) return json({ error: "A report needs a target and a reason." }, 400);
+    const recent = await env.DB.prepare("SELECT COUNT(*) count FROM content_reports WHERE reporter_id=? AND created_at>datetime('now','-1 day')").bind(user.id).first<{ count: number }>();
+    if (Number(recent?.count || 0) >= 20) return json({ error: "Too many reports today." }, 429);
+    await env.DB.prepare("INSERT INTO content_reports(id,reporter_id,target_type,target_id,reason,note) VALUES(?,?,?,?,?,?)")
+      .bind(crypto.randomUUID(), user.id, body.targetType, body.targetId.trim(), body.reason.trim().slice(0, 100), body.note?.trim().slice(0, 1000) || "")
+      .run();
+    return json({ reported: true }, 201);
   }
 
   if (path === "leaderboard" && method === "GET") {

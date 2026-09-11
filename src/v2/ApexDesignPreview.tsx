@@ -873,7 +873,7 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
 }
 
 function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
-  const { posts, commentsByPost, loading, error, userId, toggleLike, toggleSave, toggleFollow, loadComments, addComment, createPost, loadFeed, setRadarTarget, recordView } = useContentStore();
+  const { posts, commentsByPost, loading, error, userId, toggleLike, toggleSave, toggleFollow, loadComments, addComment, createPost, loadFeed, setRadarTarget, recordView, blockUser, reportContent } = useContentStore();
   const viewedPostsRef=useRef<Set<string>>(new Set());
   const [composerOpen, setComposerOpen] = useState(false);
   const [draftUri, setDraftUri] = useState<string | null>(null);
@@ -901,6 +901,26 @@ function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
     }
   };
   const discardDraft = () => { setDraftUri(null); setCaption(''); void AsyncStorage.removeItem(DRAFT_POST_KEY); };
+  const reportPost = (postId:string) => {
+    const reasons=['Spam','Harassment','Dangerous driving','Explicit content','Impersonation'];
+    Alert.alert('Report this post', 'What is the issue?', [
+      ...reasons.map(reason=>({text:reason,onPress:()=>{void reportContent('post',postId,reason);Alert.alert('Report submitted','Thank you. Our team will review this.');}})),
+      {text:'Cancel',style:'cancel' as const},
+    ]);
+  };
+  const blockPostAuthor = (targetUserId:string, alias:string) => {
+    Alert.alert(`Block @${alias}?`, 'You will no longer see their posts, and they will no longer see yours.', [
+      {text:'Cancel',style:'cancel'},
+      {text:'Block',style:'destructive',onPress:()=>{void blockUser(targetUserId);}},
+    ]);
+  };
+  const showPostOptions = (postId:string, targetUserId:string, alias:string) => {
+    Alert.alert('Post options', undefined, [
+      {text:'Report',onPress:()=>reportPost(postId)},
+      {text:'Block @'+alias,style:'destructive',onPress:()=>blockPostAuthor(targetUserId,alias)},
+      {text:'Cancel',style:'cancel'},
+    ]);
+  };
   const publish = async () => {
     if (!draftUri) return;
     if (await createPost(draftUri, caption, draftType, postCategory)) {
@@ -919,7 +939,7 @@ function FeedScreen({onTab}:{onTab:(tab:TabKey)=>void}) {
       {error ? <Pressable onPress={()=>void loadFeed(feedMode)} style={styles.inlineError}><Text style={styles.networkError}>{error}</Text><Text style={styles.sectionAction}>RETRY</Text></Pressable> : null}
       {userId&&posts.length?<View style={styles.feedListViewport} onLayout={event=>{const height=Math.round(event.nativeEvent.layout.height);if(height>=420&&height!==feedPageHeight)setFeedPageHeight(height);}}><FlatList data={posts} keyExtractor={post=>post.id} showsVerticalScrollIndicator={false} pagingEnabled snapToInterval={feedPageHeight} decelerationRate="fast" initialNumToRender={2} maxToRenderPerBatch={2} windowSize={3} removeClippedSubviews={Platform.OS!=='web'} getItemLayout={(_,index)=>({length:feedPageHeight,offset:feedPageHeight*index,index})} onMomentumScrollEnd={event=>setActiveIndex(Math.round(event.nativeEvent.contentOffset.y/feedPageHeight))} renderItem={({item:post,index})=><View style={[styles.feedPage,{height:feedPageHeight}]}>
         <View style={styles.feedMedia}>{post.videoUrl?<FeedVideo uri={post.videoUrl} active={activeIndex===index} muted={videoMuted}/>:<Image source={{uri:post.mediaUrl}} style={StyleSheet.absoluteFill} resizeMode="cover"/>}<LinearGradient pointerEvents="none" colors={['rgba(0,0,0,.05)','rgba(0,0,0,.08)','rgba(0,0,0,.88)']} style={StyleSheet.absoluteFill}/></View>
-        <View style={styles.feedCreator}>{post.avatarUrl?<Image source={{uri:post.avatarUrl}} style={styles.postAvatar}/>:<View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0,1)}</Text></View>}<View style={styles.commandCopy}><Text style={styles.postAlias}>@{post.alias}</Text><Text style={styles.postMeta}>{new Date(post.createdAt).toLocaleString()}</Text></View>{post.userId!==userId?<Pressable accessibilityRole="button" accessibilityLabel={post.following?'Unfollow driver':'Follow driver'} onPress={()=>{playInterfaceSound();void toggleFollow(post.userId);}} style={[styles.followButton,post.following&&styles.followButtonActive]}><Text style={styles.followText}>{post.following?'FOLLOWING':'FOLLOW'}</Text></Pressable>:null}</View>
+        <View style={styles.feedCreator}>{post.avatarUrl?<Image source={{uri:post.avatarUrl}} style={styles.postAvatar}/>:<View style={styles.postAvatar}><Text style={styles.postAvatarText}>{post.alias.slice(0,1)}</Text></View>}<View style={styles.commandCopy}><Text style={styles.postAlias}>@{post.alias}</Text><Text style={styles.postMeta}>{new Date(post.createdAt).toLocaleString()}</Text></View>{post.userId!==userId?<Pressable accessibilityRole="button" accessibilityLabel={post.following?'Unfollow driver':'Follow driver'} onPress={()=>{playInterfaceSound();void toggleFollow(post.userId);}} style={[styles.followButton,post.following&&styles.followButtonActive]}><Text style={styles.followText}>{post.following?'FOLLOWING':'FOLLOW'}</Text></Pressable>:null}{post.userId!==userId?<Pressable accessibilityRole="button" accessibilityLabel="Report or block this post" onPress={()=>showPostOptions(post.id,post.userId,post.alias)} style={styles.iconButton}><MoreHorizontal size={18} color={paper}/></Pressable>:null}</View>
         <Text style={styles.feedCaption}>{post.caption||'Untitled transmission'}</Text>
         <View style={styles.feedActionRail}><Pressable accessibilityRole="button" accessibilityLabel={post.liked?'Unlike post':'Like post'} onPress={()=>{playInterfaceSound();void toggleLike(post.id);}} style={styles.feedAction}><Heart size={25} color={post.liked?accent:paper} fill={post.liked?accent:'transparent'}/><Text style={styles.feedActionCount}>{post.likes}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Comment on post" onPress={()=>{playInterfaceSound();const opening=commenting!==post.id;setCommenting(opening?post.id:null);if(opening)void loadComments(post.id);}} style={styles.feedAction}><MessageCircle size={25} color={paper}/><Text style={styles.feedActionCount}>{post.comments}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={post.saved?'Remove saved post':'Save post'} onPress={()=>{playInterfaceSound();void toggleSave(post.id);}} style={styles.feedAction}><Bookmark size={24} color={post.saved?accent:paper} fill={post.saved?accent:'transparent'}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Show driver on map" onPress={()=>{playInterfaceSound('toggle');setRadarTarget(post.userId);onTab('radar');}} style={styles.feedAction}><MapPin size={24} color={paper}/><Text style={styles.feedActionLabel}>MAP</Text></Pressable>{post.videoUrl?<Pressable accessibilityRole="button" accessibilityLabel={videoMuted?'Unmute video':'Mute video'} onPress={()=>{playInterfaceSound('toggle');setVideoMuted(value=>!value);}} style={styles.feedAction}>{videoMuted?<VolumeX size={23} color={paper}/>:<Volume2 size={23} color={accent}/>}</Pressable>:null}{post.userId===userId&&post.viewCount!=null?<View style={styles.feedAction}><Text style={styles.feedActionLabel}>{post.viewCount} VIEWS</Text></View>:null}</View>
         {commenting===post.id?<View style={styles.feedCommentPanel}><ScrollView style={styles.feedCommentList}>{(commentsByPost[post.id]||[]).map(entry=><View key={entry.id} style={styles.feedCommentRow}><Text style={styles.feedCommentAlias}>@{entry.alias}</Text><Text style={styles.feedCommentBody}>{entry.body}</Text></View>)}{!(commentsByPost[post.id]||[]).length?<Text style={styles.feedCommentEmpty}>NO COMMENTS YET</Text>:null}</ScrollView><View style={styles.feedCommentComposer}><TextInput value={comment} onChangeText={setComment} placeholder="Add a comment" placeholderTextColor={muted} style={styles.commentInput} maxLength={500}/><Pressable disabled={!comment.trim()} accessibilityRole="button" accessibilityLabel="Send comment" onPress={async()=>{if(await addComment(post.id,comment.trim()))setComment('');}}><Send size={19} color={comment.trim()?accent:muted}/></Pressable></View></View>:null}
