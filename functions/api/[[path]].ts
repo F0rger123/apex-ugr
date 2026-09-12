@@ -2321,8 +2321,11 @@ async function handle(request: Request, env: Env, path: string) {
   if (path === "upload" && method === "POST") {
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File) || file.size > 30 * 1024 * 1024) return json({ error: "Upload must be a file under 30 MB." }, 400);
+    if (!(file instanceof File)) return json({ error: "Upload must be a file." }, 400);
     if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) return json({ error: "Only image and video uploads are supported." }, 415);
+    const isVideo = file.type.startsWith("video/");
+    const maxBytes = isVideo ? 90 * 1024 * 1024 : 20 * 1024 * 1024;
+    if (file.size > maxBytes) return json({ error: `Upload must be a ${isVideo ? "video" : "photo"} under ${Math.round(maxBytes / (1024 * 1024))} MB.` }, 400);
     const extension = (file.name.split(".").pop() || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 6);
     const key = `${user.id}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
     await env.MEDIA.put(key, file.stream(), {

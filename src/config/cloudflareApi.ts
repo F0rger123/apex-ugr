@@ -28,10 +28,10 @@ function failureMessage(status: number, fallback?: string) {
   return fallback || `REQUEST FAILED (${status})`;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, timeoutMs = 15_000): Promise<T> {
   const sessionToken = await token();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${configuredBase}${path}`, {
       ...init,
@@ -76,7 +76,7 @@ export const cloudflareApi = {
     const file = await (await fetch(uri)).blob();
     const form = new FormData();
     form.append('file', file, `upload.${mediaType === 'video' ? 'mp4' : 'jpg'}`);
-    return request<{ url: string }>('/api/upload', { method: 'POST', body: form });
+    return request<{ url: string }>('/api/upload', { method: 'POST', body: form }, mediaType === 'video' ? 120_000 : 30_000);
   },
 };
 
