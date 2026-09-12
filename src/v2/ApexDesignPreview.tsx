@@ -130,8 +130,8 @@ const surface = 'rgba(4, 8, 5, 0.86)';
 const border = 'rgba(255, 255, 255, 0.16)';
 const { width: screenWidth } = Dimensions.get('window');
 const ANDROID_DOWNLOAD_URL='https://apex-ugr.pages.dev/api/download/android';
-const APP_VERSION='1.5.2';
-const ANDROID_VERSION_CODE=17;
+const APP_VERSION='1.5.3';
+const ANDROID_VERSION_CODE=18;
 const SCRAMBLE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%&';
 const useNativeAnimations=Platform.OS!=='web';
 
