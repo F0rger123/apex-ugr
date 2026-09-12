@@ -746,10 +746,10 @@ function RadarScreen({ onTab }: { onTab: (tab: TabKey) => void }) {
   const {discoveries,crewDiscoveries,territories,drops,reports,rewards,ghostReplays,safeHouses,refresh:refreshWorld}=useWorldStore();
   const humanDrivers = liveDrivers.map((driver: LiveDriver): Driver => ({
     id: driver.id, alias: driver.alias, car: driver.vehicle || 'VEHICLE PRIVATE', hp: null, record: driver.record,
-    rank: driver.tier, distance: `${Math.round(driver.speedKph)} KPH`, mystery: driver.mystery,
+    rank: driver.tier, distance: `${Math.round(unit==='mph'?driver.speedKph*.621371:driver.speedKph)} ${unit.toUpperCase()}`, mystery: driver.mystery,
     latitude: driver.latitude, longitude: driver.longitude, speedKph: driver.speedKph, cruiseId: driver.cruiseId, isLive: driver.isLive,
   }));
-  const bountyActors=[worldBounty?.target,...(worldBounty?.hunters||[])].filter((actor:any)=>Number.isFinite(actor?.latitude)&&Number.isFinite(actor?.longitude)).map((actor:any):Driver=>({id:actor.id,alias:actor.displayName,car:actor.vehicleLabel,hp:null,record:actor.actorType==='npc'?'NPC':'BOUNTY',rank:'Bronze',distance:`${Math.round(actor.speedKph||0)} KPH`,mystery:false,latitude:actor.latitude,longitude:actor.longitude,speedKph:actor.speedKph||0,cruiseId:null,isLive:true}));
+  const bountyActors=[worldBounty?.target,...(worldBounty?.hunters||[])].filter((actor:any)=>Number.isFinite(actor?.latitude)&&Number.isFinite(actor?.longitude)).map((actor:any):Driver=>({id:actor.id,alias:actor.displayName,car:actor.vehicleLabel,hp:null,record:actor.actorType==='npc'?'NPC':'BOUNTY',rank:'Bronze',distance:`${Math.round(unit==='mph'?(actor.speedKph||0)*.621371:(actor.speedKph||0))} ${unit.toUpperCase()}`,mystery:false,latitude:actor.latitude,longitude:actor.longitude,speedKph:actor.speedKph||0,cruiseId:null,isLive:true}));
   const drivers=[...humanDrivers,...bountyActors.filter((actor:Driver)=>!humanDrivers.some(driver=>driver.id===actor.id))];
   const crewTracks=cruises.map(cruise=>{const members=drivers.filter(driver=>driver.cruiseId===cruise.id);if(!members.length)return null;return{id:cruise.id,title:cruise.title,members,latitude:members.reduce((sum,item)=>sum+item.latitude,0)/members.length,longitude:members.reduce((sum,item)=>sum+item.longitude,0)/members.length,status:cruise.status};}).filter(Boolean) as Array<{id:string;title:string;members:Driver[];latitude:number;longitude:number;status:string}>;
   const selectedCrew=crewTracks.find(crew=>crew.id===selectedCrewId)||null;
@@ -1222,11 +1222,12 @@ function MeetScreen() {
 type LeaderboardMode='season'|'wins'|'speed'|'reputation'|'credits';
 function LeaderboardScreen(){
   const rankings=useContentStore(state=>state.rankings);
+  const unit=useLiveNetworkStore(state=>state.unit);
   const [mode,setMode]=useState<LeaderboardMode>('season');
   const boards:{key:LeaderboardMode;label:string;title:string;icon:IconType;value:(row:(typeof rankings)[number])=>number;format:(value:number)=>string}[]=[
     {key:'season',label:'SEASON',title:'SEASON RP',icon:Trophy,value:row=>row.points,format:value=>`${value.toLocaleString()} RP`},
     {key:'wins',label:'WINS',title:'RACE WINS',icon:Medal,value:row=>row.wins,format:value=>`${value} WINS`},
-    {key:'speed',label:'SPEED',title:'TOP SPEED',icon:Gauge,value:row=>row.topSpeed,format:value=>`${Math.round(value)} KPH`},
+    {key:'speed',label:'SPEED',title:'TOP SPEED',icon:Gauge,value:row=>row.topSpeed,format:value=>`${Math.round(unit==='mph'?value*.621371:value)} ${unit.toUpperCase()}`},
     {key:'reputation',label:'REP',title:'REPUTATION',icon:ShieldCheck,value:row=>row.reputation,format:value=>`${value.toLocaleString()} REP`},
     {key:'credits',label:'CREDITS',title:'CREDIT VAULT',icon:Gem,value:row=>row.credits,format:value=>`${value.toLocaleString()} ACR`},
   ];
@@ -1389,7 +1390,7 @@ function RaceScreen() {
   const [inboxFilter,setInboxFilter]=useState<'pending'|'accepted'|'history'>('pending');
   const subscription = useRef<Location.LocationSubscription | null>(null);
   const { pilots, races, profile, challengeTargetId, loadPilots, loadRaces, respondToRace, startRace, checkRace, setChallengeTarget } = useContentStore();
-  const {route,location}=useLiveNetworkStore();
+  const {route,location,unit}=useLiveNetworkStore();
   const creditBalance=profile?.credits||0;
   const challengePilots=useMemo(()=>pilots.filter(pilot=>!opponentQuery.trim()||`${pilot.alias} ${pilot.vehicle||''}`.toLowerCase().includes(opponentQuery.trim().toLowerCase())).slice(0,24),[pilots,opponentQuery]);
   const visibleRaces=races.filter(race=>inboxFilter==='pending'?['pending','rescheduled'].includes(race.status):inboxFilter==='accepted'?['accepted','scheduled','live'].includes(race.status):!['pending','rescheduled','accepted','scheduled','live'].includes(race.status));
@@ -1430,9 +1431,9 @@ function RaceScreen() {
     subscription.current = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 1 },
       update => {
-        const mph = Math.max(0, (update.coords.speed || 0) * 2.23694);
-        setSpeed(mph);
-        setMaxSpeed(current => Math.max(current, mph));
+        const kph = Math.max(0, (update.coords.speed || 0) * 3.6);
+        setSpeed(kph);
+        setMaxSpeed(current => Math.max(current, kph));
       }
     );
   };
@@ -1506,9 +1507,9 @@ function RaceScreen() {
       <SectionTitle label="LIVE SPEED PROOF" />
       <GlassPanel style={styles.speedPanel} glow={tracking}>
         <View style={styles.speedHeader}><Text style={[styles.speedStatus, tracking && { color: accent }]}>{gpsStatus}</Text><View style={[styles.liveDot, tracking && styles.liveDotBright]} /></View>
-        <Text style={styles.speedValue}>{Math.round(speed)}</Text>
-        <Text style={styles.speedUnit}>MPH</Text>
-        <View style={styles.speedMetaRow}><Text style={styles.speedMeta}>MAX {Math.round(maxSpeed)} MPH</Text><Text style={styles.speedMeta}>FORMAT {format}</Text></View>
+        <Text style={styles.speedValue}>{Math.round(unit === 'mph' ? speed * .621371 : speed)}</Text>
+        <Text style={styles.speedUnit}>{unit.toUpperCase()}</Text>
+        <View style={styles.speedMetaRow}><Text style={styles.speedMeta}>MAX {Math.round(unit === 'mph' ? maxSpeed * .621371 : maxSpeed)} {unit.toUpperCase()}</Text><Text style={styles.speedMeta}>FORMAT {format}</Text></View>
         <Pressable onPress={toggleTracking} style={[styles.startRunButton, tracking && styles.stopRunButton]}>
           {tracking ? <X size={18} color={paper} /> : <Play size={18} color={accent} fill={accent} />}
           <Text style={[styles.startRunText, tracking && { color: paper }]}>{tracking ? 'END GPS RUN' : 'START GPS RUN'}</Text>
