@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Image,
@@ -423,7 +424,8 @@ export function Phase3ProfileScreen({
     [tab, setTab] = useState<ProfileTab>("OVERVIEW"),
     [error, setError] = useState(""),
     [qrOpen, setQrOpen] = useState(false),
-    [cameraOpen, setCameraOpen] = useState(false);
+    [cameraOpen, setCameraOpen] = useState(false),
+    [avatarBusy, setAvatarBusy] = useState(false);
   const vehicles = useContentStore((state) => state.vehicles);
   const load = async () => {
     try {
@@ -434,6 +436,23 @@ export function Phase3ProfileScreen({
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Profile failed.");
+    }
+  };
+  const pickAvatar = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (result.canceled || !result.assets[0]) return;
+    setAvatarBusy(true);
+    try {
+      const ok = await useContentStore.getState().updateAvatar(result.assets[0].uri);
+      if (ok) await load();
+      else Alert.alert("Avatar update failed", useContentStore.getState().error || "Try again in a moment.");
+    } finally {
+      setAvatarBusy(false);
     }
   };
   useEffect(() => {
@@ -470,7 +489,11 @@ export function Phase3ProfileScreen({
         }
         style={styles.profileHero}
       >
-        <View
+        <Pressable
+          disabled={!data.isSelf || avatarBusy}
+          accessibilityRole={data.isSelf ? "button" : undefined}
+          accessibilityLabel={data.isSelf ? "Change profile photo" : undefined}
+          onPress={data.isSelf ? () => void pickAvatar() : undefined}
           style={[
             styles.profileAvatar,
             frame && {
@@ -489,7 +512,16 @@ export function Phase3ProfileScreen({
               {String(p.display_name || p.username).slice(0, 1)}
             </Text>
           )}
-        </View>
+          {data.isSelf ? (
+            <View style={styles.avatarEditBadge}>
+              {avatarBusy ? (
+                <ActivityIndicator size="small" color={paper} />
+              ) : (
+                <Camera size={12} color={paper} />
+              )}
+            </View>
+          ) : null}
+        </Pressable>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>{p.title}</Text>
           <Text numberOfLines={1} style={styles.title}>
@@ -2389,6 +2421,7 @@ const styles = StyleSheet.create({
   },
   profilePhoto: { width: "100%", height: "100%" },
   profileInitial: { color: paper, fontSize: 30, fontWeight: "900" },
+  avatarEditBadge: { position: "absolute", right: 1, bottom: 1, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,5,3,.92)", borderWidth: 1, borderColor: "rgba(255,255,255,.4)" },
   profileId: { color: accent, fontSize: 10, fontWeight: "900" },
   profileTools: { gap: 7 },
   iconAction: {

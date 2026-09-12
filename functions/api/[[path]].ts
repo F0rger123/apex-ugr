@@ -934,10 +934,22 @@ async function handle(request: Request, env: Env, path: string) {
     return json({ unregistered: true });
   }
   if (path === "profile" && method === "PUT") {
-    const body = await request.json<{ displayName?: string }>();
+    const body = await request.json<{ displayName?: string; avatarUrl?: string }>();
     const displayName = body.displayName?.trim();
-    if (!displayName || displayName.length < 2) return json({ error: "Use a display name with at least 2 characters." }, 400);
-    await env.DB.prepare("UPDATE users SET display_name=? WHERE id=?").bind(displayName.slice(0, 40), user.id).run();
+    if (body.displayName !== undefined && (!displayName || displayName.length < 2)) return json({ error: "Use a display name with at least 2 characters." }, 400);
+    let avatarUrl: string | undefined;
+    if (body.avatarUrl !== undefined) {
+      if (!body.avatarUrl.startsWith("/api/media/")) return json({ error: "Upload your avatar through the encrypted Apex uploader first." }, 400);
+      const avatarKey = decodeURIComponent(body.avatarUrl.slice("/api/media/".length));
+      if (!avatarKey.startsWith(`${user.id}/`)) return json({ error: "This upload belongs to another pilot." }, 403);
+      const avatarObject = await env.MEDIA.head(avatarKey);
+      if (!avatarObject) return json({ error: "Uploaded avatar is no longer available." }, 404);
+      if (!(avatarObject.httpMetadata?.contentType || "").startsWith("image/")) return json({ error: "Avatar must be a photo." }, 400);
+      avatarUrl = body.avatarUrl;
+    }
+    if (displayName === undefined && avatarUrl === undefined) return json({ error: "Nothing to update." }, 400);
+    if (displayName !== undefined) await env.DB.prepare("UPDATE users SET display_name=? WHERE id=?").bind(displayName!.slice(0, 40), user.id).run();
+    if (avatarUrl !== undefined) await env.DB.prepare("UPDATE users SET avatar_url=? WHERE id=?").bind(avatarUrl, user.id).run();
     const updated = await env.DB.prepare("SELECT id,email,username,display_name,avatar_url,credits,points,tier,wins,losses,reputation,decline_streak FROM users WHERE id=?").bind(user.id).first<UserRow>();
     return json({ user: publicUser(updated!) });
   }

@@ -16,7 +16,7 @@ interface ContentState {
   posts:LivePost[]; commentsByPost:Record<string,LiveComment[]>; rankings:Ranking[]; pilots:PilotDirectoryEntry[]; races:RaceContract[]; vehicles:ActiveVehicle[]; activeVehicleId:string|null; challengeTargetId:string|null; radarTargetId:string|null;
   products:ProviderProduct[]; providers:ProviderLink[]; loading:boolean; error:string|null;
   initialize:()=>Promise<void>; loadFeed:(mode?:string)=>Promise<void>; recordView:(id:string)=>Promise<void>; toggleLike:(id:string)=>Promise<void>; toggleSave:(id:string)=>Promise<void>; toggleFollow:(userId:string)=>Promise<void>; blockUser:(userId:string)=>Promise<boolean>; reportContent:(targetType:'post'|'user'|'comment',targetId:string,reason:string,note?:string)=>Promise<boolean>;
-  loadComments:(id:string)=>Promise<void>;addComment:(id:string,text:string)=>Promise<boolean>; createPost:(uri:string,caption:string,type:'photo'|'video',category?:string)=>Promise<boolean>; updateProfile:(displayName:string)=>Promise<boolean>;
+  loadComments:(id:string)=>Promise<void>;addComment:(id:string,text:string)=>Promise<boolean>; createPost:(uri:string,caption:string,type:'photo'|'video',category?:string)=>Promise<boolean>; updateProfile:(displayName:string)=>Promise<boolean>; updateAvatar:(photoUri:string)=>Promise<boolean>;
   loadRankings:()=>Promise<void>; loadPilots:()=>Promise<void>; loadRaces:()=>Promise<void>; respondToRace:(id:string,action:'accept'|'decline'|'reschedule',startsAt?:string)=>Promise<string>; startRace:(id:string)=>Promise<string>; checkRace:(id:string,location:{latitude:number;longitude:number;accuracy:number|null;sampleAgeMs:number})=>Promise<string>; setChallengeTarget:(id:string|null)=>void; setRadarTarget:(id:string|null)=>void; loadVehicles:()=>Promise<void>; addVehicle:(vehicle:{nickname:string;year:number;make:string;model:string;trim:string;engine:string;drivetrain:string;horsepower:number;color:string},photoUri:string|null)=>Promise<boolean>; setActiveVehicle:(id:string)=>void; searchParts:(query:string)=>Promise<void>;
 }
 
@@ -56,6 +56,9 @@ export const useContentStore=create<ContentState>((set,get)=>({
   },
   updateProfile:async displayName=>{
     try{const data=await cloudflareApi.request<{user:any}>('/api/profile',{method:'PUT',body:JSON.stringify({displayName})});const user=data.user;set(state=>({profile:state.profile?{...state.profile,displayName:user.displayName}:state.profile}));return true;}catch(error){set({error:error instanceof Error?error.message:'Profile update failed'});return false;}
+  },
+  updateAvatar:async photoUri=>{
+    try{const upload=await cloudflareApi.upload(photoUri,'photo');await cloudflareApi.request('/api/profile',{method:'PUT',body:JSON.stringify({avatarUrl:upload.url})});return true;}catch(error){set({error:error instanceof Error?error.message:'Avatar update failed'});return false;}
   },
   loadRankings:async()=>{
     if(!get().userId)return;
