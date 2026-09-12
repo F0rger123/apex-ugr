@@ -36,12 +36,21 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     } finally { set({ isLoading: false }); }
   },
   markAsRead: async notificationId => {
-    await cloudflareApi.request(`/api/notifications/${notificationId}/read`, { method: 'POST' });
-    set(state => ({ notifications: state.notifications.map(item => item.id === notificationId ? { ...item, read: true } : item), unreadCount: Math.max(0, state.unreadCount - 1) }));
+    try {
+      await cloudflareApi.request(`/api/notifications/${notificationId}/read`, { method: 'POST' });
+      set(state => ({ notifications: state.notifications.map(item => item.id === notificationId ? { ...item, read: true } : item), unreadCount: Math.max(0, state.unreadCount - 1) }));
+    } catch {
+      // Non-critical: the caller navigates on tap regardless of whether the
+      // read-receipt round trip succeeds, so this must never throw.
+    }
   },
   markAllAsRead: async () => {
-    await cloudflareApi.request('/api/notifications/read-all', { method: 'POST' });
-    set(state => ({ notifications: state.notifications.map(item => ({ ...item, read: true })), unreadCount: 0 }));
+    try {
+      await cloudflareApi.request('/api/notifications/read-all', { method: 'POST' });
+      set(state => ({ notifications: state.notifications.map(item => ({ ...item, read: true })), unreadCount: 0 }));
+    } catch {
+      // Non-critical; next poll will reconcile actual read state.
+    }
   },
   subscribeToNotifications: userId => {
     if (get()._poll) clearInterval(get()._poll!);
